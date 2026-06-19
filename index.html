@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>本地RSS媒体阅读器</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto}
+body{background:#f5f5f5;color:#111;max-width:100%;margin:0 auto;padding-bottom:100px}
+header{position:sticky;top:0;background:#fff;padding:12px 10px;border-bottom:1px solid #eee;z-index:10}
+h1{font-size:22px;margin-bottom:10px;color:#000}
+.top-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+button{position:relative;background:#1d9bf0;color:#fff;border:none;padding:10px 12px;border-radius:999px;cursor:pointer;font-size:14px;white-space:nowrap;min-height:40px;min-width:90px}
+button.active{background:#28a745}
+button.danger{background:#f4212e}
+button.edit{background:#ffc107;color:#000}
+button:disabled{opacity:0.5;cursor:not-allowed;}
+/* 管理条目右侧操作按钮缩小 */
+.feed-btn-group button{
+    padding:6px 8px;
+    min-height:32px;
+    min-width:65px;
+    font-size:12px;
+}
+/* 未读角标样式 */
+.badge{
+    position:absolute;
+    top:-6px;
+    right:-6px;
+    min-width:18px;
+    height:18px;
+    background:#f4212e;
+    color:#fff;
+    font-size:12px;
+    border-radius:9px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:0 4px;
+}
+.add-feed-row{display:flex;flex-wrap:wrap;gap:8px;width:100%;margin-top:10px;display:none;padding:0 10px}
+.add-feed-row input{flex:1;min-width:140px;background:#fff;border:1px solid #ddd;color:#111;padding:10px 12px;border-radius:8px;outline:none}
+.add-feed-row input:focus{border-color:#1d9bf0}
+.feed-list{margin:10px;border:1px solid #eee;border-radius:10px;overflow:hidden;display:none}
+.feed-item{display:flex;justify-content:space-between;align-items:center;padding:10px;border-bottom:1px solid #eee;gap:8px;flex-wrap:wrap}
+.feed-item:last-child{border:none}
+.feed-info{flex:1;display:flex;flex-direction:column;gap:4px}
+.feed-name{font-size:16px;font-weight:600}
+.feed-cat,.feed-url{display:none;}
+.feed-btn-group{display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap}
+.modal-mask{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:99;display:none;padding:10px}
+.modal-box{width:100%;max-width:500px;background:#fff;padding:16px;border-radius:12}
+.modal-box h3{margin-bottom:12px}
+.modal-box input{width:100%;margin-bottom:10px;padding:10px;border:1px solid #ddd;border-radius:8px}
+.modal-btn-bar{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+.article-stream{margin-top:10px;padding:0 10px}
+/* 推特风格卡片 淡蓝边框大圆角 */
+.tweet-card{
+    width:100%;
+    max-width:100%;
+    margin:0 auto 12px auto;
+    background:#fff;
+    border:1px solid #cce0f5;
+    border-radius:16px;
+    padding:12px;
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+}
+/* 卡片顶部头像+名称（纯文字头像，无LOGO） */
+.card-top{
+    display:flex;
+    align-items:center;
+    gap:10px;
+}
+.card-avatar{
+    width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:bold;font-size:14px;flex-shrink:0;
+    background:#45B7D1;
+}
+.card-source-title{
+    font-size:14px;
+    font-weight:bold;
+    color:#222;
+}
+/* 中间标题 */
+.card-title{
+    font-size:14px;
+    font-weight:normal;
+    color:#111;
+    text-decoration:none;
+    display:block;
+    margin-bottom:6px;
+}
+/* 图片两列网格容器 */
+.img-grid-wrap{
+    width:100%;
+    border-radius:12px;
+    overflow:hidden;
+    background:#f0f0f0;
+}
+.img-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:2px;
+}
+.grid-img-box{
+    width:100%;
+    aspect-ratio:1 / 1;
+    overflow:hidden;
+}
+.grid-img{
+    width:100%;
+    height:100%;
+    object-fit:cover;
+    display:block;
+    cursor:zoom-in;
+}
+.expand-btn{
+    width:100%;
+    text-align:center;
+    padding:8px;
+    background:#eee;
+    border:none;
+    font-size:14px;
+    cursor:pointer;
+}
+/* 视频单独容器，圆角铺满 */
+.video-single-wrap{
+    width:100%;
+    border-radius:12px;
+    overflow:hidden;
+    background:#000;
+}
+.media-video{
+    width:100%;
+    display:block;
+    object-fit:cover;
+}
+/* 底部左右布局 */
+.card-bottom{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    flex-wrap:wrap;
+    gap:8px;
+}
+.card-time{font-size:12px;color:#666}
+.card-buttons{display:flex;gap:10px;flex-wrap:wrap}
+.card-icon-btn{background:none;border:none;color:#666;cursor:pointer;font-size:14px;padding:4px}
+.card-icon-btn.fav{color:#ff9500}
+.empty-tip{text-align:center;padding:40px 10px;color:#777;font-size:14px}
+.bottom-tip{
+    text-align:center;
+    padding:20px 0;
+    color:#999;
+    font-size:13px;
+}
+.fav-panel{margin:10px 0;padding:0 10px;display:none}
+.fav-item{padding:10px;border-bottom:1px solid #eee}
+.fav-item:last-child{border:none}
+/* 管理订阅顶部操作栏常驻 */
+.feed-top-op{margin:10px;display:flex;gap:8px;flex-wrap:wrap}
+/* 大图预览弹窗 */
+.img-preview-mask{
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,0.9);
+    z-index:999;
+    display:none;
+    align-items:center;
+    justify-content:center;
+    padding:10px;
+}
+.img-preview-box{
+    width:100%;
+    height:100%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    position:relative;
+}
+.preview-img{
+    max-width:90%;
+    max-height:90%;
+}
+.preview-close{
+    position:absolute;
+    top:24px;
+    right:24px;
+    color:#fff;
+    font-size:32px;
+    cursor:pointer;
+}
+.preview-prev,.preview-next{
+    position:absolute;
+    color:#fff;
+    font-size:40px;
+    cursor:pointer;
+    padding:0 16px;
+}
+.preview-prev{left:12px}
+.preview-next{right:12px}
+</style>
+</head>
+<body>
+<header>
+<h1 id="pageTitle">本地RSS媒体阅读器</h1>
+<div class="top-bar">
+    <button id="btnHome" class="active">主页
+        <span class="badge" id="homeBadge" style="display:none"></span>
+    </button>
+    <button id="btnManage">管理订阅源</button>
+    <button id="btnAdd">添加订阅</button>
+    <button id="btnFav">我的收藏</button>
+</div>
+<!-- 已彻底删除LOGO输入框 -->
+<div class="add-feed-row" id="addFeedBox">
+    <input id="feedName" placeholder="自定义订阅名称（可选）">
+    <input id="feedCat" placeholder="分类标签（可选，如：摄影、动漫）">
+    <input id="feedUrl" placeholder="输入RSS订阅链接">
+    <button id="confirmAdd">确认添加</button>
+</div>
+<div class="feed-top-op" id="feedTopOp" style="display:none">
+    <button id="importFeed">一键导入</button>
+    <button id="exportAllBtn">一键导出</button>
+    <input type="file" id="importFileInput" accept=".json" style="display:none">
+</div>
+<!-- 移除多选勾选面板，不再渲染 -->
+<div class="feed-list" id="feedPanel"></div>
+<div class="fav-panel" id="favPanel"></div>
+</header>
+
+<div class="article-stream" id="articleBox"></div>
+
+<!-- 编辑弹窗：删除LOGO输入框 -->
+<div class="modal-mask" id="editModal">
+    <div class="modal-box">
+        <h3>编辑订阅源</h3>
+        <input id="editIndex" type="hidden">
+        <input id="editName" placeholder="自定义订阅名称">
+        <input id="editCat" placeholder="分类标签">
+        <input id="editUrl" placeholder="RSS订阅链接">
+        <div class="modal-btn-bar">
+            <button id="cancelEdit">取消</button>
+            <button id="saveEdit">保存修改</button>
+        </div>
+    </div>
+</div>
+
+<!-- 大图预览弹窗 -->
+<div class="img-preview-mask" id="imgPreviewMask">
+    <div class="img-preview-box">
+        <span class="preview-close" id="previewClose">×</span>
+        <span class="preview-prev" id="previewPrev">&lt;</span>
+        <img class="preview-img" id="previewImg" src="" alt="">
+        <span class="preview-next" id="previewNext">&gt;</span>
+    </div>
+</div>
+
+<script>
+const PROXY = "https://corsproxy.io/?";
+const FEED_STORAGE_KEY = "local_rss_feeds";
+const FAV_STORAGE_KEY = "rss_fav_list";
+const READ_STORAGE_KEY = "rss_read_links";
+const IMG_EXT = ["jpg","jpeg","png","gif","webp"];
+const VIDEO_EXT = ["mp4"];
+
+let feedList = JSON.parse(localStorage.getItem(FEED_STORAGE_KEY)) || [];
+let favList = JSON.parse(localStorage.getItem(FAV_STORAGE_KEY)) || [];
+// 已读链接持久化存储
+let readLinks = JSON.parse(localStorage.getItem(READ_STORAGE_KEY)) || [];
+const articleBox = document.getElementById("articleBox");
+const feedPanel = document.getElementById("feedPanel");
+const addFeedBox = document.getElementById("addFeedBox");
+const toggleAddBtn = document.getElementById("btnAdd");
+const manageBtn = document.getElementById("btnManage");
+const editModal = document.getElementById("editModal");
+const favPanel = document.getElementById("favPanel");
+const toggleFavBtn = document.getElementById("btnFav");
+const refreshAllBtn = document.getElementById("btnHome");
+const allNavBtns = [refreshAllBtn, manageBtn, toggleAddBtn, toggleFavBtn];
+const feedTopOp = document.getElementById("feedTopOp");
+const importFeedBtn = document.getElementById("importFeed");
+const exportAllBtn = document.getElementById("exportAllBtn");
+const importFileInput = document.getElementById("importFileInput");
+const pageTitle = document.getElementById("pageTitle");
+const homeBadge = document.getElementById("homeBadge");
+let currentFilterFeedUrl = null;
+let currentUnreadItems = [];
+
+// 一键导出全部订阅 直接绑定按钮
+exportAllBtn.onclick = function(){
+    const jsonStr = JSON.stringify(feedList, null, 2);
+    const blob = new Blob([jsonStr], {type:"application/json"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "rss全部订阅_"+Date.now()+".json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(a.href);
+}
+
+// 大图预览全局变量
+const imgPreviewMask = document.getElementById("imgPreviewMask");
+const previewImg = document.getElementById("previewImg");
+const previewClose = document.getElementById("previewClose");
+const previewPrev = document.getElementById("previewPrev");
+const previewNext = document.getElementById("previewNext");
+let currentPreviewImages = [];
+let currentPreviewIndex = 0;
+
+previewClose.onclick = ()=>{
+    imgPreviewMask.style.display = "none";
+}
+imgPreviewMask.onclick = (e)=>{
+    if(e.target === imgPreviewMask) imgPreviewMask.style.display = "none";
+}
+previewPrev.onclick = ()=>{
+    currentPreviewIndex --;
+    if(currentPreviewIndex < 0) currentPreviewIndex = currentPreviewImages.length - 1;
+    previewImg.src = currentPreviewImages[currentPreviewIndex];
+}
+previewNext.onclick = ()=>{
+    currentPreviewIndex ++;
+    if(currentPreviewIndex >= currentPreviewImages.length) currentPreviewIndex = 0;
+    previewImg.src = currentPreviewImages[currentPreviewIndex];
+}
+
+function setActiveNav(btnDom){
+    allNavBtns.forEach(btn=>btn.classList.remove("active"));
+    btnDom.classList.add("active");
+}
+function getRandomBg(){
+    const colors = ["#FF6B6B","#4ECDC4","#45B7D1","#FFA07A","#98D8C8","#F7DC6F","#BB8FCE","#85C1E9"];
+    return colors[Math.floor(Math.random()*colors.length)];
+}
+// 保存已读列表到本地
+function saveRead(){
+    localStorage.setItem(READ_STORAGE_KEY, JSON.stringify(readLinks));
+}
+// 标记单条为已读
+function markRead(link){
+    if(!readLinks.includes(link)){
+        readLinks.push(link);
+        saveRead();
+    }
+}
+
+// 切换页面
+toggleFavBtn.onclick = function(){
+    setActiveNav(this);
+    addFeedBox.style.display = "none";
+    feedPanel.style.display = "none";
+    feedTopOp.style.display = "none";
+    articleBox.style.display = "none";
+    favPanel.style.display = "block";
+    pageTitle.textContent = "我的收藏";
+    currentFilterFeedUrl = null;
+    renderFavPanel();
+}
+toggleAddBtn.onclick = function(){
+    setActiveNav(this);
+    favPanel.style.display = "none";
+    articleBox.style.display = "none";
+    feedPanel.style.display = "none";
+    feedTopOp.style.display = "none";
+    addFeedBox.style.display = "flex";
+    pageTitle.textContent = "添加订阅源";
+    currentFilterFeedUrl = null;
+}
+manageBtn.onclick = function(){
+    setActiveNav(this);
+    favPanel.style.display = "none";
+    articleBox.style.display = "none";
+    addFeedBox.style.display = "none";
+    feedPanel.style.display = "block";
+    feedTopOp.style.display = "flex";
+    pageTitle.textContent = "管理订阅源";
+    currentFilterFeedUrl = null;
+    renderFeedList();
+}
+// 主页刷新：并行并发加载全部订阅，过滤未读、更新角标
+refreshAllBtn.onclick = async function(){
+    setActiveNav(this);
+    addFeedBox.style.display = "none";
+    feedPanel.style.display = "none";
+    feedTopOp.style.display = "none";
+    favPanel.style.display = "none";
+    articleBox.style.display = "block";
+    pageTitle.textContent = "本地RSS媒体阅读器";
+    currentFilterFeedUrl = null;
+    if(feedList.length === 0){
+        articleBox.innerHTML = `<div class="empty-tip">暂无订阅源，请点击【添加订阅】输入RSS链接</div>`;
+        homeBadge.style.display = "none";
+        return;
+    }
+    articleBox.innerHTML = `<div class="empty-tip">加载中...</div>`;
+    // 并行并发请求
+    const fetchTasks = feedList.map(async feed=>{
+        try{
+            const xmlRaw = await fetchRssFeed(feed.url);
+            return parseRSSRawText(xmlRaw, feed.name, feed.url);
+        }catch(err){
+            console.error("订阅加载失败", feed.url, err);
+            return [];
+        }
+    })
+    const allGroups = await Promise.all(fetchTasks);
+    let allArts = [];
+    allGroups.forEach(g=>allArts.push(...g));
+    // 从新到旧排序
+    allArts.sort((a,b)=>{
+        const t1 = a.date ? new Date(a.date).getTime() : 0;
+        const t2 = b.date ? new Date(b.date).getTime() : 0;
+        return t2 - t1;
+    });
+    // 过滤只保留未读条目
+    currentUnreadItems = allArts.filter(item=>!readLinks.includes(item.link));
+    // 更新小红角标
+    if(currentUnreadItems.length > 0){
+        homeBadge.textContent = currentUnreadItems.length;
+        homeBadge.style.display = "flex";
+    }else{
+        homeBadge.style.display = "none";
+    }
+    renderArticleList(currentUnreadItems);
+}
+// 仅加载单个订阅源条目（不区分已读，全部展示，无角标）
+async function loadSingleFeedItems(targetUrl, feedName){
+    setActiveNav(refreshAllBtn);
+    addFeedBox.style.display = "none";
+    feedPanel.style.display = "none";
+    feedTopOp.style.display = "none";
+    favPanel.style.display = "none";
+    articleBox.style.display = "block";
+    pageTitle.textContent = feedName;
+    currentFilterFeedUrl = targetUrl;
+    articleBox.innerHTML = `<div class="empty-tip">加载中...</div>`;
+    const targetFeed = feedList.find(f=>f.url === targetUrl);
+    if(!targetFeed){
+        articleBox.innerHTML = `<div class="empty-tip">未找到该订阅源</div>`;
+        return;
+    }
+    let itemArr = [];
+    try{
+        const xmlRaw = await fetchRssFeed(targetFeed.url);
+        itemArr = parseRSSRawText(xmlRaw, targetFeed.name, targetFeed.url);
+    }catch(err){
+        articleBox.innerHTML = `<div class="empty-tip">订阅加载失败</div>`;
+        return;
+    }
+    itemArr.sort((a,b)=>{
+        const t1 = a.date ? new Date(a.date).getTime() : 0;
+        const t2 = b.date ? new Date(b.date).getTime() : 0;
+        return t2 - t1;
+    });
+    renderArticleList(itemArr);
+}
+
+// 管理订阅列表：隐藏URL，只保留名称+按钮
+function renderFeedList(){
+    feedPanel.innerHTML = "";
+    if(feedList.length === 0){
+        feedPanel.innerHTML = "<div style='padding:14px;color:#888'>暂无订阅源</div>";
+        return;
+    }
+    feedList.forEach((feed,idx)=>{
+        const div = document.createElement("div");
+        div.className = "feed-item";
+        div.innerHTML = `
+            <div class="feed-info">
+                <div class="feed-name">${feed.name || "未命名订阅"}</div>
+            </div>
+            <div class="feed-btn-group">
+                <button class="view-feed" data-url="${feed.url}" data-name="${feed.name}">查看条目</button>
+                <button class="edit" data-idx="${idx}">编辑</button>
+                <button class="danger" data-idx="${idx}">删除</button>
+            </div>
+        `;
+        feedPanel.appendChild(div);
+    })
+    document.querySelectorAll(".view-feed").forEach(btn=>{
+        btn.onclick = function(){
+            const u = this.dataset.url;
+            const n = this.dataset.name;
+            loadSingleFeedItems(u, n);
+        }
+    })
+    feedPanel.querySelectorAll("button.danger").forEach(btn=>{
+        btn.onclick = function(){
+            const i = Number(this.dataset.idx);
+            feedList.splice(i,1);
+            saveFeeds();
+            renderFeedList();
+        }
+    })
+    feedPanel.querySelectorAll("button.edit").forEach(btn=>{
+        btn.onclick = function(){
+            const i = Number(this.dataset.idx);
+            const feed = feedList[i];
+            document.getElementById("editIndex").value = i;
+            document.getElementById("editName").value = feed.name || "";
+            document.getElementById("editCat").value = feed.category || "";
+            document.getElementById("editUrl").value = feed.url;
+            editModal.style.display = "flex";
+        }
+    })
+}
+importFeedBtn.onclick = function(){
+    importFileInput.click();
+}
+importFileInput.onchange = function(e){
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = function(ev){
+        try{
+            const importData = JSON.parse(ev.target.result);
+            if(!Array.isArray(importData)) return;
+            importData.forEach(item=>{
+                const cleanItem = {name: item.name || "", category: item.category || "", url: item.url};
+                if(!feedList.some(f=>f.url === cleanItem.url)) feedList.push(cleanItem);
+            })
+            saveFeeds();
+            renderFeedList();
+        }catch(err){}
+    }
+    reader.readAsText(file);
+}
+
+function saveFeeds(){localStorage.setItem(FEED_STORAGE_KEY, JSON.stringify(feedList));}
+function saveFav(){localStorage.setItem(FAV_STORAGE_KEY, JSON.stringify(favList));}
+function isFav(item){return favList.some(f=>f.link === item.link);}
+// 收藏：仅局部更新卡片，不全局刷新
+async function addFav(item, cardDom){
+    if(isFav(item)) return;
+    favList.push(item);
+    saveFav();
+    const imgs = item.media.imgs || [];
+    const videos = item.media.videos || [];
+    const mediaHtml = buildMediaHtml(imgs, videos);
+    const sourceName = item.sourceName || "";
+    const firstChar = sourceName.charAt(0) || "?";
+    const bgColor = getRandomBg();
+    let timeHtml = item.date ? `<span class="card-time">${item.date}</span>` : "";
+    const avatarHtml = `<div class="card-avatar" style="background:${bgColor}">${firstChar}</div>`;
+    cardDom.outerHTML = `
+        <div class="tweet-card">
+            <div class="card-top">
+                ${avatarHtml}
+                <div class="card-source-title">${sourceName}</div>
+            </div>
+            <div class="card-middle">
+                <a class="card-title" target="_blank" href="${item.link}">${item.title}</a>
+                ${mediaHtml}
+            </div>
+            <div class="card-bottom">
+                ${timeHtml}
+                <div class="card-buttons">
+                    <button class="card-icon-btn fav-btn" data-item='${JSON.stringify(item).replaceAll("'","\\'")}'>已收藏</button>
+                    <button class="card-icon-btn download-btn" data-media='${JSON.stringify(item.media)}'>下载</button>
+                </div>
+            </div>
+        </div>
+    `;
+    bindMediaAction();
+}
+function removeFav(link){
+    favList = favList.filter(f=>f.link !== link);
+    saveFav();
+    if(pageTitle.textContent === "我的收藏") renderFavPanel();
+}
+
+function fullDecodeXml(str){
+    let s = str.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/&quot;/g, "\"").replace(/&#039;/g, "'");
+    s = s.replace(/<br\s*\/?>/gi, " ").replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ");
+    return s;
+}
+// 轻量化媒体解析
+function extractMediaFromRawText(rawText){
+    const allSrc = new Set();
+    const srcReg = /src\s*=\s*(["'])(.*?)\1/gi;
+    let m;
+    while((m = srcReg.exec(rawText)) !== null) allSrc.add(m[2].trim());
+    const mediaLinkReg = /https?:\/\/[^\s"']+\.(jpg|jpeg|png|gif|webp|mp4)/gi;
+    while((m = mediaLinkReg.exec(rawText)) !== null) allSrc.add(m[0].trim());
+    const arr = [...allSrc];
+    const imgs = [];
+    const videos = [];
+    for(const url of arr){
+        const ext = url.split(".").pop().toLowerCase();
+        if(IMG_EXT.includes(ext)) imgs.push(url);
+        if(VIDEO_EXT.includes(ext)) videos.push(url);
+    }
+    return {imgs, videos};
+}
+
+function parseRSSRawText(xmlText, feedName, feedUrl){
+    const items = [];
+    const itemReg = /<item>([\s\S]*?)<\/item>/gi;
+    let block;
+    while((block = itemReg.exec(xmlText)) !== null){
+        const blockText = block[1];
+        const titleMatch = blockText.match(/<title>([\s\S]*?)<\/title>/);
+        const title = titleMatch ? fullDecodeXml(titleMatch[1]) : "";
+        const linkMatch = blockText.match(/<link>([\s\S]*?)<\/link>/);
+        const link = linkMatch ? fullDecodeXml(linkMatch[1]) : "";
+        const descMatch = blockText.match(/<description>([\s\S]*?)<\/description>/);
+        const descRaw = descMatch ? descMatch[1] : "";
+        const media = extractMediaFromRawText(descRaw);
+        if(link){
+            const linkExt = link.split(".").pop().toLowerCase();
+            if(IMG_EXT.includes(linkExt) && media.imgs.indexOf(link) === -1) media.imgs.push(link);
+        }
+        let pubDate = "";
+        const dateMatch = blockText.match(/<pubDate>(.*?)<\/pubDate>/) || blockText.match(/<updated>(.*?)<\/updated>/);
+        if(dateMatch) pubDate = fullDecodeXml(dateMatch[1]);
+        items.push({title, link, date: pubDate, media, sourceName: feedName, sourceUrl: feedUrl});
+    }
+    return items;
+}
+
+async function downloadFile(url, filename){
+    try{
+        const res = await fetch(url);
+        const blob = await res.blob();
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(a.href);
+    }catch(e){
+        window.open(url,"_blank");
+    }
+}
+
+async function fetchRssFeed(url){
+    try{
+        const res = await fetch(url,{signal:AbortSignal.timeout(8000)});
+        if(res.ok) return await res.text();
+        throw new Error("fail");
+    }catch(err){
+        const proxyUrl = PROXY + encodeURIComponent(url);
+        const res = await fetch(proxyUrl,{signal:AbortSignal.timeout(10000)});
+        return await res.text();
+    }
+}
+
+// 图片两列网格HTML
+function buildImageGridHtml(imgList){
+    const total = imgList.length;
+    const showMax = 4;
+    const needFold = total > showMax;
+    const showList = needFold ? imgList.slice(0, showMax) : imgList;
+    let html = `<div class="img-grid-wrap" data-fullimgs='${JSON.stringify(imgList)}' data-fold='${needFold ? "1" : "0"}'>`;
+    html += `<div class="img-grid">`;
+    showList.forEach(src=>html += `<div class="grid-img-box"><img class="grid-img" data-imggroup='${JSON.stringify(imgList)}' src="${src}" referrerpolicy="no-referrer"></div>`);
+    html += `</div>`;
+    if(needFold) html += `<button class="expand-btn">展开全部${total}张图片</button>`;
+    html += `</div>`;
+    return html;
+}
+// 媒体渲染：有视频只输出video（poster内置播放器，不输出图片网格）
+function buildMediaHtml(imgs, videos){
+    if(videos.length > 0){
+        let html = "";
+        videos.forEach(vSrc=>{
+            const cover = imgs.length > 0 ? imgs[0] : "";
+            html += `<div class="video-single-wrap"><video class="media-video" controls src="${vSrc}" poster="${cover}"></video></div>`;
+        })
+        return html;
+    }else if(imgs.length > 0){
+        return buildImageGridHtml(imgs);
+    }
+    return "";
+}
+
+// 绑定图片弹窗、展开折叠
+function bindMediaAction(){
+    document.querySelectorAll(".grid-img").forEach(img=>{
+        img.onclick = function(){
+            currentPreviewImages = JSON.parse(this.dataset.imggroup);
+            currentPreviewIndex = currentPreviewImages.indexOf(this.src);
+            previewImg.src = this.src;
+            imgPreviewMask.style.display = "flex";
+        }
+    })
+    document.querySelectorAll(".expand-btn").forEach(btn=>{
+        btn.onclick = function(){
+            const wrap = this.parentElement;
+            wrap.outerHTML = buildImageGridHtml(JSON.parse(wrap.dataset.fullimgs));
+            bindMediaAction();
+        }
+    })
+}
+
+// 渲染条目卡片 + 底部到底提示 + 滚动自动标记已读
+function renderArticleList(list){
+    articleBox.innerHTML = "";
+    if(list.length === 0){
+        articleBox.innerHTML = `<div class="empty-tip">暂无内容</div>`;
+        return;
+    }
+    list.forEach(art=>{
+        const imgs = art.media.imgs || [];
+        const videos = art.media.videos || [];
+        const mediaHtml = buildMediaHtml(imgs, videos);
+        const favFlag = isFav(art);
+        const favText = favFlag ? "已收藏" : "收藏";
+        const favClass = favFlag ? "card-icon-btn fav" : "card-icon-btn";
+        const sourceName = art.sourceName || "";
+        const firstChar = sourceName.charAt(0) || "?";
+        const bgColor = getRandomBg();
+        const timeHtml = art.date ? `<span class="card-time">${art.date}</span>` : "";
+        const avatarHtml = `<div class="card-avatar" style="background:${bgColor}">${firstChar}</div>`;
+        const card = document.createElement("div");
+        card.className = "tweet-card";
+        card.dataset.link = art.link;
+        card.innerHTML = `
+            <div class="card-top">
+                ${avatarHtml}
+                <div class="card-source-title">${sourceName}</div>
+            </div>
+            <div class="card-middle">
+                <a class="card-title" target="_blank" href="${art.link}">${art.title}</a>
+                ${mediaHtml}
+            </div>
+            <div class="card-bottom">
+                ${timeHtml}
+                <div class="card-buttons">
+                    <button class="${favClass} fav-btn" data-item='${JSON.stringify(art).replaceAll("'","\\'")}'>${favText}</button>
+                    <button class="card-icon-btn download-btn" data-media='${JSON.stringify(art.media)}'>下载</button>
+                </div>
+            </div>
+        `;
+        // 滚动进入视口自动标记已读
+        const observer = new IntersectionObserver((entries)=>{
+            entries.forEach(entry=>{
+                if(entry.isIntersecting){
+                    markRead(art.link);
+                    observer.disconnect();
+                }
+            })
+        },{threshold:0.2});
+        observer.observe(card);
+        // 收藏按钮
+        const favBtn = card.querySelector(".fav-btn");
+        favBtn.onclick = function(){
+            const item = JSON.parse(this.dataset.item.replaceAll("\\'","'"));
+            addFav(item, card);
+        }
+        // 下载按钮
+        const downloadBtn = card.querySelector(".download-btn");
+        downloadBtn.onclick = async function(){
+            const media = JSON.parse(this.dataset.media);
+            const allMedia = [...media.imgs, ...media.videos];
+            if(allMedia.length === 0) return;
+            for(let url of allMedia){
+                const name = url.split("/").pop();
+                await downloadFile(url, name);
+            }
+        }
+        articleBox.appendChild(card);
+    })
+    // 底部到底提示
+    const tipDom = document.createElement("div");
+    tipDom.className = "bottom-tip";
+    tipDom.textContent = "已经到底了，没有更多未读内容";
+    articleBox.appendChild(tipDom);
+    bindMediaAction();
+}
+
+// 收藏页面完整渲染卡片
+function renderFavPanel(){
+    favPanel.innerHTML = "";
+    if(favList.length === 0){
+        favPanel.innerHTML = `<div class="empty-tip">暂无收藏条目，去主页添加收藏吧</div>`;
+        return;
+    }
+    favList.forEach(art=>{
+        const imgs = art.media.imgs || [];
+        const videos = art.media.videos || [];
+        const mediaHtml = buildMediaHtml(imgs, videos);
+        const sourceName = art.sourceName || "";
+        const firstChar = sourceName.charAt(0) || "?";
+        const bg = getRandomBg();
+        const timeHtml = art.date ? `<span class="card-time">${art.date}</span>` : "";
+        const avatarHtml = `<div class="card-avatar" style="background:${bg}">${firstChar}</div>`;
+        const card = document.createElement("div");
+        card.className = "tweet-card";
+        card.innerHTML = `
+            <div class="card-top">
+                ${avatarHtml}
+                <div class="card-source-title">${sourceName}</div>
+            </div>
+            <div class="card-middle">
+                <a class="card-title" target="_blank" href="${art.link}">${art.title}</a>
+                ${mediaHtml}
+            </div>
+            <div class="card-bottom">
+                ${timeHtml}
+                <div class="card-buttons">
+                    <button class="card-icon-btn del-fav" data-link="${art.link}">取消收藏</button>
+                </div>
+            </div>
+        `;
+        const delBtn = card.querySelector(".del-fav");
+        delBtn.onclick = function(){
+            removeFav(this.dataset.link);
+        }
+        favPanel.appendChild(card);
+    })
+    bindMediaAction();
+}
+
+// 添加订阅静默无弹窗
+document.getElementById("confirmAdd").onclick = function(){
+    const name = document.getElementById("feedName").value.trim();
+    const cat = document.getElementById("feedCat").value.trim();
+    const url = document.getElementById("feedUrl").value.trim();
+    if(!url) return;
+    if(feedList.some(f=>f.url === url)) return;
+    feedList.push({name, category: cat, url});
+    saveFeeds();
+    document.getElementById("feedName").value = "";
+    document.getElementById("feedCat").value = "";
+    document.getElementById("feedUrl").value = "";
+    addFeedBox.style.display = "none";
+    refreshAllBtn.click();
+}
+document.getElementById("cancelEdit").onclick = function(){
+    editModal.style.display = "none";
+}
+document.getElementById("saveEdit").onclick = function(){
+    const idx = Number(document.getElementById("editIndex").value);
+    const name = document.getElementById("editName").value.trim();
+    const cat = document.getElementById("editCat").value.trim();
+    const url = document.getElementById("editUrl").value.trim();
+    if(!url) return;
+    const existOther = feedList.some((f,i)=>i!==idx&&f.url===url);
+    if(existOther) return;
+    feedList[idx].name = name;
+    feedList[idx].category = cat;
+    feedList[idx].url = url;
+    saveFeeds();
+    editModal.style.display = "none";
+    renderFeedList();
+}
+
+renderFeedList();
+</script>
+</body>
+</html>
