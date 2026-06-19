@@ -9,8 +9,33 @@
 body{background:#f5f5f5;color:#111;max-width:100%;margin:0 auto;padding-bottom:100px}
 header{position:sticky;top:0;background:#fff;padding:12px 10px;border-bottom:1px solid #eee;z-index:10}
 h1{font-size:22px;margin-bottom:10px;color:#000}
-.top-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
-button{position:relative;background:#1d9bf0;color:#fff;border:none;padding:10px 12px;border-radius:999px;cursor:pointer;font-size:14px;white-space:nowrap;min-height:40px;min-width:90px}
+/* 修复导航单行滚动 */
+.top-bar{
+    display:flex;
+    flex-wrap:nowrap; /* 禁止自动换行 */
+    gap:8px;
+    align-items:center;
+    margin-bottom:10px;
+    overflow-x:auto; /* 横向滚动 */
+    padding-bottom:4px; /* 滚动条不遮挡按钮 */
+}
+/* 隐藏滚动条美化 */
+.top-bar::-webkit-scrollbar{height:3px}
+.top-bar::-webkit-scrollbar-thumb{background:#ccc;border-radius:3px}
+button{
+    position:relative;
+    background:#1d9bf0;
+    color:#fff;
+    border:none;
+    padding:10px 10px; /* 缩小左右内边距 */
+    border-radius:999px;
+    cursor:pointer;
+    font-size:14px;
+    white-space:nowrap;
+    min-height:40px;
+    min-width:75px; /* 缩小最小宽度适配手机 */
+    flex-shrink:0; /* 按钮不挤压缩小 */
+}
 button.active{background:#28a745}
 button.danger{background:#f4212e}
 button.edit{background:#ffc107;color:#000}
@@ -647,7 +672,7 @@ async function fetchRssFeed(url){
     }
 }
 
-// ========== 核心修复：单图全屏，多图双列 ==========
+// ========== 图片单图全屏，多图双列 逻辑保留 ==========
 function buildImageGridHtml(imgList){
     const total = imgList.length;
     const showMax = 4;
