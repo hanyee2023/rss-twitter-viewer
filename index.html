@@ -100,7 +100,6 @@ button:disabled{opacity:0.5;cursor:not-allowed;}
 }
 .img-grid{
     display:grid;
-    grid-template-columns:1fr 1fr;
     gap:2px;
 }
 .grid-img-box{
@@ -225,7 +224,6 @@ button:disabled{opacity:0.5;cursor:not-allowed;}
     <button id="exportAllBtn">一键导出</button>
     <input type="file" id="importFileInput" accept=".json" style="display:none">
 </div>
-<!-- 移除多选勾选面板，不再渲染 -->
 <div class="feed-list" id="feedPanel"></div>
 <div class="fav-panel" id="favPanel"></div>
 </header>
@@ -649,14 +647,16 @@ async function fetchRssFeed(url){
     }
 }
 
-// 图片两列网格HTML
+// ========== 核心修复：单图全屏，多图双列 ==========
 function buildImageGridHtml(imgList){
     const total = imgList.length;
     const showMax = 4;
     const needFold = total > showMax;
     const showList = needFold ? imgList.slice(0, showMax) : imgList;
+    // 动态设置网格列：1张图=单列，≥2张=双列
+    const gridCols = total === 1 ? "1fr" : "1fr 1fr";
     let html = `<div class="img-grid-wrap" data-fullimgs='${JSON.stringify(imgList)}' data-fold='${needFold ? "1" : "0"}'>`;
-    html += `<div class="img-grid">`;
+    html += `<div class="img-grid" style="grid-template-columns:${gridCols}">`;
     showList.forEach(src=>html += `<div class="grid-img-box"><img class="grid-img" data-imggroup='${JSON.stringify(imgList)}' src="${src}" referrerpolicy="no-referrer"></div>`);
     html += `</div>`;
     if(needFold) html += `<button class="expand-btn">展开全部${total}张图片</button>`;
