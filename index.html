@@ -67,6 +67,10 @@ button.active{background:#28a745}
 button.danger{background:#f4212e}
 button.edit{background:#ffc107;color:#000}
 button:disabled{opacity:0.5;cursor:not-allowed;}
+/* 一键导入导出橙色 */
+#importFeed,#exportAllBtn{
+    background:#ff7823;
+}
 @media (min-width:769px){
     button{min-width:80px;}
 }
@@ -117,7 +121,6 @@ button:disabled{opacity:0.5;cursor:not-allowed;}
 .feed-item:last-child{border:none}
 .feed-info{flex:1;display:flex;flex-direction:column;gap:4px}
 .feed-name{font-size:16px;font-weight:600}
-.feed-cat,.feed-url{display:none;}
 .feed-btn-group{display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap}
 .modal-mask{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);display:flex;align-items:center;justify-content:center;z-index:9999;display:none;padding:10px}
 .modal-box{width:100%;max-width:500px;background:#fff;padding:16px;border-radius:12}
@@ -159,8 +162,6 @@ button:disabled{opacity:0.5;cursor:not-allowed;}
 .empty-tip{text-align:center;padding:40px 10px;color:#777;font-size:14px}
 .bottom-tip{text-align:center;padding:20px 0;color:#999;font-size:13px;}
 .fav-panel{margin:8px 0;display:none}
-.fav-item{padding:10px;border-bottom:1px solid #eee}
-.fav-item:last-child{border:none}
 .feed-top-op{margin:8px;display:flex;gap:8px;flex-wrap:wrap}
 .img-preview-mask{
     position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:9999;
@@ -201,7 +202,6 @@ button:disabled{opacity:0.5;cursor:not-allowed;}
             <button id="exportAllBtn">一键导出</button>
             <input type="file" id="importFileInput" accept=".json" style="display:none">
         </div>
-        <!-- 给列表父容器绑定委托事件 -->
         <div class="feed-list" id="feedPanel"></div>
         <div class="fav-panel" id="favPanel"></div>
     </div>
@@ -237,9 +237,12 @@ const READ_STORAGE_KEY = "rss_read_links";
 const IMG_EXT = ["jpg","jpeg","png","gif","webp"];
 const VIDEO_EXT = ["mp4"];
 
+// 数据初始化
 let feedList = JSON.parse(localStorage.getItem(FEED_STORAGE_KEY)) || [];
 let favList = JSON.parse(localStorage.getItem(FAV_STORAGE_KEY)) || [];
 let readLinks = JSON.parse(localStorage.getItem(READ_STORAGE_KEY)) || [];
+
+// DOM节点缓存
 const articleBox = document.getElementById("articleBox");
 const feedPanel = document.getElementById("feedPanel");
 const addFeedBox = document.getElementById("addFeedBox");
@@ -256,10 +259,6 @@ const exportAllBtn = document.getElementById("exportAllBtn");
 const importFileInput = document.getElementById("importFileInput");
 const pageTitle = document.getElementById("pageTitle");
 const homeBadge = document.getElementById("homeBadge");
-const mainHeader = document.getElementById("mainHeader");
-let currentFilterFeedUrl = null;
-let currentUnreadItems = [];
-let currentPageType = "home";
 const imgPreviewMask = document.getElementById("imgPreviewMask");
 const previewImg = document.getElementById("previewImg");
 const previewClose = document.getElementById("previewClose");
@@ -267,11 +266,14 @@ const previewPrev = document.getElementById("previewPrev");
 const previewNext = document.getElementById("previewNext");
 const previewBox = document.getElementById("previewBox");
 const slideTip = document.getElementById("slideTip");
+
 let previewImages = [];
 let previewIndex = 0;
-let touchStartX = 0;
-let touchEndX = 0;
+let currentFilterFeedUrl = null;
+let currentUnreadItems = [];
+let currentPageType = "home";
 
+// 导出订阅文件
 exportAllBtn.onclick = function(){
     const jsonStr = JSON.stringify(feedList, null, 2);
     const blob = new Blob([jsonStr], {type:"application/json"});
@@ -283,25 +285,24 @@ exportAllBtn.onclick = function(){
     a.remove();
     URL.revokeObjectURL(a.href);
 }
+
+// 图片预览滑动逻辑
 previewBox.addEventListener("touchstart", e=>{
-    touchStartX = e.changedTouches[0].screenX;
-});
-previewBox.addEventListener("touchend", e=>{
-    touchEndX = e.changedTouches[0].screenX;
-    handleSwipe();
-});
-function handleSwipe(){
-    const diff = touchEndX - touchStartX;
-    const threshold = 60;
-    if(Math.abs(diff) < threshold) return;
-    if(diff > threshold){
-        if(previewIndex === 0){showTip("已是第一张啦");return;}
-        previewIndex--;previewImg.src = previewImages[previewIndex];
-    }else if(diff < -threshold){
-        if(previewIndex === previewImages.length -1){showTip("已是最后一张啦");return;}
-        previewIndex++;previewImg.src = previewImages[previewIndex];
+    const touchStartX = e.changedTouches[0].screenX;
+    previewBox.ontouchend = e=>{
+        const touchEndX = e.changedTouches[0].screenX;
+        const diff = touchEndX - touchStartX;
+        const threshold = 60;
+        if(Math.abs(diff) < threshold) return;
+        if(diff > threshold){
+            if(previewIndex === 0){showTip("已是第一张啦");return;}
+            previewIndex--;previewImg.src = previewImages[previewIndex];
+        }else{
+            if(previewIndex === previewImages.length -1){showTip("已是最后一张啦");return;}
+            previewIndex++;previewImg.src = previewImages[previewIndex];
+        }
     }
-}
+});
 function showTip(text){
     slideTip.textContent = text;
     slideTip.style.display = "block";
@@ -317,10 +318,7 @@ previewPrev.onclick = ()=>{
 }
 previewClose.onclick = ()=>{imgPreviewMask.style.display = "none";}
 
-// 移除头部滚动隐藏逻辑，永久固定头部
-articleBox.removeEventListener("scroll", ()=>{});
-mainHeader.classList.remove("hide-header");
-
+// 工具函数
 function setActiveNav(btnDom){
     allNavBtns.forEach(btn=>btn.classList.remove("active"));
     btnDom.classList.add("active");
@@ -331,17 +329,17 @@ function getRandomBg(){
 }
 function saveRead(){localStorage.setItem(READ_STORAGE_KEY, JSON.stringify(readLinks));}
 function markRead(link){if(!readLinks.includes(link)){readLinks.push(link);saveRead();}}
+function saveFav(){localStorage.setItem(FAV_STORAGE_KEY, JSON.stringify(favList));}
+function saveFeeds(){localStorage.setItem(FEED_STORAGE_KEY, JSON.stringify(feedList));}
 
-// ==========核心修复：事件委托，一次性绑定父容器，所有动态生成按钮永久生效==========
+// 管理列表事件委托（修复按钮失效）
 feedPanel.addEventListener("click", function(e){
     const target = e.target;
-    // 查看条目按钮
     if(target.classList.contains("view-feed")){
         const url = target.dataset.url;
         const name = target.dataset.name;
         loadSingleFeedItems(url, name);
     }
-    // 编辑按钮
     if(target.classList.contains("edit")){
         const idx = Number(target.dataset.idx);
         const feed = feedList[idx];
@@ -351,22 +349,43 @@ feedPanel.addEventListener("click", function(e){
         document.getElementById("editUrl").value = feed.url;
         editModal.style.display = "flex";
     }
-    // 删除按钮
     if(target.classList.contains("danger")){
         const idx = Number(target.dataset.idx);
+        const delFeedUrl = feedList[idx].url;
+        // 删除订阅同步清理收藏、已读
         feedList.splice(idx,1);
         saveFeeds();
+        favList = favList.filter(item => item.sourceUrl !== delFeedUrl);
+        saveFav();
+        // 清理该源所有已读链接
+        const allSourceLinks = [];
+        feedList.forEach(f=>{
+            fetchRssFeed(f.url).then(txt=>{
+                const arr = parseRSSRawText(txt,f.name,f.url);
+                arr.forEach(i=>allSourceLinks.push(i.link));
+            })
+        })
+        readLinks = readLinks.filter(link=>{
+            return !favList.some(f=>f.link===link && f.sourceUrl===delFeedUrl);
+        });
+        saveRead();
         renderFeedList();
     }
 })
 
-// 页面切换：先清空容器再插入面板，杜绝列表乱跳
-toggleFavBtn.onclick = function(){
-    setActiveNav(this);
-    currentPageType = "fav";
+// 统一页面切换隐藏所有面板（修复添加订阅残留）
+function hideAllPanels(){
     addFeedBox.style.display = "none";
     feedPanel.style.display = "none";
     feedTopOp.style.display = "none";
+    favPanel.style.display = "none";
+}
+
+// 我的收藏：按收藏时间新→旧
+toggleFavBtn.onclick = function(){
+    setActiveNav(this);
+    currentPageType = "fav";
+    hideAllPanels();
     articleBox.style.display = "block";
     articleBox.innerHTML = "";
     articleBox.appendChild(favPanel);
@@ -375,21 +394,21 @@ toggleFavBtn.onclick = function(){
     currentFilterFeedUrl = null;
     renderFavPanel();
 }
+// 添加订阅页面
 toggleAddBtn.onclick = function(){
     setActiveNav(this);
     currentPageType = "add";
-    favPanel.style.display = "none";
+    hideAllPanels();
     articleBox.style.display = "none";
-    feedPanel.style.display = "none";
-    feedTopOp.style.display = "none";
     addFeedBox.style.display = "flex";
     pageTitle.textContent = "添加订阅源";
     currentFilterFeedUrl = null;
 }
+// 管理订阅页面
 manageBtn.onclick = function(){
     setActiveNav(this);
     currentPageType = "manage";
-    favPanel.style.display = "none";
+    hideAllPanels();
     articleBox.style.display = "block";
     articleBox.innerHTML = "";
     articleBox.appendChild(feedPanel);
@@ -399,13 +418,11 @@ manageBtn.onclick = function(){
     currentFilterFeedUrl = null;
     renderFeedList();
 }
+// 主页完整刷新全部订阅，修复角标不显示
 refreshAllBtn.onclick = async function(){
     setActiveNav(this);
     currentPageType = "home";
-    addFeedBox.style.display = "none";
-    feedPanel.style.display = "none";
-    feedTopOp.style.display = "none";
-    favPanel.style.display = "none";
+    hideAllPanels();
     articleBox.style.display = "block";
     articleBox.innerHTML = `<div class="empty-tip">加载中...</div>`;
     pageTitle.textContent = "本地RSS媒体阅读器";
@@ -415,6 +432,7 @@ refreshAllBtn.onclick = async function(){
         homeBadge.style.display = "none";
         return;
     }
+    // 全部拉取订阅数据
     const fetchTasks = feedList.map(async feed=>{
         try{
             const xmlRaw = await fetchRssFeed(feed.url);
@@ -426,11 +444,13 @@ refreshAllBtn.onclick = async function(){
     const allGroups = await Promise.all(fetchTasks);
     let allArts = [];
     allGroups.forEach(g=>allArts.push(...g));
+    // 按发布时间倒序
     allArts.sort((a,b)=>{
         const t1 = a.date ? new Date(a.date).getTime() : 0;
         const t2 = b.date ? new Date(b.date).getTime() : 0;
         return t2 - t1;
     });
+    // 计算未读、更新顶部角标
     currentUnreadItems = allArts.filter(item=>!readLinks.includes(item.link));
     if(currentUnreadItems.length > 0){
         homeBadge.textContent = currentUnreadItems.length;
@@ -440,13 +460,12 @@ refreshAllBtn.onclick = async function(){
     }
     renderArticleList(currentUnreadItems);
 }
+
+// 查看单个订阅条目
 async function loadSingleFeedItems(targetUrl, feedName){
     setActiveNav(refreshAllBtn);
     currentPageType = "home";
-    addFeedBox.style.display = "none";
-    feedPanel.style.display = "none";
-    feedTopOp.style.display = "none";
-    favPanel.style.display = "none";
+    hideAllPanels();
     articleBox.style.display = "block";
     pageTitle.textContent = feedName;
     currentFilterFeedUrl = targetUrl;
@@ -471,7 +490,8 @@ async function loadSingleFeedItems(targetUrl, feedName){
     });
     renderArticleList(itemArr);
 }
-// 渲染列表只生成DOM，不再绑定按钮事件（事件统一委托到父容器）
+
+// 渲染管理订阅列表（实时计算未读角标）
 function renderFeedList(){
     feedPanel.innerHTML = "";
     if(feedList.length === 0){
@@ -503,7 +523,8 @@ function renderFeedList(){
         feedPanel.appendChild(div);
     })
 }
-importFeedBtn.onclick = function(){importFileInput.click();}
+
+// 导入订阅文件
 importFileInput.onchange = function(e){
     const file = e.target.files[0];
     if(!file) return;
@@ -521,12 +542,15 @@ importFileInput.onchange = function(e){
     }
     reader.readAsText(file);
 }
-function saveFeeds(){localStorage.setItem(FEED_STORAGE_KEY, JSON.stringify(feedList));}
-function saveFav(){localStorage.setItem(FAV_STORAGE_KEY, JSON.stringify(favList));}
+
 function isFav(item){return favList.some(f=>f.link === item.link);}
+// 添加收藏
 async function addFav(item, cardDom){
     if(isFav(item)) return;
-    favList.push(item);saveFav();
+    // 新增收藏时间戳，用于排序
+    item.favTime = Date.now();
+    favList.push(item);
+    saveFav();
     const imgs = item.media.imgs || [];
     const videos = item.media.videos || [];
     const mediaHtml = buildMediaHtml(imgs, videos);
@@ -561,6 +585,8 @@ function removeFav(link){
     saveFav();
     if(currentPageType === "fav") renderFavPanel();
 }
+
+// XML解码与媒体提取
 function fullDecodeXml(str){
     let s = str.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/&quot;/g, "\"").replace(/&#039;/g, "'");
     s = s.replace(/<br\s*\/?>/gi, " ").replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ");
@@ -603,6 +629,8 @@ function parseRSSRawText(xmlText, feedName, feedUrl){
     }
     return items;
 }
+
+// 文件下载
 async function downloadFile(url, filename){
     try{
         const res = await fetch(url);
@@ -616,6 +644,7 @@ async function downloadFile(url, filename){
         URL.revokeObjectURL(a.href);
     }catch(e){window.open(url,"_blank");}
 }
+// 跨域代理拉取RSS
 async function fetchRssFeed(url){
     try{
         const res = await fetch(url,{signal:AbortSignal.timeout(8000)});
@@ -627,6 +656,8 @@ async function fetchRssFeed(url){
         return await res.text();
     }
 }
+
+// 媒体渲染工具
 function buildImageGridHtml(imgList){
     const total = imgList.length;
     const showMax = 4;
@@ -659,7 +690,7 @@ function bindMediaAction(){
         img.onclick = function(){
             previewImages = JSON.parse(this.dataset.imggroup);
             previewIndex = previewImages.indexOf(this.src);
-            previewImg.src = previewImages[previewImages.length - 1 - previewIndex];
+            previewImg.src = previewImages[previewIndex];
             imgPreviewMask.style.display = "flex";
         }
     })
@@ -671,6 +702,8 @@ function bindMediaAction(){
         }
     })
 }
+
+// 主页条目渲染
 function renderArticleList(list){
     articleBox.innerHTML = "";
     if(list.length === 0){
@@ -709,6 +742,7 @@ function renderArticleList(list){
                 </div>
             </div>
         `;
+        // 进入视窗标记已读
         const observer = new IntersectionObserver((entries)=>{
             entries.forEach(entry=>{
                 if(entry.isIntersecting){
@@ -718,11 +752,13 @@ function renderArticleList(list){
             })
         },{threshold:0.2});
         observer.observe(card);
+        // 收藏按钮
         const favBtn = card.querySelector(".fav-btn");
         favBtn.onclick = function(){
             const item = JSON.parse(this.dataset.item.replaceAll("\\'","'"));
             addFav(item, card);
         }
+        // 下载按钮
         const downloadBtn = card.querySelector(".download-btn");
         downloadBtn.onclick = async function(){
             const media = JSON.parse(this.dataset.media);
@@ -741,13 +777,17 @@ function renderArticleList(list){
     articleBox.appendChild(tipDom);
     bindMediaAction();
 }
+
+// 收藏列表渲染：按收藏时间新→旧，底部增加到底提示
 function renderFavPanel(){
     favPanel.innerHTML = "";
     if(favList.length === 0){
         favPanel.innerHTML = `<div class="empty-tip">暂无收藏条目，去主页添加收藏吧</div>`;
         return;
     }
-    favList.forEach(art=>{
+    // 按收藏时间倒序（新收藏在前）
+    const sortedFav = [...favList].sort((a,b)=> (b.favTime||0) - (a.favTime||0));
+    sortedFav.forEach(art=>{
         const imgs = art.media.imgs || [];
         const videos = art.media.videos || [];
         const mediaHtml = buildMediaHtml(imgs, videos);
@@ -778,8 +818,15 @@ function renderFavPanel(){
         delBtn.onclick = function(){removeFav(this.dataset.link);}
         favPanel.appendChild(card);
     })
+    // 收藏底部到底提示
+    const tipDom = document.createElement("div");
+    tipDom.className = "bottom-tip";
+    tipDom.textContent = "已经到底了，没有更多收藏内容";
+    favPanel.appendChild(tipDom);
     bindMediaAction();
 }
+
+// 添加订阅确认
 document.getElementById("confirmAdd").onclick = function(){
     const name = document.getElementById("feedName").value.trim();
     const cat = document.getElementById("feedCat").value.trim();
@@ -794,6 +841,7 @@ document.getElementById("confirmAdd").onclick = function(){
     addFeedBox.style.display = "none";
     refreshAllBtn.click();
 }
+// 编辑弹窗
 document.getElementById("cancelEdit").onclick = function(){editModal.style.display = "none";}
 document.getElementById("saveEdit").onclick = function(){
     const idx = Number(document.getElementById("editIndex").value);
@@ -810,6 +858,8 @@ document.getElementById("saveEdit").onclick = function(){
     editModal.style.display = "none";
     renderFeedList();
 }
+
+// 初始化加载订阅列表
 renderFeedList();
 </script>
 </body>
