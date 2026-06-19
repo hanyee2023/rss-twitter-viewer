@@ -7,19 +7,30 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto}
 body{background:#f5f5f5;color:#111;max-width:100%;margin:0 auto;padding-bottom:100px}
-header{position:sticky;top:0;background:#fff;padding:12px 10px;border-bottom:1px solid #eee;z-index:10}
+/* 顶部导航滚动显隐 */
+header{
+    position:sticky;
+    top:0;
+    background:#fff;
+    padding:12px 10px;
+    border-bottom:1px solid #eee;
+    z-index:10;
+    transition:transform 0.3s ease;
+}
+header.hide-header{
+    transform:translateY(-100%);
+}
 h1{font-size:22px;margin-bottom:10px;color:#000}
-/* 修复导航单行滚动 */
+/* 导航单行滚动 */
 .top-bar{
     display:flex;
-    flex-wrap:nowrap; /* 禁止自动换行 */
+    flex-wrap:nowrap;
     gap:8px;
     align-items:center;
     margin-bottom:10px;
-    overflow-x:auto; /* 横向滚动 */
-    padding-bottom:4px; /* 滚动条不遮挡按钮 */
+    overflow-x:auto;
+    padding-bottom:4px;
 }
-/* 隐藏滚动条美化 */
 .top-bar::-webkit-scrollbar{height:3px}
 .top-bar::-webkit-scrollbar-thumb{background:#ccc;border-radius:3px}
 button{
@@ -27,27 +38,71 @@ button{
     background:#1d9bf0;
     color:#fff;
     border:none;
-    padding:10px 10px; /* 缩小左右内边距 */
+    padding:10px 10px;
     border-radius:999px;
     cursor:pointer;
     font-size:14px;
     white-space:nowrap;
     min-height:40px;
-    min-width:75px; /* 缩小最小宽度适配手机 */
-    flex-shrink:0; /* 按钮不挤压缩小 */
+    min-width:75px;
+    flex-shrink:0;
 }
 button.active{background:#28a745}
 button.danger{background:#f4212e}
 button.edit{background:#ffc107;color:#000}
 button:disabled{opacity:0.5;cursor:not-allowed;}
-/* 管理条目右侧操作按钮缩小 */
+/* 管理条目按钮缩小 */
 .feed-btn-group button{
     padding:6px 8px;
     min-height:32px;
     min-width:65px;
     font-size:12px;
 }
-/* 未读角标样式 */
+/* 管理页查看条目角标 */
+.feed-btn-group .view-feed{
+    position:relative;
+}
+.feed-btn-group .view-feed .unread-badge{
+    position:absolute;
+    top:-6px;
+    right:-6px;
+    min-width:18px;
+    height:18px;
+    background:#f4212e;
+    color:#fff;
+    font-size:11px;
+    border-radius:9px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+}
+/* 首页卡片标题放大一号 */
+.card-title{
+    font-size:16px;
+    font-weight:500;
+    color:#111;
+    text-decoration:none;
+    display:block;
+    margin-bottom:6px;
+}
+/* 卡片底部按钮右对齐 */
+.card-bottom{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    flex-wrap:wrap;
+    gap:8px;
+}
+.card-buttons{
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+    justify-content:flex-end;
+}
+.card-time{font-size:12px;color:#666}
+.card-icon-btn{background:none;border:none;color:#666;cursor:pointer;font-size:14px;padding:4px}
+.card-icon-btn.fav{color:#ff9500}
+/* 未读角标通用 */
 .badge{
     position:absolute;
     top:-6px;
@@ -73,13 +128,13 @@ button:disabled{opacity:0.5;cursor:not-allowed;}
 .feed-name{font-size:16px;font-weight:600}
 .feed-cat,.feed-url{display:none;}
 .feed-btn-group{display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap}
-.modal-mask{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:99;display:none;padding:10px}
+.modal-mask{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);display:flex;align-items:center;justify-content:center;z-index:999;display:none;padding:10px}
 .modal-box{width:100%;max-width:500px;background:#fff;padding:16px;border-radius:12}
 .modal-box h3{margin-bottom:12px}
 .modal-box input{width:100%;margin-bottom:10px;padding:10px;border:1px solid #ddd;border-radius:8px}
 .modal-btn-bar{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
-.article-stream{margin-top:10px;padding:0 10px}
-/* 推特风格卡片 淡蓝边框大圆角 */
+.article-stream{margin-top:10px;padding:0 10px;overflow-y:auto}
+/* 卡片样式 */
 .tweet-card{
     width:100%;
     max-width:100%;
@@ -92,7 +147,6 @@ button:disabled{opacity:0.5;cursor:not-allowed;}
     flex-direction:column;
     gap:12px;
 }
-/* 卡片顶部头像+名称（纯文字头像，无LOGO） */
 .card-top{
     display:flex;
     align-items:center;
@@ -107,16 +161,7 @@ button:disabled{opacity:0.5;cursor:not-allowed;}
     font-weight:bold;
     color:#222;
 }
-/* 中间标题 */
-.card-title{
-    font-size:14px;
-    font-weight:normal;
-    color:#111;
-    text-decoration:none;
-    display:block;
-    margin-bottom:6px;
-}
-/* 图片两列网格容器 */
+/* 图片网格 */
 .img-grid-wrap{
     width:100%;
     border-radius:12px;
@@ -148,7 +193,7 @@ button:disabled{opacity:0.5;cursor:not-allowed;}
     font-size:14px;
     cursor:pointer;
 }
-/* 视频单独容器，圆角铺满 */
+/* 视频容器 */
 .video-single-wrap{
     width:100%;
     border-radius:12px;
@@ -160,18 +205,6 @@ button:disabled{opacity:0.5;cursor:not-allowed;}
     display:block;
     object-fit:cover;
 }
-/* 底部左右布局 */
-.card-bottom{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    flex-wrap:wrap;
-    gap:8px;
-}
-.card-time{font-size:12px;color:#666}
-.card-buttons{display:flex;gap:10px;flex-wrap:wrap}
-.card-icon-btn{background:none;border:none;color:#666;cursor:pointer;font-size:14px;padding:4px}
-.card-icon-btn.fav{color:#ff9500}
 .empty-tip{text-align:center;padding:40px 10px;color:#777;font-size:14px}
 .bottom-tip{
     text-align:center;
@@ -182,9 +215,8 @@ button:disabled{opacity:0.5;cursor:not-allowed;}
 .fav-panel{margin:10px 0;padding:0 10px;display:none}
 .fav-item{padding:10px;border-bottom:1px solid #eee}
 .fav-item:last-child{border:none}
-/* 管理订阅顶部操作栏常驻 */
 .feed-top-op{margin:10px;display:flex;gap:8px;flex-wrap:wrap}
-/* 大图预览弹窗 */
+/* 图片预览弹窗 */
 .img-preview-mask{
     position:fixed;
     inset:0;
@@ -193,7 +225,7 @@ button:disabled{opacity:0.5;cursor:not-allowed;}
     display:none;
     align-items:center;
     justify-content:center;
-    padding:10px;
+    touch-action:none;
 }
 .img-preview-box{
     width:100%;
@@ -224,10 +256,23 @@ button:disabled{opacity:0.5;cursor:not-allowed;}
 }
 .preview-prev{left:12px}
 .preview-next{right:12px}
+/* 滑动提示 */
+.tip-toast{
+    position:absolute;
+    bottom:120px;
+    left:50%;
+    transform:translateX(-50%);
+    background:rgba(0,0,0,0.6);
+    color:#fff;
+    padding:8px 16px;
+    border-radius:20px;
+    font-size:14px;
+    display:none;
+}
 </style>
 </head>
 <body>
-<header>
+<header id="mainHeader">
 <h1 id="pageTitle">本地RSS媒体阅读器</h1>
 <div class="top-bar">
     <button id="btnHome" class="active">主页
@@ -237,25 +282,29 @@ button:disabled{opacity:0.5;cursor:not-allowed;}
     <button id="btnAdd">添加订阅</button>
     <button id="btnFav">我的收藏</button>
 </div>
-<!-- 已彻底删除LOGO输入框 -->
+<!-- 添加订阅面板 -->
 <div class="add-feed-row" id="addFeedBox">
     <input id="feedName" placeholder="自定义订阅名称（可选）">
     <input id="feedCat" placeholder="分类标签（可选，如：摄影、动漫）">
     <input id="feedUrl" placeholder="输入RSS订阅链接">
     <button id="confirmAdd">确认添加</button>
 </div>
+<!-- 管理页操作栏 -->
 <div class="feed-top-op" id="feedTopOp" style="display:none">
     <button id="importFeed">一键导入</button>
     <button id="exportAllBtn">一键导出</button>
     <input type="file" id="importFileInput" accept=".json" style="display:none">
 </div>
+<!-- 订阅列表 -->
 <div class="feed-list" id="feedPanel"></div>
+<!-- 收藏页面 -->
 <div class="fav-panel" id="favPanel"></div>
 </header>
 
+<!-- 内容区域 -->
 <div class="article-stream" id="articleBox"></div>
 
-<!-- 编辑弹窗：删除LOGO输入框 -->
+<!-- 编辑弹窗 -->
 <div class="modal-mask" id="editModal">
     <div class="modal-box">
         <h3>编辑订阅源</h3>
@@ -272,11 +321,12 @@ button:disabled{opacity:0.5;cursor:not-allowed;}
 
 <!-- 大图预览弹窗 -->
 <div class="img-preview-mask" id="imgPreviewMask">
-    <div class="img-preview-box">
+    <div class="img-preview-box" id="previewBox">
         <span class="preview-close" id="previewClose">×</span>
         <span class="preview-prev" id="previewPrev">&lt;</span>
         <img class="preview-img" id="previewImg" src="" alt="">
         <span class="preview-next" id="previewNext">&gt;</span>
+        <div class="tip-toast" id="slideTip"></div>
     </div>
 </div>
 
@@ -290,7 +340,6 @@ const VIDEO_EXT = ["mp4"];
 
 let feedList = JSON.parse(localStorage.getItem(FEED_STORAGE_KEY)) || [];
 let favList = JSON.parse(localStorage.getItem(FAV_STORAGE_KEY)) || [];
-// 已读链接持久化存储
 let readLinks = JSON.parse(localStorage.getItem(READ_STORAGE_KEY)) || [];
 const articleBox = document.getElementById("articleBox");
 const feedPanel = document.getElementById("feedPanel");
@@ -308,10 +357,24 @@ const exportAllBtn = document.getElementById("exportAllBtn");
 const importFileInput = document.getElementById("importFileInput");
 const pageTitle = document.getElementById("pageTitle");
 const homeBadge = document.getElementById("homeBadge");
+const mainHeader = document.getElementById("mainHeader");
 let currentFilterFeedUrl = null;
 let currentUnreadItems = [];
+// 图片预览全局
+const imgPreviewMask = document.getElementById("imgPreviewMask");
+const previewImg = document.getElementById("previewImg");
+const previewClose = document.getElementById("previewClose");
+const previewPrev = document.getElementById("previewPrev");
+const previewNext = document.getElementById("previewNext");
+const previewBox = document.getElementById("previewBox");
+const slideTip = document.getElementById("slideTip");
+let previewImages = [];
+let previewIndex = 0;
+// 触摸滑动变量
+let touchStartX = 0;
+let touchEndX = 0;
 
-// 一键导出全部订阅 直接绑定按钮
+// 一键导出
 exportAllBtn.onclick = function(){
     const jsonStr = JSON.stringify(feedList, null, 2);
     const blob = new Blob([jsonStr], {type:"application/json"});
@@ -324,31 +387,73 @@ exportAllBtn.onclick = function(){
     URL.revokeObjectURL(a.href);
 }
 
-// 大图预览全局变量
-const imgPreviewMask = document.getElementById("imgPreviewMask");
-const previewImg = document.getElementById("previewImg");
-const previewClose = document.getElementById("previewClose");
-const previewPrev = document.getElementById("previewPrev");
-const previewNext = document.getElementById("previewNext");
-let currentPreviewImages = [];
-let currentPreviewIndex = 0;
-
+// 图片弹窗触摸滑动
+previewBox.addEventListener("touchstart", e=>{
+    touchStartX = e.changedTouches[0].screenX;
+});
+previewBox.addEventListener("touchend", e=>{
+    touchEndX = e.changedTouches[0].screenX;
+    handleSwipe();
+});
+function handleSwipe(){
+    const diff = touchEndX - touchStartX;
+    const threshold = 60;
+    if(Math.abs(diff) < threshold) return;
+    if(diff > threshold){
+        // 右滑 → 上一张
+        if(previewIndex === 0){
+            showTip("已是第一张啦");
+            return;
+        }
+        previewIndex--;
+        previewImg.src = previewImages[previewIndex];
+    }else if(diff < -threshold){
+        // 左滑 → 下一张
+        if(previewIndex === previewImages.length -1){
+            showTip("已是最后一张啦");
+            return;
+        }
+        previewIndex++;
+        previewImg.src = previewImages[previewIndex];
+    }
+}
+function showTip(text){
+    slideTip.textContent = text;
+    slideTip.style.display = "block";
+    setTimeout(()=>slideTip.style.display = "none",1200);
+}
+// 箭头切换
+previewNext.onclick = ()=>{
+    if(previewIndex === previewImages.length -1){
+        showTip("已是最后一张啦");
+        return;
+    }
+    previewIndex++;
+    previewImg.src = previewImages[previewIndex];
+}
+previewPrev.onclick = ()=>{
+    if(previewIndex === 0){
+        showTip("已是第一张啦");
+        return;
+    }
+    previewIndex--;
+    previewImg.src = previewImages[previewIndex];
+}
 previewClose.onclick = ()=>{
     imgPreviewMask.style.display = "none";
 }
-imgPreviewMask.onclick = (e)=>{
-    if(e.target === imgPreviewMask) imgPreviewMask.style.display = "none";
-}
-previewPrev.onclick = ()=>{
-    currentPreviewIndex --;
-    if(currentPreviewIndex < 0) currentPreviewIndex = currentPreviewImages.length - 1;
-    previewImg.src = currentPreviewImages[currentPreviewIndex];
-}
-previewNext.onclick = ()=>{
-    currentPreviewIndex ++;
-    if(currentPreviewIndex >= currentPreviewImages.length) currentPreviewIndex = 0;
-    previewImg.src = currentPreviewImages[currentPreviewIndex];
-}
+
+// 页面滚动 隐藏/显示顶部导航
+let lastScrollY = 0;
+articleBox.addEventListener("scroll", ()=>{
+    const nowY = articleBox.scrollTop;
+    if(nowY > lastScrollY && nowY > 40){
+        mainHeader.classList.add("hide-header");
+    }else{
+        mainHeader.classList.remove("hide-header");
+    }
+    lastScrollY = nowY;
+})
 
 function setActiveNav(btnDom){
     allNavBtns.forEach(btn=>btn.classList.remove("active"));
@@ -358,11 +463,9 @@ function getRandomBg(){
     const colors = ["#FF6B6B","#4ECDC4","#45B7D1","#FFA07A","#98D8C8","#F7DC6F","#BB8FCE","#85C1E9"];
     return colors[Math.floor(Math.random()*colors.length)];
 }
-// 保存已读列表到本地
 function saveRead(){
     localStorage.setItem(READ_STORAGE_KEY, JSON.stringify(readLinks));
 }
-// 标记单条为已读
 function markRead(link){
     if(!readLinks.includes(link)){
         readLinks.push(link);
@@ -370,7 +473,7 @@ function markRead(link){
     }
 }
 
-// 切换页面
+// 页面切换
 toggleFavBtn.onclick = function(){
     setActiveNav(this);
     addFeedBox.style.display = "none";
@@ -403,7 +506,7 @@ manageBtn.onclick = function(){
     currentFilterFeedUrl = null;
     renderFeedList();
 }
-// 主页刷新：并行并发加载全部订阅，过滤未读、更新角标
+// 主页加载
 refreshAllBtn.onclick = async function(){
     setActiveNav(this);
     addFeedBox.style.display = "none";
@@ -419,28 +522,23 @@ refreshAllBtn.onclick = async function(){
         return;
     }
     articleBox.innerHTML = `<div class="empty-tip">加载中...</div>`;
-    // 并行并发请求
     const fetchTasks = feedList.map(async feed=>{
         try{
             const xmlRaw = await fetchRssFeed(feed.url);
             return parseRSSRawText(xmlRaw, feed.name, feed.url);
         }catch(err){
-            console.error("订阅加载失败", feed.url, err);
             return [];
         }
     })
     const allGroups = await Promise.all(fetchTasks);
     let allArts = [];
     allGroups.forEach(g=>allArts.push(...g));
-    // 从新到旧排序
     allArts.sort((a,b)=>{
         const t1 = a.date ? new Date(a.date).getTime() : 0;
         const t2 = b.date ? new Date(b.date).getTime() : 0;
         return t2 - t1;
     });
-    // 过滤只保留未读条目
     currentUnreadItems = allArts.filter(item=>!readLinks.includes(item.link));
-    // 更新小红角标
     if(currentUnreadItems.length > 0){
         homeBadge.textContent = currentUnreadItems.length;
         homeBadge.style.display = "flex";
@@ -449,7 +547,7 @@ refreshAllBtn.onclick = async function(){
     }
     renderArticleList(currentUnreadItems);
 }
-// 仅加载单个订阅源条目（不区分已读，全部展示，无角标）
+// 单订阅条目
 async function loadSingleFeedItems(targetUrl, feedName){
     setActiveNav(refreshAllBtn);
     addFeedBox.style.display = "none";
@@ -481,14 +579,20 @@ async function loadSingleFeedItems(targetUrl, feedName){
     renderArticleList(itemArr);
 }
 
-// 管理订阅列表：隐藏URL，只保留名称+按钮
+// 管理订阅列表（带未读角标）
 function renderFeedList(){
     feedPanel.innerHTML = "";
     if(feedList.length === 0){
         feedPanel.innerHTML = "<div style='padding:14px;color:#888'>暂无订阅源</div>";
         return;
     }
-    feedList.forEach((feed,idx)=>{
+    feedList.forEach(async (feed,idx)=>{
+        let unreadCount = 0;
+        try{
+            const xml = await fetchRssFeed(feed.url);
+            const items = parseRSSRawText(xml, feed.name, feed.url);
+            unreadCount = items.filter(i=>!readLinks.includes(i.link)).length;
+        }catch(e){unreadCount = 0;}
         const div = document.createElement("div");
         div.className = "feed-item";
         div.innerHTML = `
@@ -496,39 +600,44 @@ function renderFeedList(){
                 <div class="feed-name">${feed.name || "未命名订阅"}</div>
             </div>
             <div class="feed-btn-group">
-                <button class="view-feed" data-url="${feed.url}" data-name="${feed.name}">查看条目</button>
+                <button class="view-feed" data-url="${feed.url}" data-name="${feed.name}">
+                    查看条目
+                    ${unreadCount>0 ? `<span class="unread-badge">${unreadCount}</span>` : ""}
+                </button>
                 <button class="edit" data-idx="${idx}">编辑</button>
                 <button class="danger" data-idx="${idx}">删除</button>
             </div>
         `;
         feedPanel.appendChild(div);
     })
-    document.querySelectorAll(".view-feed").forEach(btn=>{
-        btn.onclick = function(){
-            const u = this.dataset.url;
-            const n = this.dataset.name;
-            loadSingleFeedItems(u, n);
-        }
-    })
-    feedPanel.querySelectorAll("button.danger").forEach(btn=>{
-        btn.onclick = function(){
-            const i = Number(this.dataset.idx);
-            feedList.splice(i,1);
-            saveFeeds();
-            renderFeedList();
-        }
-    })
-    feedPanel.querySelectorAll("button.edit").forEach(btn=>{
-        btn.onclick = function(){
-            const i = Number(this.dataset.idx);
-            const feed = feedList[i];
-            document.getElementById("editIndex").value = i;
-            document.getElementById("editName").value = feed.name || "";
-            document.getElementById("editCat").value = feed.category || "";
-            document.getElementById("editUrl").value = feed.url;
-            editModal.style.display = "flex";
-        }
-    })
+    setTimeout(()=>{
+        document.querySelectorAll(".view-feed").forEach(btn=>{
+            btn.onclick = function(){
+                const u = this.dataset.url;
+                const n = this.dataset.name;
+                loadSingleFeedItems(u, n);
+            }
+        })
+        document.querySelectorAll(".feed-btn-group .danger").forEach(btn=>{
+            btn.onclick = function(){
+                const i = Number(this.dataset.idx);
+                feedList.splice(i,1);
+                saveFeeds();
+                renderFeedList();
+            }
+        })
+        document.querySelectorAll(".feed-btn-group .edit").forEach(btn=>{
+            btn.onclick = function(){
+                const i = Number(this.dataset.idx);
+                const feed = feedList[i];
+                document.getElementById("editIndex").value = i;
+                document.getElementById("editName").value = feed.name || "";
+                document.getElementById("editCat").value = feed.category || "";
+                document.getElementById("editUrl").value = feed.url;
+                editModal.style.display = "flex";
+            }
+        })
+    },300);
 }
 importFeedBtn.onclick = function(){
     importFileInput.click();
@@ -555,7 +664,6 @@ importFileInput.onchange = function(e){
 function saveFeeds(){localStorage.setItem(FEED_STORAGE_KEY, JSON.stringify(feedList));}
 function saveFav(){localStorage.setItem(FAV_STORAGE_KEY, JSON.stringify(favList));}
 function isFav(item){return favList.some(f=>f.link === item.link);}
-// 收藏：仅局部更新卡片，不全局刷新
 async function addFav(item, cardDom){
     if(isFav(item)) return;
     favList.push(item);
@@ -600,7 +708,6 @@ function fullDecodeXml(str){
     s = s.replace(/<br\s*\/?>/gi, " ").replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ");
     return s;
 }
-// 轻量化媒体解析
 function extractMediaFromRawText(rawText){
     const allSrc = new Set();
     const srcReg = /src\s*=\s*(["'])(.*?)\1/gi;
@@ -618,7 +725,6 @@ function extractMediaFromRawText(rawText){
     }
     return {imgs, videos};
 }
-
 function parseRSSRawText(xmlText, feedName, feedUrl){
     const items = [];
     const itemReg = /<item>([\s\S]*?)<\/item>/gi;
@@ -643,7 +749,6 @@ function parseRSSRawText(xmlText, feedName, feedUrl){
     }
     return items;
 }
-
 async function downloadFile(url, filename){
     try{
         const res = await fetch(url);
@@ -659,7 +764,6 @@ async function downloadFile(url, filename){
         window.open(url,"_blank");
     }
 }
-
 async function fetchRssFeed(url){
     try{
         const res = await fetch(url,{signal:AbortSignal.timeout(8000)});
@@ -671,14 +775,12 @@ async function fetchRssFeed(url){
         return await res.text();
     }
 }
-
-// ========== 图片单图全屏，多图双列 逻辑保留 ==========
+// 图片自适应布局
 function buildImageGridHtml(imgList){
     const total = imgList.length;
     const showMax = 4;
     const needFold = total > showMax;
     const showList = needFold ? imgList.slice(0, showMax) : imgList;
-    // 动态设置网格列：1张图=单列，≥2张=双列
     const gridCols = total === 1 ? "1fr" : "1fr 1fr";
     let html = `<div class="img-grid-wrap" data-fullimgs='${JSON.stringify(imgList)}' data-fold='${needFold ? "1" : "0"}'>`;
     html += `<div class="img-grid" style="grid-template-columns:${gridCols}">`;
@@ -688,7 +790,6 @@ function buildImageGridHtml(imgList){
     html += `</div>`;
     return html;
 }
-// 媒体渲染：有视频只输出video（poster内置播放器，不输出图片网格）
 function buildMediaHtml(imgs, videos){
     if(videos.length > 0){
         let html = "";
@@ -702,14 +803,13 @@ function buildMediaHtml(imgs, videos){
     }
     return "";
 }
-
-// 绑定图片弹窗、展开折叠
+// 图片点击弹窗
 function bindMediaAction(){
     document.querySelectorAll(".grid-img").forEach(img=>{
         img.onclick = function(){
-            currentPreviewImages = JSON.parse(this.dataset.imggroup);
-            currentPreviewIndex = currentPreviewImages.indexOf(this.src);
-            previewImg.src = this.src;
+            previewImages = JSON.parse(this.dataset.imggroup);
+            previewIndex = previewImages.indexOf(this.src);
+            previewImg.src = previewImages[previewIndex];
             imgPreviewMask.style.display = "flex";
         }
     })
@@ -721,8 +821,7 @@ function bindMediaAction(){
         }
     })
 }
-
-// 渲染条目卡片 + 底部到底提示 + 滚动自动标记已读
+// 渲染主页卡片
 function renderArticleList(list){
     articleBox.innerHTML = "";
     if(list.length === 0){
@@ -761,7 +860,7 @@ function renderArticleList(list){
                 </div>
             </div>
         `;
-        // 滚动进入视口自动标记已读
+        // 滚动标记已读
         const observer = new IntersectionObserver((entries)=>{
             entries.forEach(entry=>{
                 if(entry.isIntersecting){
@@ -790,15 +889,14 @@ function renderArticleList(list){
         }
         articleBox.appendChild(card);
     })
-    // 底部到底提示
+    // 底部提示
     const tipDom = document.createElement("div");
     tipDom.className = "bottom-tip";
     tipDom.textContent = "已经到底了，没有更多未读内容";
     articleBox.appendChild(tipDom);
     bindMediaAction();
 }
-
-// 收藏页面完整渲染卡片
+// 收藏页面
 function renderFavPanel(){
     favPanel.innerHTML = "";
     if(favList.length === 0){
@@ -840,8 +938,7 @@ function renderFavPanel(){
     })
     bindMediaAction();
 }
-
-// 添加订阅静默无弹窗
+// 添加订阅确认
 document.getElementById("confirmAdd").onclick = function(){
     const name = document.getElementById("feedName").value.trim();
     const cat = document.getElementById("feedCat").value.trim();
