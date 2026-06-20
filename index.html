@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>本地RSS媒体阅读器</title>
+<title>本地RSS媒体阅读器 V2.0</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto;}
 html {
@@ -56,10 +56,9 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     padding:10px;
     border-bottom:1px solid #eee;
     display:flex;
-    justify-content:space-between;
     align-items:center;
+    gap:6px; /* 缩小序号与标题间距，紧贴文字 */
     flex-wrap:wrap;
-    gap:8px;
 }
 .feed-item.type-img{background:#d4edda;}
 .feed-item.type-video{background:#ffe6e6;}
@@ -70,10 +69,13 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     text-align:center;
     font-size:14px;
     color:#666;
+    flex-shrink:0;
+}
+.feed-info{
+    flex:1;
 }
 .feed-name{
     font-weight:bold;
-    flex:1;
 }
 .feed-btn-group button{
     border:none;
@@ -308,7 +310,6 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     </div>
     <div class="page-manage" id="pageManage">
         <div class="feed-top-op">
-            <!-- 修改按钮文字：一键导出、一键清空 -->
             <button id="importFeed">一键导入</button>
             <button id="exportAllBtn">一键导出</button>
             <button id="delAllFeed">一键清空</button>
@@ -552,7 +553,7 @@ function bindScrollLoadMore(){
     scrollObserver.observe(loadTip);
 }
 
-// 管理订阅源：降序序号、名称加粗
+// 管理订阅源：降序序号、名称加粗、缩小序号间距
 function renderManage(){
     if(feedList.length === 0){
         feedPanel.innerHTML = `<div class="empty-tip">暂无订阅源</div>`;
@@ -613,7 +614,7 @@ function renderFav(){
     bindVideoPauseObserver();
 }
 
-// 构建卡片：标题外层包裹跳转a链接
+// 构建卡片：修复标题跳转链接，使用item.link原生文章地址
 function buildCard(item, isFav = false){
     let mediaHtml = "";
     const imgs = [...new Set(item.media.imgs || [])];
@@ -641,6 +642,7 @@ function buildCard(item, isFav = false){
     const favTxt = isCollected ? "已收藏" : "收藏";
     const favCls = isCollected ? "btn-fav collected" : "btn-fav";
     const titleRaw = item.title || "无标题";
+    // 修复：使用文章原生link，不再写死github地址
     const linkUrl = item.link;
     if(isFav){
         return `
