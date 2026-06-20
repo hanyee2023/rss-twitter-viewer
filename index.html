@@ -16,116 +16,116 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     top:0;
     left:0;
     width:100%;
-    height:66px;
+    height:60px;
     background:#fff;
     border-bottom:1px solid #eee;
     z-index:999;
-    padding:5px 10px;
+    padding:4px 10px;
 }
-#pageTitle{font-size:22px;margin-bottom:6px;font-weight:600;}
-.top-bar{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;}
+#pageTitle{font-size:18px;margin-bottom:4px;font-weight:600;}
+.top-bar{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;}
 .top-bar button{
     border:none;
-    padding:8px 14px;
+    padding:6px 12px;
     border-radius:999px;
-    font-size:16px;
+    font-size:14px;
     background:#1d9bf0;
     color:#fff;
     white-space:nowrap;
 }
 .top-bar button.active{background:#28a745;}
 .main-wrap{
-    margin-top:70px;
-    padding:12px 10px;
-    min-height:calc(100vh - 70px);
+    margin-top:64px;
+    padding:10px 8px;
+    min-height:calc(100vh - 64px);
 }
 .page-home,.page-manage,.page-add,.page-fav{display:none;}
 .feed-top-op{
     display:flex;
-    gap:10px;
+    gap:8px;
     flex-wrap:wrap;
     justify-content:center;
-    margin-bottom:14px;
+    margin-bottom:12px;
 }
-#importFeed{background:#ff7823;color:#fff;border:none;padding:8px 16px;border-radius:999px;font-size:15px;}
-#exportAllBtn{background:#b388eb;color:#fff;border:none;padding:8px 16px;border-radius:999px;font-size:15px;}
-#delAllFeed{background:#c0392b;color:#fff;border:none;padding:8px 16px;border-radius:999px;font-size:15px;}
+#importFeed{background:#ff7823;color:#fff;border:none;padding:6px 14px;border-radius:999px;font-size:14px;}
+#exportAllBtn{background:#b388eb;color:#fff;border:none;padding:6px 14px;border-radius:999px;font-size:14px;}
+#delAllFeed{background:#c0392b;color:#fff;border:none;padding:6px 14px;border-radius:999px;font-size:14px;}
 .feed-list{border:1px solid #eee;border-radius:10px;background:#fff;}
 .feed-item{
-    padding:12px;
+    padding:10px;
     border-bottom:1px solid #eee;
     display:flex;
     justify-content:space-between;
     align-items:center;
     flex-wrap:wrap;
-    gap:10px;
+    gap:8px;
 }
 .feed-item.type-img{background:#d4edda22;}
 .feed-item.type-video{background:#ffe6e622;}
 .feed-item:last-child{border-bottom:none;}
 .feed-btn-group button{
     border:none;
-    padding:6px 10px;
+    padding:4px 8px;
     border-radius:999px;
-    font-size:13px;
+    font-size:12px;
     color:#fff;
-    margin:0 3px;
+    margin:0 2px;
 }
 .feed-btn-group .view-feed{background:#1d9bf0;}
 .feed-btn-group .edit{background:#ff9500;}
 .feed-btn-group .del{background:#e53e3e;}
-.add-feed-row{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px;}
+.add-feed-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;}
 .add-feed-row input,.add-feed-row select{
     flex:1;
-    min-width:160px;
-    padding:12px;
+    min-width:140px;
+    padding:10px;
     border:1px solid #ddd;
     border-radius:8px;
-    font-size:16px;
+    font-size:15px;
 }
-#confirmAdd{background:#1d9bf0;color:#fff;border:none;padding:0 20px;border-radius:8px;font-size:16px;}
-.empty-tip{text-align:center;padding:120px 10px;color:#777;font-size:18px;}
-.error-tip{text-align:center;padding:40px 10px;color:#c0392b;font-size:16px;margin-bottom:12px;}
+#confirmAdd{background:#1d9bf0;color:#fff;border:none;padding:0 16px;border-radius:8px;font-size:15px;}
+.empty-tip{text-align:center;padding:100px 10px;color:#777;font-size:16px;}
+.error-tip{text-align:center;padding:30px 10px;color:#c0392b;font-size:15px;margin-bottom:10px;}
 .update-tip-bar{
     background:#e6f7ff;
     border:1px solid #91caff;
     border-radius:12px;
-    padding:14px;
+    padding:12px;
     text-align:center;
     color:#0050b3;
-    margin-bottom:12px;
+    margin-bottom:10px;
     cursor:pointer;
-    font-size:16px;
+    font-size:15px;
 }
 .no-update-tip{
     background:#f0f2f5;
     border:1px solid #dcdcdc;
     border-radius:12px;
-    padding:14px;
+    padding:12px;
     text-align:center;
     color:#666;
-    margin-bottom:12px;
-    font-size:16px;
+    margin-bottom:10px;
+    font-size:15px;
 }
 .load-more-tip{
-    text-align:center;padding:18px 0;color:#888;font-size:14px;
+    text-align:center;padding:14px 0;color:#888;font-size:13px;
 }
 .tweet-card{
     background:#fff;
     border:1px solid #cce0f5;
     border-radius:16px;
-    padding:16px;
-    margin-bottom:12px;
+    padding:14px;
+    margin-bottom:10px;
 }
 .card-top{
     display:flex;
     align-items:center;
-    gap:10px;
-    margin-bottom:10px;
+    gap:8px;
+    margin-bottom:8px;
 }
 .card-avatar{
-    width:40px;
-    height:40px;
+    width:36px;
+    height:36px;
     border-radius:50%;
     background:#45B7D1;
     color:#fff;
@@ -133,71 +133,140 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     align-items:center;
     justify-content:center;
     font-weight:bold;
-    font-size:18px;
+    font-size:16px;
     flex-shrink:0;
 }
 .source-name-text{
-    font-size:18px;
+    font-size:16px;
     font-weight:600;
     color:#111;
 }
-/* 修复：卡片标题链接去除下划线 */
+.card-title-wrap{display:flex;gap:6px;align-items:flex-start;}
+/* 标题两行截断 */
 .card-title{
-    font-size:16px;
+    font-size:15px;
     font-weight:normal;
     color:#000;
     display:-webkit-box;
     -webkit-line-clamp:2;
     overflow:hidden;
-    line-height:1.5;
+    line-height:1.45;
     text-decoration:none;
+    flex:1;
 }
-.img-grid-wrap{border-radius:12px;overflow:hidden;background:#f0f0f0;margin:8px 0;}
-.img-grid{display:grid;grid-template-columns:1fr 1fr;gap:3px;}
-.grid-img-box{aspect-ratio:1/1;}
+.card-title.expand{
+    -webkit-line-clamp:99;
+}
+.title-toggle-btn{
+    font-size:13px;
+    color:#1d9bf0;
+    border:none;
+    background:transparent;
+    white-space:nowrap;
+}
+.img-grid-wrap{border-radius:12px;overflow:hidden;background:#f0f0f0;margin:6px 0;}
+.img-grid{display:grid;gap:2px;}
+.grid-single{grid-template-columns:1fr;}
+.grid-multi{grid-template-columns:1fr 1fr;}
+.grid-img-box{position:relative;aspect-ratio:1/1;overflow:hidden;}
 .grid-img{width:100%;height:100%;object-fit:cover;display:block;}
-.video-single-wrap{width:100%;border-radius:12px;overflow:hidden;background:#000;margin:8px 0;}
-.media-video{width:100%;display:block;}
-.bottom-tip{text-align:center;padding:22px 0;color:#999;font-size:13px;}
+.img-overlay-more{
+    position:absolute;
+    inset:0;
+    background:rgba(0,0,0,0.6);
+    color:#fff;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:14px;
+}
+/* 视频播放器：保留poster预览封面，播放器底色黑色 */
+.video-single-wrap{width:100%;border-radius:12px;overflow:hidden;margin:6px 0;}
+.media-video{
+    width:100%;
+    display:block;
+    background:#000;
+    object-fit:contain;
+}
+.bottom-tip{text-align:center;padding:18px 0;color:#999;font-size:12px;}
 .modal-mask{
     position:fixed;inset:0;background:rgba(0,0,0,0.9);display:none;
-    align-items:center;justify-content:center;z-index:9999;padding:15px;
+    align-items:center;justify-content:center;z-index:9999;padding:12px;
 }
-.modal-box{width:100%;max-width:520px;background:#fff;padding:20px;border-radius:12px;}
-.modal-box input,.modal-box select{width:100%;margin-bottom:12px;padding:12px;border:1px solid #ddd;border-radius:8px;font-size:16px;}
-/* 美化弹窗按钮，匹配全局风格 */
-.modal-btn-bar{display:flex;gap:12px;justify-content:flex-end;margin-top:14px;}
+.modal-box{width:100%;max-width:480px;background:#fff;padding:16px;border-radius:12px;}
+.modal-box input,.modal-box select{width:100%;margin-bottom:10px;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:15px;}
+.modal-btn-bar{display:flex;gap:10px;justify-content:flex-end;margin-top:12px;}
 #cancelEdit{
     border:none;
-    padding:10px 22px;
+    padding:8px 18px;
     border-radius:999px;
-    font-size:16px;
+    font-size:15px;
     background:#6c757d;
     color:#fff;
 }
 #saveEdit{
     border:none;
-    padding:10px 22px;
+    padding:8px 18px;
     border-radius:999px;
-    font-size:16px;
+    font-size:15px;
     background:#28a745;
     color:#fff;
 }
 .img-preview-mask{
     position:fixed;inset:0;background:rgba(0,0,0,0.95);display:none;
     align-items:center;justify-content:center;z-index:9999;
+    touch-action:none;
 }
-.preview-close{position:absolute;top:24px;right:24px;color:#fff;font-size:32px;border:none;background:transparent;cursor:pointer;}
-.preview-img{max-width:95vw;max-height:95vh;object-fit:contain;}
+.preview-wrap{
+    width:100%;height:100%;
+    display:flex;
+    overflow-x:auto;
+    scroll-snap-type:x mandatory;
+    scrollbar-width:none;
+    -ms-overflow-style:none;
+}
+.preview-wrap::-webkit-scrollbar{display:none;}
+.preview-slide{
+    flex:0 0 100%;
+    height:100%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    scroll-snap-align:center;
+    padding:10px;
+}
+.preview-img{max-width:92vw;max-height:92vh;object-fit:contain;}
+.preview-close{position:absolute;top:20px;right:20px;color:#fff;font-size:28px;border:none;background:transparent;cursor:pointer;z-index:10;}
+.preview-tip{
+    position:absolute;bottom:40px;left:50%;transform:translateX(-50%);
+    color:#fff;font-size:14px;background:rgba(0,0,0,0.4);padding:6px 14px;border-radius:16px;
+}
 .tip-toast{
-    position:absolute;bottom:100px;left:50%;transform:translateX(-50%);
-    background:rgba(0,0,0,0.65);color:#fff;padding:10px 20px;border-radius:22px;display:none;font-size:15px;
+    position:absolute;bottom:90px;left:50%;transform:translateX(-50%);
+    background:rgba(0,0,0,0.65);color:#fff;padding:8px 16px;border-radius:20px;display:none;font-size:14px;
 }
+.card-bottom{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-top:8px;
+    flex-wrap:wrap;
+    gap:6px;
+}
+.card-bottom-left{font-size:12px;color:#666;}
+.card-bottom-right{display:flex;gap:8px;}
+.card-bottom-right button{
+    border:none;background:transparent;font-size:13px;
+}
+.btn-download{color:#1d9bf0;}
+.btn-fav{color:#666;}
+.btn-fav.collected{color:#ff9500;}
 /* 手机屏幕适配 */
 @media (max-width:768px){
-  .top-bar button{padding:10px 16px;font-size:17px;}
-  .tweet-card{padding:16px;}
-  #pageTitle{font-size:20px;}
+  #mainHeader{height:56px;padding:3px 8px;}
+  #pageTitle{font-size:16px;}
+  .top-bar button{padding:5px 10px;font-size:13px;}
+  .tweet-card{padding:12px;}
   .modal-btn-bar{justify-content:center;}
   #cancelEdit,#saveEdit{flex:1;text-align:center;}
 }
@@ -256,25 +325,25 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     </div>
 </div>
 <div class="img-preview-mask" id="imgPreviewMask">
-    <div style="position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center;">
-        <button class="preview-close" id="previewClose">×</button>
-        <img class="preview-img" id="previewImg" alt="">
-        <div class="tip-toast" id="slideTip"></div>
-    </div>
+    <button class="preview-close" id="previewClose">×</button>
+    <div class="preview-wrap" id="previewWrap"></div>
+    <div class="preview-tip" id="previewTip"></div>
 </div>
+<div class="tip-toast" id="slideTip"></div>
 <script>
 const FEED_KEY = "local_rss_feeds";
 const FAV_KEY = "rss_fav_list";
 const PAGE_SIZE = 50;
-const FETCH_TIMEOUT = 4000; // 4秒超时，适配手机弱网
+const FETCH_TIMEOUT = 4000;
 let feedList = JSON.parse(localStorage.getItem(FEED_KEY)) || [];
 let favList = JSON.parse(localStorage.getItem(FAV_KEY)) || [];
 let currentArticles = [];
 let renderPageNum = 0;
 let allArticles = [];
 let scrollObserver = null;
+let currentPreviewImgs = [];
 
-// ====================== 多代理池配置（6个备用公共CORS代理，自动轮换） ======================
+// 多代理池自动轮换
 const PROXY_POOL = [
     "https://api.codetabs.com/v1/proxy?quest=",
     "https://staging.corsproxy.io/?",
@@ -283,7 +352,6 @@ const PROXY_POOL = [
     "https://api.cors.lol/?url=",
     "https://whateverorigin.org/get?url="
 ];
-// 自动切换代理请求函数：遍历全部代理直到成功，全部失败返回空数组
 async function fetchWithAutoProxy(targetUrl) {
     const encodedUrl = encodeURIComponent(targetUrl);
     for (const proxyPrefix of PROXY_POOL) {
@@ -295,7 +363,6 @@ async function fetchWithAutoProxy(targetUrl) {
             clearTimeout(timer);
             if (res.ok) {
                 const text = await res.text();
-                // whateverorigin特殊格式处理
                 if (proxyPrefix.includes("whateverorigin")) {
                     const json = JSON.parse(text);
                     return json.contents || "";
@@ -307,10 +374,8 @@ async function fetchWithAutoProxy(targetUrl) {
             continue;
         }
     }
-    // 所有代理全部失效
     return "";
 }
-// ======================================================================================
 
 const pageHome = document.getElementById("pageHome");
 const pageManage = document.getElementById("pageManage");
@@ -326,6 +391,10 @@ const btnFav = document.getElementById("btnFav");
 const pageTitle = document.getElementById("pageTitle");
 const allBtns = [btnHome, btnManage, btnAdd, btnFav];
 const editModal = document.getElementById("editModal");
+const imgPreviewMask = document.getElementById("imgPreviewMask");
+const previewWrap = document.getElementById("previewWrap");
+const previewTip = document.getElementById("previewTip");
+const previewClose = document.getElementById("previewClose");
 
 function showPage(pageEl, title) {
     pageHome.style.display = "none";
@@ -376,7 +445,6 @@ async function handleHomeClick(){
         bindScrollLoadMore();
         return;
     }
-    // 复用已缓存数据对比更新，不再重复请求
     const newItems = allArticles.filter(item => !currentArticles.some(c => c.link === item.link));
     const tempBox = articleBox.innerHTML;
     try{
@@ -410,7 +478,7 @@ function renderPagedList(){
     let html = renderCardList(slice);
     html += currentArticles.length > PAGE_SIZE ? `<div class="load-more-tip">滚动加载更多...</div>` : `<div class="bottom-tip">全部内容加载完毕</div>`;
     articleBox.innerHTML = html;
-    bindImageClick();
+    bindAllCardEvent();
 }
 
 function renderPartialCardList(list, limit){
@@ -440,7 +508,7 @@ function bindScrollLoadMore(){
             html += renderCardList(newSlice);
             html += end < currentArticles.length ? `<div class="load-more-tip">滚动加载更多...</div>` : `<div class="bottom-tip">全部内容加载完毕</div>`;
             articleBox.innerHTML = html;
-            bindImageClick();
+            bindAllCardEvent();
             bindScrollLoadMore();
         }
     }, {rootMargin:"200px 0px"});
@@ -499,94 +567,172 @@ function renderFav(){
     favList.forEach(item => html += buildCard(item, true));
     html += `<div class="bottom-tip">无更多收藏</div>`;
     favPanel.innerHTML = html;
-    bindImageClick();
+    bindAllCardEvent();
 }
 
+// 构建卡片HTML（修正图片网格逻辑、视频poster保留预览）
 function buildCard(item, isFav = false){
     let mediaHtml = "";
-    if(item.media.videos && item.media.videos.length > 0){
-        mediaHtml = `<div class="video-single-wrap"><video class="media-video" controls src="${item.media.videos[0]}"></video></div>`;
-    }else if(item.media.imgs && item.media.imgs.length > 0){
-        const uniqueImgs = [...new Set(item.media.imgs)];
-        const showImgs = uniqueImgs.slice(0,4);
-        mediaHtml = `<div class="img-grid-wrap"><div class="img-grid">`;
-        showImgs.forEach(src=>{
-            mediaHtml += `<div class="grid-img-box"><img class="grid-img" data-imggroup='${JSON.stringify(uniqueImgs)}' src="${src}"></div>`;
+    const imgs = [...new Set(item.media.imgs || [])];
+    const videos = item.media.videos || [];
+    if(videos.length > 0){
+        // 视频保留poster预览封面，播放器底色黑色
+        mediaHtml = `<div class="video-single-wrap"><video class="media-video" controls src="${videos[0]}"></video></div>`;
+    }else if(imgs.length > 0){
+        const total = imgs.length;
+        // 修正网格规则：1张通栏；2-4张两列；>4张第四张加遮罩
+        const gridClass = total === 1 ? "grid-single" : "grid-multi";
+        mediaHtml = `<div class="img-grid-wrap"><div class="img-grid ${gridClass}">`;
+        const show = imgs.slice(0,4);
+        show.forEach((src,i)=>{
+            let overlay = "";
+            // 仅图片总数>4 且是第4张才加遮罩
+            if(i === 3 && total > 4){
+                const rest = total - 4;
+                overlay = `<div class="img-overlay-more">+${rest}张</div>`;
+            }
+            mediaHtml += `<div class="grid-img-box"><img class="grid-img" data-imggroup='${JSON.stringify(imgs)}' src="${src}">${overlay}</div>`;
         })
         mediaHtml += `</div></div>`;
     }
-    if(isFav){
-        return `
-        <div class="tweet-card" data-link="${item.link}">
-            <div class="card-top">
-                <div class="card-avatar">${item.sourceName.slice(0,1)}</div>
-                <div class="source-name-text">${item.sourceName}</div>
+    const isCollected = favList.some(f=>f.link === item.link);
+    const favTxt = isCollected ? "已收藏" : "收藏";
+    const favCls = isCollected ? "btn-fav collected" : "btn-fav";
+    const titleRaw = item.title || "无标题";
+    return `
+    <div class="tweet-card" data-link="${item.link}">
+        <div class="card-top">
+            <div class="card-avatar">${item.sourceName.slice(0,1)}</div>
+            <div class="source-name-text">${item.sourceName}</div>
+        </div>
+        <div class="card-title-wrap">
+            <a class="card-title" target="_blank" href="${item.link}">${titleRaw}</a>
+            <button class="title-toggle-btn" style="display:none;">展开</button>
+        </div>
+        ${mediaHtml}
+        <div class="card-bottom">
+            <div class="card-bottom-left">${item.date || "未知时间"}</div>
+            <div class="card-bottom-right">
+                <button class="btn-download" data-link="${item.link}" data-img='${JSON.stringify(imgs)}' data-video='${JSON.stringify(videos)}'>下载</button>
+                <button class="${favCls}" data-link="${item.link}">${favTxt}</button>
+                ${isFav ? `<button class="del-fav" data-link="${item.link}">取消收藏</button>` : ""}
             </div>
-            <div class="card-middle">
-                <a class="card-title" target="_blank" href="${item.link}">${item.title}</a>
-                ${mediaHtml}
-            </div>
-            <div class="card-bottom" style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
-                <span style="font-size:12px;color:#666;">${item.date}</span>
-                <button class="del-fav" data-link="${item.link}" style="border:none;background:transparent;color:#666;font-size:13px;">取消收藏</button>
-            </div>
-        </div>`;
-    }else{
-        const isCollected = favList.some(f=>f.link === item.link);
-        const favTxt = isCollected ? "已收藏" : "收藏";
-        const favColor = isCollected ? "#ff9500" : "#666";
-        return `
-        <div class="tweet-card" data-link="${item.link}">
-            <div class="card-top">
-                <div class="card-avatar">${item.sourceName.slice(0,1)}</div>
-                <div class="source-name-text">${item.sourceName}</div>
-            </div>
-            <div class="card-middle">
-                <a class="card-title" target="_blank" href="${item.link}">${item.title}</a>
-                ${mediaHtml}
-            </div>
-            <div class="card-bottom" style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
-                <span style="font-size:12px;color:#666;">${item.date}</span>
-                <button class="fav-btn" data-link="${item.link}" style="border:none;background:transparent;color:${favColor};font-size:13px;">${favTxt}</button>
-            </div>
-        </div>`;
-    }
+        </div>
+    </div>`;
 }
 
-function bindImageClick(){
+// 绑定卡片全部事件：图片预览、标题展开、下载、收藏
+function bindAllCardEvent(){
+    // 图片点击预览、滑动切换
     document.querySelectorAll(".grid-img").forEach(img=>{
         img.onclick = function(){
-            document.getElementById("previewImg").src = this.src;
-            document.getElementById("imgPreviewMask").style.display = "flex";
+            const imgs = JSON.parse(this.dataset.imggroup);
+            currentPreviewImgs = imgs;
+            renderPreviewSlider(imgs);
+            imgPreviewMask.style.display = "flex";
         }
     })
-    // 取消收藏：静默更新本地数组，不刷新页面
-    document.querySelectorAll(".del-fav").forEach(btn=>{
+    // 标题展开/收起
+    document.querySelectorAll(".title-toggle-btn").forEach(btn=>{
+        const titleEl = btn.previousElementSibling;
+        // 自动判断文字是否超过两行，超过才显示按钮
+        setTimeout(()=>{
+            if(titleEl.scrollHeight > titleEl.clientHeight){
+                btn.style.display = "block";
+            }
+        },10)
         btn.onclick = function(){
-            const link = this.dataset.link;
-            favList = favList.filter(f=>f.link !== link);
-            localStorage.setItem(FAV_KEY, JSON.stringify(favList));
-            // 仅移除当前卡片DOM，无全局刷新
-            this.closest(".tweet-card").remove();
+            if(titleEl.classList.contains("expand")){
+                titleEl.classList.remove("expand");
+                this.innerText = "展开";
+            }else{
+                titleEl.classList.add("expand");
+                this.innerText = "收起";
+            }
         }
     })
-    // 收藏按钮：静默更新本地数组，不刷新页面
-    document.querySelectorAll(".fav-btn").forEach(btn=>{
+    // 下载按钮
+    document.querySelectorAll(".btn-download").forEach(btn=>{
+        btn.onclick = function(){
+            const imgs = JSON.parse(this.dataset.img);
+            const videos = JSON.parse(this.dataset.video);
+            if(videos.length > 0){
+                downloadFile(videos[0], "video.mp4");
+                return;
+            }
+            if(imgs.length === 1){
+                downloadFile(imgs[0], "image.jpg");
+            }else if(imgs.length > 1){
+                alert("多图请长按单张图片保存");
+            }else{
+                alert("无媒体资源可下载");
+            }
+        }
+    })
+    // 收藏静默操作
+    document.querySelectorAll(".btn-fav").forEach(btn=>{
         btn.onclick = function(){
             const link = this.dataset.link;
             const target = allArticles.find(i=>i.link === link);
             if(target && !favList.some(f=>f.link === link)){
                 favList.push(target);
                 localStorage.setItem(FAV_KEY, JSON.stringify(favList));
-                // 仅修改按钮文字颜色，无页面刷新
                 this.innerText = "已收藏";
-                this.style.color = "#ff9500";
+                this.classList.add("collected");
             }
+        }
+    })
+    // 取消收藏静默移除卡片
+    document.querySelectorAll(".del-fav").forEach(btn=>{
+        btn.onclick = function(){
+            const link = this.dataset.link;
+            favList = favList.filter(f=>f.link !== link);
+            localStorage.setItem(FAV_KEY, JSON.stringify(favList));
+            this.closest(".tweet-card").remove();
         }
     })
 }
 
-// 批量加载所有RSS，自动切换代理
+// 渲染预览滑动容器
+function renderPreviewSlider(imgs){
+    previewWrap.innerHTML = "";
+    imgs.forEach(src=>{
+        const slide = document.createElement("div");
+        slide.className = "preview-slide";
+        slide.innerHTML = `<img class="preview-img" src="${src}">`;
+        previewWrap.appendChild(slide);
+    })
+    previewTip.innerText = "";
+    bindPreviewScroll();
+}
+// 预览滑动监听首尾提示
+function bindPreviewScroll(){
+    previewWrap.onscroll = function(){
+        const scrollX = this.scrollLeft;
+        const width = this.clientWidth;
+        const totalW = this.scrollWidth;
+        if(scrollX <= 10){
+            previewTip.innerText = "这是第一张";
+        }else if(scrollX + width >= totalW - 10){
+            previewTip.innerText = "这是最后一张啦";
+        }else{
+            previewTip.innerText = "";
+        }
+    }
+}
+previewClose.onclick = ()=> imgPreviewMask.style.display = "none";
+
+// 下载文件工具
+function downloadFile(url, name){
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+}
+
+// 批量加载RSS
 async function loadAllRSS(){
     const taskList = feedList.map(async f=>{
         try{
@@ -601,64 +747,50 @@ async function loadAllRSS(){
     const allGroups = await Promise.all(taskList);
     let res = [];
     allGroups.forEach(group=>res = res.concat(group));
-    // 按发布时间倒序排序
     res.sort((a,b)=> new Date(b.date).getTime() - new Date(a.date).getTime());
     return res;
 }
 
-// 兼容标准RSS / Atom 双格式解析函数
+// RSS/Atom兼容解析
 function parseRSS(xml, sourceName, sourceUrl, cat){
     let list = [];
     const itemReg = /<(item|entry)>([\s\S]*?)<\/(item|entry)>/gi;
     let m;
     while((m = itemReg.exec(xml)) !== null){
         let txt = m[2];
-        // 标题兼容
         let title = (txt.match(/<title>([\s\S]*?)<\/title>/) || [])[1] || "无标题";
-        // 链接兼容两种写法
         let link = "";
         const linkHref = txt.match(/<link[^>]*href="([^"]+)"/);
         if(linkHref) link = linkHref[1];
         if(!link) link = (txt.match(/<guid>([\s\S]*?)<\/guid>/) || [])[1] || "#";
-        // 日期兼容 pubDate / updated
         let date = (txt.match(/<pubDate>([\s\S]*?)<\/pubDate>/) || [])[1] || "";
         if(!date) date = (txt.match(/<updated>([\s\S]*?)<\/updated>/) || [])[1] || "未知时间";
-        // 正文兼容 description / summary
         let desc = (txt.match(/<description>([\s\S]*?)<\/description>/) || [])[1] || "";
         if(!desc) desc = (txt.match(/<summary>([\s\S]*?)<\/summary>/) || [])[1] || "";
-
-        // 提取MP4视频链接
         let videos = [];
         const videoReg = /https?:\/\/[^\s"']+\.mp4/gi;
         let vMatch;
-        while((vMatch = videoReg.exec(txt + desc)) !== null){
-            videos.push(vMatch[0]);
-        }
-        // 提取图片 jpg/png/webp/gif
+        while((vMatch = videoReg.exec(txt + desc)) !== null) videos.push(vMatch[0]);
         let imgsRaw = [];
         const imgReg = /https?:\/\/[^\s"']+\.(jpg|jpeg|png|gif|webp)/gi;
         let imgMatch;
-        while((imgMatch = imgReg.exec(txt + desc)) !== null){
-            imgsRaw.push(imgMatch[0]);
-        }
+        while((imgMatch = imgReg.exec(txt + desc)) !== null) imgsRaw.push(imgMatch[0]);
         const imgs = [...new Set(imgsRaw)];
         list.push({
             title: decodeXml(title),
             link: decodeXml(link),
             date: decodeXml(date),
-            media:{imgs:imgs,videos:videos},
-            sourceName,
-            sourceUrl
+            media:{imgs,videos},
+            sourceName,sourceUrl
         })
     }
     return list;
 }
-// XML特殊字符转义还原
 function decodeXml(s){
     return s.replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&amp;/g,"&").replace(/&quot;/g,"\"");
 }
 
-// 添加订阅按钮逻辑
+// 添加订阅
 document.getElementById("confirmAdd").onclick = function(){
     const name = document.getElementById("feedName").value.trim();
     const cat = document.getElementById("feedCat").value;
@@ -671,31 +803,26 @@ document.getElementById("confirmAdd").onclick = function(){
     document.getElementById("feedUrl").value = "";
     alert("添加成功，点击主页加载内容");
 }
-// 编辑订阅保存
+// 编辑保存
 document.getElementById("saveEdit").onclick = function(){
     const idx = Number(document.getElementById("editIndex").value);
     const name = document.getElementById("editName").value.trim();
     const cat = document.getElementById("editCat").value;
     const url = document.getElementById("editUrl").value.trim();
     const oldUrl = feedList[idx].url;
-    if(feedList.some((f,i)=>i!==idx && f.url === url)){
-        alert("该RSS链接已存在");return;
-    }
+    if(feedList.some((f,i)=>i!==idx && f.url === url)){alert("该RSS链接已存在");return;}
     feedList[idx].name = name;
     feedList[idx].category = cat;
     feedList[idx].url = url;
     localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
-    // 同步更新收藏内旧链接
-    favList.forEach(item=>{
-        if(item.sourceUrl === oldUrl) item.sourceUrl = url;
-    })
+    favList.forEach(item=>{if(item.sourceUrl === oldUrl) item.sourceUrl = url;})
     localStorage.setItem(FAV_KEY, JSON.stringify(favList));
     editModal.style.display = "none";
     renderManage();
 }
 document.getElementById("cancelEdit").onclick = ()=>editModal.style.display = "none";
 
-// 导入导出备份
+// 导入导出
 document.getElementById("importFeed").onclick = ()=>document.getElementById("importFileInput").click();
 document.getElementById("importFileInput").onchange = function(e){
     const file = e.target.files[0];
@@ -706,8 +833,7 @@ document.getElementById("importFileInput").onchange = function(e){
             let addNum = 0;
             data.forEach(item=>{
                 if(item.url && !feedList.some(f=>f.url === item.url)){
-                    feedList.push(item);
-                    addNum++;
+                    feedList.push(item);addNum++;
                 }
             })
             localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
@@ -723,9 +849,7 @@ document.getElementById("exportAllBtn").onclick = function(){
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = "rss订阅备份.json";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    document.body.appendChild(a);a.click();a.remove();
 }
 document.getElementById("delAllFeed").onclick = function(){
     if(confirm("确定清空全部订阅？收藏不会同步删除")){
@@ -733,10 +857,6 @@ document.getElementById("delAllFeed").onclick = function(){
         localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
         renderManage();
     }
-}
-// 图片预览关闭
-document.getElementById("previewClose").onclick = ()=>{
-    document.getElementById("imgPreviewMask").style.display = "none";
 }
 
 window.onload = function(){
