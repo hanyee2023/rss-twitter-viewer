@@ -5,223 +5,249 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>本地RSS媒体阅读器</title>
 <style>
-*{
-    margin:0;
-    padding:0;
-    box-sizing:border-box;
-    font-family:system-ui,-apple-system,Segoe UI,Roboto;
-    transition:none !important;
-    animation:none !important;
+*{margin:0;padding:0;box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto;}
+html {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
-body{background:#f5f5f5;color:#111;max-width:100%;margin:0 auto;padding-bottom:100px}
+body{background:#f5f5f5;color:#111;min-height:100vh;}
 #mainHeader{
     position:fixed;
     top:0;
     left:0;
     width:100%;
-    z-index:999;
-    pointer-events:none;
-}
-#headerInner{
+    height:66px;
     background:#fff;
-    padding:6px 10px;
     border-bottom:1px solid #eee;
-    pointer-events:auto;
+    z-index:999;
+    padding:5px 10px;
 }
-#mainHeader.hide-header #headerInner{
-    transform:translateY(0);
-}
-h1{font-size:18px;margin-bottom:6px;color:#000}
-.top-bar{
-    display:flex;
-    flex-wrap:wrap;
-    gap:6px;
-    align-items:center;
-    margin-bottom:6px;
-}
-@media (max-width:768px){
-    .top-bar{
-        flex-wrap:nowrap;
-        overflow-x:auto;
-        padding-bottom:3px;
-    }
-    .top-bar::-webkit-scrollbar{height:2px}
-    .top-bar::-webkit-scrollbar-thumb{background:#ccc;border-radius:3px}
-}
-button{
-    position:relative;
+#pageTitle{font-size:22px;margin-bottom:6px;font-weight:600;}
+.top-bar{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;}
+.top-bar button{
+    border:none;
+    padding:8px 14px;
+    border-radius:999px;
+    font-size:16px;
     background:#1d9bf0;
     color:#fff;
-    border:none;
-    padding:8px 8px;
-    border-radius:999px;
-    cursor:pointer;
-    font-size:13px;
     white-space:nowrap;
-    min-height:34px;
-    flex-shrink:0;
 }
-button.active{background:#28a745}
-button.danger{background:#f4212e}
-button.edit{background:#ffc107;color:#000}
-button.del-all{background:#c0392b;}
-button:disabled{opacity:0.5;cursor:not-allowed;}
-#importFeed,#exportAllBtn{
-    background:#ff7823;
-    z-index:10;
+.top-bar button.active{background:#28a745;}
+.main-wrap{
+    margin-top:70px;
+    padding:12px 10px;
+    min-height:calc(100vh - 70px);
 }
-@media (min-width:769px){
-    button{min-width:80px;}
+.page-home,.page-manage,.page-add,.page-fav{display:none;}
+.feed-top-op{
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+    justify-content:center;
+    margin-bottom:14px;
 }
-@media (max-width:768px){
-    button{min-width:64px;padding:8px 6px;}
+#importFeed{background:#ff7823;color:#fff;border:none;padding:8px 16px;border-radius:999px;font-size:15px;}
+#exportAllBtn{background:#b388eb;color:#fff;border:none;padding:8px 16px;border-radius:999px;font-size:15px;}
+#delAllFeed{background:#c0392b;color:#fff;border:none;padding:8px 16px;border-radius:999px;font-size:15px;}
+.feed-list{border:1px solid #eee;border-radius:10px;background:#fff;}
+.feed-item{
+    padding:12px;
+    border-bottom:1px solid #eee;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    flex-wrap:wrap;
+    gap:10px;
 }
+.feed-item.type-img{background:#d4edda22;}
+.feed-item.type-video{background:#ffe6e622;}
+.feed-item:last-child{border-bottom:none;}
 .feed-btn-group button{
-    padding:5px 6px;
-    min-height:30px;
-    min-width:65px;
-    font-size:11px;
+    border:none;
+    padding:6px 10px;
+    border-radius:999px;
+    font-size:13px;
+    color:#fff;
+    margin:0 3px;
 }
-.feed-btn-group .view-feed{position:relative;}
-.feed-btn-group .view-feed .unread-badge{
-    position:absolute;
-    top:-6px;
-    right:-8px;
-    font-size:12px;
-    color:#f4212e;
-    font-weight:bold;
-    display:none;
+.feed-btn-group .view-feed{background:#1d9bf0;}
+.feed-btn-group .edit{background:#ff9500;}
+.feed-btn-group .del{background:#e53e3e;}
+.add-feed-row{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px;}
+.add-feed-row input,.add-feed-row select{
+    flex:1;
+    min-width:160px;
+    padding:12px;
+    border:1px solid #ddd;
+    border-radius:8px;
+    font-size:16px;
 }
-.feed-btn-group .view-feed .unread-badge.show{
-    display:block;
+#confirmAdd{background:#1d9bf0;color:#fff;border:none;padding:0 20px;border-radius:8px;font-size:16px;}
+.empty-tip{text-align:center;padding:120px 10px;color:#777;font-size:18px;}
+.error-tip{text-align:center;padding:40px 10px;color:#c0392b;font-size:16px;margin-bottom:12px;}
+.update-tip-bar{
+    background:#e6f7ff;
+    border:1px solid #91caff;
+    border-radius:12px;
+    padding:14px;
+    text-align:center;
+    color:#0050b3;
+    margin-bottom:12px;
+    cursor:pointer;
+    font-size:16px;
 }
-#homeBadge{
-    position:absolute;
-    top:-6px;
-    right:-8px;
-    font-size:12px;
-    color:#f4212e;
-    font-weight:bold;
-    display:none;
+.no-update-tip{
+    background:#f0f2f5;
+    border:1px solid #dcdcdc;
+    border-radius:12px;
+    padding:14px;
+    text-align:center;
+    color:#666;
+    margin-bottom:12px;
+    font-size:16px;
 }
-#homeBadge.show{
-    display:block;
-}
-.card-title{
-    font-size:16px;font-weight:500;color:#111;
-    text-decoration:none;display:block;margin-bottom:6px;
-}
-.card-bottom{
-    display:flex;justify-content:space-between;
-    align-items:center;flex-wrap:wrap;gap:8px;
-}
-.card-buttons{
-    display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;
-}
-.card-time{font-size:12px;color:#666}
-.card-icon-btn{background:none;border:none;color:#666;cursor:pointer;font-size:14px;padding:4px}
-.card-icon-btn.fav{color:#ff9500}
-.add-feed-row{display:flex;flex-wrap:wrap;gap:8px;width:100%;margin-top:8px;display:none;padding:0 10px}
-.add-feed-row input{flex:1;min-width:140px;background:#fff;border:1px solid #ddd;color:#111;padding:9px 12px;border-radius:8px;outline:none}
-.add-feed-row input:focus{border-color:#1d9bf0}
-.feed-list{margin:8px;border:1px solid #eee;border-radius:10px;overflow:visible;display:none}
-.feed-item{display:flex;justify-content:space-between;align-items:center;padding:9px;border-bottom:1px solid #eee;gap:8px;flex-wrap:wrap}
-.feed-item:last-child{border:none}
-.feed-info{flex:1;display:flex;flex-direction:column;gap:4px}
-.feed-name{font-size:16px;font-weight:600}
-.feed-btn-group{display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap}
-.modal-mask{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);display:flex;align-items:center;justify-content:center;z-index:9999;display:none;padding:10px}
-.modal-box{width:100%;max-width:500px;background:#fff;padding:16px;border-radius:12}
-.modal-box h3{margin-bottom:12px}
-.modal-box input{width:100%;margin-bottom:10px;padding:10px;border:1px solid #ddd;border-radius:8px}
-.modal-btn-bar{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
-.article-stream{
-    margin-top:calc(6px + 34px + 6px + 24px);
-    padding:0 10px;
-    overflow-y:auto;
-    height:100vh;
-    padding-bottom:120px;
+.load-more-tip{
+    text-align:center;padding:18px 0;color:#888;font-size:14px;
 }
 .tweet-card{
-    width:100%;
-    max-width:720px;
-    margin:0 auto 12px auto;
     background:#fff;
     border:1px solid #cce0f5;
     border-radius:16px;
-    padding:12px;
+    padding:16px;
+    margin-bottom:12px;
+}
+.card-top{
     display:flex;
-    flex-direction:column;
-    gap:12px;
+    align-items:center;
+    gap:10px;
+    margin-bottom:10px;
 }
-.card-top{display:flex;align-items:center;gap:10px;}
 .card-avatar{
-    width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:bold;font-size:14px;flex-shrink:0;
+    width:40px;
+    height:40px;
+    border-radius:50%;
     background:#45B7D1;
+    color:#fff;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-weight:bold;
+    font-size:18px;
+    flex-shrink:0;
 }
-.card-source-title{font-size:14px;font-weight:bold;color:#222;}
-.img-grid-wrap{width:100%;border-radius:12px;overflow:hidden;background:#f0f0f0;}
-.img-grid{display:grid;gap:2px;}
-.grid-img-box{width:100%;aspect-ratio:1 / 1;overflow:hidden;}
-.grid-img{width:100%;height:100%;object-fit:cover;display:block;cursor:zoom-in;}
-.expand-btn{width:100%;text-align:center;padding:8px;background:#eee;border:none;font-size:14px;cursor:pointer;}
-.video-single-wrap{width:100%;border-radius:12px;overflow:hidden;background:#000;margin-bottom:8px;min-height:160px;}
-.media-video{width:100%;display:block;object-fit:cover;min-height:160px;}
-.empty-tip{text-align:center;padding:40px 10px;color:#777;font-size:14px}
-.bottom-tip{text-align:center;padding:20px 0;color:#999;font-size:13px;}
-.fav-panel{margin:8px 0;display:none}
-.feed-top-op{margin:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+.source-name-text{
+    font-size:18px;
+    font-weight:600;
+    color:#111;
+}
+/* 修复：卡片标题链接去除下划线 */
+.card-title{
+    font-size:16px;
+    font-weight:normal;
+    color:#000;
+    display:-webkit-box;
+    -webkit-line-clamp:2;
+    overflow:hidden;
+    line-height:1.5;
+    text-decoration:none;
+}
+.img-grid-wrap{border-radius:12px;overflow:hidden;background:#f0f0f0;margin:8px 0;}
+.img-grid{display:grid;grid-template-columns:1fr 1fr;gap:3px;}
+.grid-img-box{aspect-ratio:1/1;}
+.grid-img{width:100%;height:100%;object-fit:cover;display:block;}
+.video-single-wrap{width:100%;border-radius:12px;overflow:hidden;background:#000;margin:8px 0;}
+.media-video{width:100%;display:block;}
+.bottom-tip{text-align:center;padding:22px 0;color:#999;font-size:13px;}
+.modal-mask{
+    position:fixed;inset:0;background:rgba(0,0,0,0.9);display:none;
+    align-items:center;justify-content:center;z-index:9999;padding:15px;
+}
+.modal-box{width:100%;max-width:520px;background:#fff;padding:20px;border-radius:12px;}
+.modal-box input,.modal-box select{width:100%;margin-bottom:12px;padding:12px;border:1px solid #ddd;border-radius:8px;font-size:16px;}
+/* 美化弹窗按钮，匹配全局风格 */
+.modal-btn-bar{display:flex;gap:12px;justify-content:flex-end;margin-top:14px;}
+#cancelEdit{
+    border:none;
+    padding:10px 22px;
+    border-radius:999px;
+    font-size:16px;
+    background:#6c757d;
+    color:#fff;
+}
+#saveEdit{
+    border:none;
+    padding:10px 22px;
+    border-radius:999px;
+    font-size:16px;
+    background:#28a745;
+    color:#fff;
+}
 .img-preview-mask{
-    position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:9999;
-    display:none;align-items:center;justify-content:center;touch-action:none;
+    position:fixed;inset:0;background:rgba(0,0,0,0.95);display:none;
+    align-items:center;justify-content:center;z-index:9999;
 }
-.img-preview-box{width:100%;height:100%;display:flex;align-items:center;justify-content:center;position:relative;}
-.preview-img{max-width:90%;max-height:90%;}
-.preview-close{position:absolute;top:24px;right:24px;color:#fff;font-size:32px;cursor:pointer;}
-.preview-prev,.preview-next{position:absolute;color:#fff;font-size:40px;cursor:pointer;padding:0 16px;}
-.preview-prev{left:12px}
-.preview-next{right:12px}
+.preview-close{position:absolute;top:24px;right:24px;color:#fff;font-size:32px;border:none;background:transparent;cursor:pointer;}
+.preview-img{max-width:95vw;max-height:95vh;object-fit:contain;}
 .tip-toast{
-    position:absolute;bottom:120px;left:50%;transform:translateX(-50%);
-    background:rgba(0,0,0,0.6);color:#fff;padding:8px 16px;border-radius:20px;font-size:14px;display:none;
+    position:absolute;bottom:100px;left:50%;transform:translateX(-50%);
+    background:rgba(0,0,0,0.65);color:#fff;padding:10px 20px;border-radius:22px;display:none;font-size:15px;
+}
+/* 手机屏幕适配 */
+@media (max-width:768px){
+  .top-bar button{padding:10px 16px;font-size:17px;}
+  .tweet-card{padding:16px;}
+  #pageTitle{font-size:20px;}
+  .modal-btn-bar{justify-content:center;}
+  #cancelEdit,#saveEdit{flex:1;text-align:center;}
 }
 </style>
 </head>
 <body>
 <header id="mainHeader">
-    <div id="headerInner">
-        <h1 id="pageTitle">本地RSS媒体阅读器</h1>
-        <div class="top-bar">
-            <button id="btnHome">主页
-                <span id="homeBadge"></span>
-            </button>
-            <button id="btnManage">管理订阅源</button>
-            <button id="btnAdd">添加订阅</button>
-            <button id="btnFav">我的收藏</button>
-        </div>
-        <div class="add-feed-row" id="addFeedBox">
-            <input id="feedName" placeholder="自定义订阅名称（可选）">
-            <input id="feedCat" placeholder="分类标签（可选，如：摄影、动漫）">
-            <input id="feedUrl" placeholder="输入RSS订阅链接">
-            <button id="confirmAdd">确认添加</button>
-        </div>
-        <div class="feed-top-op" id="feedTopOp" style="display:none">
-            <button id="importFeed">一键导入</button>
-            <button id="exportAllBtn">一键导出</button>
-            <button id="delAllFeed" class="del-all">一键删除全部</button>
-            <input type="file" id="importFileInput" accept=".json" style="display:none">
-        </div>
-        <div class="feed-list" id="feedPanel"></div>
-        <div class="fav-panel" id="favPanel"></div>
+    <h1 id="pageTitle">本地RSS媒体阅读器</h1>
+    <div class="top-bar">
+        <button id="btnHome">主页</button>
+        <button id="btnManage">管理订阅源</button>
+        <button id="btnAdd">添加订阅</button>
+        <button id="btnFav">我的收藏</button>
     </div>
 </header>
-<div class="article-stream" id="articleBox"></div>
+<div class="main-wrap">
+    <div class="page-home" id="pageHome">
+        <div id="articleBox"></div>
+    </div>
+    <div class="page-manage" id="pageManage">
+        <div class="feed-top-op">
+            <button id="importFeed">一键导入</button>
+            <button id="exportAllBtn">导出备份</button>
+            <button id="delAllFeed">清空全部订阅</button>
+            <input type="file" id="importFileInput" accept=".json" style="display:none;">
+        </div>
+        <div class="feed-list" id="feedPanel"></div>
+    </div>
+    <div class="page-add" id="pageAdd">
+        <div class="add-feed-row">
+            <input id="feedName" placeholder="自定义订阅名称（可选）">
+            <select id="feedCat">
+                <option value="img">图片类RSS</option>
+                <option value="video">视频类RSS</option>
+            </select>
+            <input id="feedUrl" placeholder="粘贴标准RSS订阅链接">
+            <button id="confirmAdd">确认添加</button>
+        </div>
+    </div>
+    <div class="page-fav" id="pageFav"><div id="favPanel"></div></div>
+</div>
 <div class="modal-mask" id="editModal">
     <div class="modal-box">
         <h3>编辑订阅源</h3>
         <input id="editIndex" type="hidden">
         <input id="editName" placeholder="自定义订阅名称">
-        <input id="editCat" placeholder="分类标签">
+        <select id="editCat">
+            <option value="img">图片类RSS</option>
+            <option value="video">视频类RSS</option>
+        </select>
         <input id="editUrl" placeholder="RSS订阅链接">
         <div class="modal-btn-bar">
             <button id="cancelEdit">取消</button>
@@ -230,627 +256,492 @@ button:disabled{opacity:0.5;cursor:not-allowed;}
     </div>
 </div>
 <div class="img-preview-mask" id="imgPreviewMask">
-    <div class="img-preview-box" id="previewBox">
-        <span class="preview-close" id="previewClose">×</span>
-        <span class="preview-prev" id="previewPrev">&lt;</span>
-        <img class="preview-img" id="previewImg" src="" alt="">
-        <span class="preview-next" id="previewNext">&gt;</span>
+    <div style="position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center;">
+        <button class="preview-close" id="previewClose">×</button>
+        <img class="preview-img" id="previewImg" alt="">
         <div class="tip-toast" id="slideTip"></div>
     </div>
 </div>
 <script>
-const PROXY = "https://corsproxy.io/?";
-const FEED_STORAGE_KEY = "local_rss_feeds";
-const FAV_STORAGE_KEY = "rss_fav_list";
-const READ_STORAGE_KEY = "rss_read_links";
-// 图片格式全量大小写覆盖
-const IMG_EXT = ["jpg","jpeg","png","gif","webp","JPG","JPEG","PNG","GIF","WEBP"];
-const VIDEO_EXT = ["mp4","MP4"];
+const FEED_KEY = "local_rss_feeds";
+const FAV_KEY = "rss_fav_list";
+const PAGE_SIZE = 50;
+const FETCH_TIMEOUT = 4000; // 4秒超时，适配手机弱网
+let feedList = JSON.parse(localStorage.getItem(FEED_KEY)) || [];
+let favList = JSON.parse(localStorage.getItem(FAV_KEY)) || [];
+let currentArticles = [];
+let renderPageNum = 0;
+let allArticles = [];
+let scrollObserver = null;
 
-let feedList = JSON.parse(localStorage.getItem(FEED_STORAGE_KEY)) || [];
-let favList = JSON.parse(localStorage.getItem(FAV_STORAGE_KEY)) || [];
-let readLinks = JSON.parse(localStorage.getItem(READ_STORAGE_KEY)) || [];
-
-const articleBox = document.getElementById("articleBox");
-const feedPanel = document.getElementById("feedPanel");
-const addFeedBox = document.getElementById("addFeedBox");
-const toggleAddBtn = document.getElementById("btnAdd");
-const manageBtn = document.getElementById("btnManage");
-const editModal = document.getElementById("editModal");
-const favPanel = document.getElementById("favPanel");
-const toggleFavBtn = document.getElementById("btnFav");
-const refreshAllBtn = document.getElementById("btnHome");
-const allNavBtns = [refreshAllBtn, manageBtn, toggleAddBtn, toggleFavBtn];
-const feedTopOp = document.getElementById("feedTopOp");
-const importFeedBtn = document.getElementById("importFeed");
-const exportAllBtn = document.getElementById("exportAllBtn");
-const delAllFeedBtn = document.getElementById("delAllFeed");
-const importFileInput = document.getElementById("importFileInput");
-const pageTitle = document.getElementById("pageTitle");
-const homeBadge = document.getElementById("homeBadge");
-const imgPreviewMask = document.getElementById("imgPreviewMask");
-const previewImg = document.getElementById("previewImg");
-const previewClose = document.getElementById("previewClose");
-const previewPrev = document.getElementById("previewPrev");
-const previewNext = document.getElementById("previewNext");
-const previewBox = document.getElementById("previewBox");
-const slideTip = document.getElementById("slideTip");
-
-let previewImages = [];
-let previewIndex = 0;
-let currentFilterFeedUrl = null;
-let currentUnreadItems = [];
-let currentPageType = "home";
-
-importFeedBtn.onclick = ()=>importFileInput.click();
-exportAllBtn.onclick = function(){
-    const jsonStr = JSON.stringify(feedList, null, 2);
-    const blob = new Blob([jsonStr], {type:"application/json"});
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "rss全部订阅_"+Date.now()+".json";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(a.href);
-}
-delAllFeedBtn.onclick = function(){
-    if(!confirm("确定删除所有订阅、收藏、已读记录？删除无法恢复！")) return;
-    feedList.length = 0;
-    favList.length = 0;
-    readLinks.length = 0;
-    localStorage.removeItem(FEED_STORAGE_KEY);
-    localStorage.removeItem(FAV_STORAGE_KEY);
-    localStorage.removeItem(READ_STORAGE_KEY);
-    renderFeedList();
-    alert("全部数据已清空");
-}
-
-previewBox.addEventListener("touchstart", e=>{
-    const touchStartX = e.changedTouches[0].screenX;
-    previewBox.ontouchend = e=>{
-        const touchEndX = e.changedTouches[0].screenX;
-        const diff = touchEndX - touchStartX;
-        const threshold = 60;
-        if(Math.abs(diff) < threshold) return;
-        if(diff > 0){
-            if(previewIndex === 0){showTip("已是第一张啦");return;}
-            previewIndex--;previewImg.src = previewImages[previewIndex];
-        }else{
-            if(previewIndex === previewImages.length -1){showTip("已是最后一张啦");return;}
-            previewIndex++;previewImg.src = previewImages[previewIndex];
+// ====================== 多代理池配置（6个备用公共CORS代理，自动轮换） ======================
+const PROXY_POOL = [
+    "https://api.codetabs.com/v1/proxy?quest=",
+    "https://staging.corsproxy.io/?",
+    "https://cors-proxy.htmldriven.com/?url=",
+    "https://proxy.cors.sh/",
+    "https://api.cors.lol/?url=",
+    "https://whateverorigin.org/get?url="
+];
+// 自动切换代理请求函数：遍历全部代理直到成功，全部失败返回空数组
+async function fetchWithAutoProxy(targetUrl) {
+    const encodedUrl = encodeURIComponent(targetUrl);
+    for (const proxyPrefix of PROXY_POOL) {
+        const fullUrl = proxyPrefix + encodedUrl;
+        try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+            const res = await fetch(fullUrl, { signal: controller.signal });
+            clearTimeout(timer);
+            if (res.ok) {
+                const text = await res.text();
+                // whateverorigin特殊格式处理
+                if (proxyPrefix.includes("whateverorigin")) {
+                    const json = JSON.parse(text);
+                    return json.contents || "";
+                }
+                return text;
+            }
+        } catch (err) {
+            console.log(`代理 ${proxyPrefix} 请求失败，自动切换下一个`);
+            continue;
         }
     }
-});
-function showTip(text){
-    slideTip.textContent = text;
-    slideTip.style.display = "block";
-    setTimeout(()=>slideTip.style.display = "none",1200);
+    // 所有代理全部失效
+    return "";
 }
-previewNext.onclick = ()=>{
-    if(previewIndex === previewImages.length -1){showTip("已是最后一张啦");return;}
-    previewIndex++;previewImg.src = previewImages[previewIndex];
-}
-previewPrev.onclick = ()=>{
-    if(previewIndex === 0){showTip("已是第一张啦");return;}
-    previewIndex--;previewImg.src = previewImages[previewIndex];
-}
-previewClose.onclick = ()=>imgPreviewMask.style.display = "none";
+// ======================================================================================
 
-function setActiveNav(btnDom){
-    allNavBtns.forEach(b=>b.classList.remove("active"));
-    btnDom.classList.add("active");
-}
-function getRandomBg(){
-    const c = ["#FF6B6B","#4ECDC4","#45B7D1","#FFA07A","#98D8C8","#F7DC6F","#BB8FCE","#85C1E9"];
-    return c[Math.floor(Math.random()*c.length)];
-}
-function saveRead(){localStorage.setItem(READ_STORAGE_KEY, JSON.stringify(readLinks));}
-function markRead(link){if(!readLinks.includes(link)){readLinks.push(link);saveRead();}}
-function saveFav(){localStorage.setItem(FAV_STORAGE_KEY, JSON.stringify(favList));}
-function saveFeeds(){localStorage.setItem(FEED_STORAGE_KEY, JSON.stringify(feedList));}
+const pageHome = document.getElementById("pageHome");
+const pageManage = document.getElementById("pageManage");
+const pageAdd = document.getElementById("pageAdd");
+const pageFav = document.getElementById("pageFav");
+const articleBox = document.getElementById("articleBox");
+const feedPanel = document.getElementById("feedPanel");
+const favPanel = document.getElementById("favPanel");
+const btnHome = document.getElementById("btnHome");
+const btnManage = document.getElementById("btnManage");
+const btnAdd = document.getElementById("btnAdd");
+const btnFav = document.getElementById("btnFav");
+const pageTitle = document.getElementById("pageTitle");
+const allBtns = [btnHome, btnManage, btnAdd, btnFav];
+const editModal = document.getElementById("editModal");
 
-feedPanel.addEventListener("click", function(e){
-    const t = e.target;
-    if(t.classList.contains("view-feed")) loadSingleFeedItems(t.dataset.url, t.dataset.name);
-    if(t.classList.contains("edit")){
-        const idx = Number(t.dataset.idx);
-        const f = feedList[idx];
-        document.getElementById("editIndex").value = idx;
-        document.getElementById("editName").value = f.name||"";
-        document.getElementById("editCat").value = f.category||"";
-        document.getElementById("editUrl").value = f.url;
-        editModal.style.display = "flex";
-    }
-    if(t.classList.contains("danger")){
-        const idx = Number(t.dataset.idx);
-        const delUrl = feedList[idx].url;
-        feedList.splice(idx,1);
-        saveFeeds();
-        favList = favList.filter(x=>x.sourceUrl !== delUrl);
-        saveFav();
-        readLinks = readLinks.filter(l=>!favList.some(f=>f.link===l&&f.sourceUrl===delUrl));
-        saveRead();
-        renderFeedList();
-    }
-})
-
-function hideAllPanels(){
-    addFeedBox.style.display = "none";
-    feedPanel.style.display = "none";
-    feedTopOp.style.display = "none";
-    favPanel.style.display = "none";
-}
-
-toggleFavBtn.onclick = function(){
-    setActiveNav(this);
-    currentPageType = "fav";
-    hideAllPanels();
-    articleBox.style.display = "block";
-    articleBox.innerHTML = "";
-    articleBox.appendChild(favPanel);
-    favPanel.style.display = "block";
-    pageTitle.textContent = "我的收藏";
-    renderFavPanel();
-}
-toggleAddBtn.onclick = function(){
-    setActiveNav(this);
-    currentPageType = "add";
-    hideAllPanels();
-    articleBox.style.display = "none";
-    addFeedBox.style.display = "flex";
-    pageTitle.textContent = "添加订阅源";
-}
-manageBtn.onclick = function(){
-    setActiveNav(this);
-    currentPageType = "manage";
-    hideAllPanels();
-    articleBox.style.display = "block";
-    articleBox.innerHTML = "";
-    articleBox.appendChild(feedPanel);
-    feedPanel.style.display = "block";
-    feedTopOp.style.display = "flex";
-    pageTitle.textContent = "管理订阅源";
-    renderFeedList();
-}
-
-async function calcAllUnread(){
-    let all = [];
-    for(const f of feedList){
-        try{
-            const txt = await fetchRssFeed(f.url);
-            all = all.concat(parseRSSRawText(txt, f.name, f.url));
-        }catch(e){}
-    }
-    const unread = all.filter(item=>!readLinks.includes(item.link));
-    return {allArticles:all, unread};
-}
-
-refreshAllBtn.onclick = async function(){
-    setActiveNav(this);
-    currentPageType = "home";
-    hideAllPanels();
-    articleBox.style.display = "block";
-    articleBox.innerHTML = `<div class="empty-tip">加载中...</div>`;
-    pageTitle.textContent = "本地RSS媒体阅读器";
-    homeBadge.classList.remove("show");
-    homeBadge.textContent = "";
-    if(feedList.length === 0){
-        articleBox.innerHTML = `<div class="empty-tip">暂无订阅源，请点击【添加订阅】输入RSS链接</div>`;
-        return;
-    }
-    const {allArticles, unread} = await calcAllUnread();
-    allArticles.sort((a,b)=>{
-        const ta = a.date ? new Date(a.date).getTime() : 0;
-        const tb = b.date ? new Date(b.date).getTime() : 0;
-        return tb - ta;
-    });
-    currentUnreadItems = unread;
-    if(unread.length > 0){
-        homeBadge.textContent = unread.length;
-        homeBadge.classList.add("show");
-    }
-    renderArticleList(unread);
-}
-
-async function loadSingleFeedItems(targetUrl, feedName){
-    setActiveNav(refreshAllBtn);
-    currentPageType = "home";
-    hideAllPanels();
-    articleBox.style.display = "block";
-    pageTitle.textContent = feedName;
-    currentFilterFeedUrl = targetUrl;
-    articleBox.innerHTML = `<div class="empty-tip">加载中...</div>`;
-    const targetFeed = feedList.find(f=>f.url === targetUrl);
-    if(!targetFeed){
-        articleBox.innerHTML = `<div class="empty-tip">未找到该订阅源</div>`;
-        return;
-    }
-    let itemArr = [];
-    try{
-        const xmlRaw = await fetchRssFeed(targetFeed.url);
-        itemArr = parseRSSRawText(xmlRaw, targetFeed.name, targetFeed.url);
-    }catch(err){
-        articleBox.innerHTML = `<div class="empty-tip">订阅加载失败</div>`;
-        return;
-    }
-    itemArr.sort((a,b)=>{
-        const ta = a.date ? new Date(a.date).getTime() : 0;
-        const tb = b.date ? new Date(b.date).getTime() : 0;
-        return tb - ta;
-    });
-    renderArticleList(itemArr);
-}
-
-function renderFeedList(){
+function showPage(pageEl, title) {
+    pageHome.style.display = "none";
+    pageManage.style.display = "none";
+    pageAdd.style.display = "none";
+    pageFav.style.display = "none";
     feedPanel.innerHTML = "";
+    favPanel.innerHTML = "";
+    pageEl.style.display = "block";
+    pageTitle.textContent = title;
+    allBtns.forEach(b => b.classList.remove("active"));
+    if (title === "本地RSS媒体阅读器") btnHome.classList.add("active");
+    if (title === "管理订阅源") btnManage.classList.add("active");
+    if (title === "添加订阅") btnAdd.classList.add("active");
+    if (title === "我的收藏") btnFav.classList.add("active");
+    if (title === "本地RSS媒体阅读器") handleHomeClick();
+    if (title === "管理订阅源") renderManage();
+    if (title === "我的收藏") renderFav();
+}
+
+btnHome.onclick = () => showPage(pageHome, "本地RSS媒体阅读器");
+btnManage.onclick = () => showPage(pageManage, "管理订阅源");
+btnAdd.onclick = () => showPage(pageAdd, "添加订阅");
+btnFav.onclick = () => showPage(pageFav, "我的收藏");
+
+async function handleHomeClick(){
+    if(scrollObserver) scrollObserver.disconnect();
+    renderPageNum = 0;
+    articleBox.innerHTML = `<div class="empty-tip">正在加载订阅内容，请稍候...</div>`;
     if(feedList.length === 0){
-        feedPanel.innerHTML = "<div style='padding:14px;color:#888'>暂无订阅源</div>";
+        articleBox.innerHTML = `<div class="empty-tip">暂无订阅，请切换至【添加订阅】新增RSS链接</div>`;
         return;
     }
-    const domArr = [];
-    for(let i=0;i<feedList.length;i++){
-        const f = feedList[i];
-        const div = document.createElement("div");
-        div.className = "feed-item";
-        div.dataset.idx = i;
-        div.innerHTML = `
+    try{
+        allArticles = await loadAllRSS();
+    }catch(err){
+        articleBox.innerHTML = `<div class="error-tip">所有代理均请求失败，请稍后重试或更换RSS源</div>`;
+        return;
+    }
+    if(allArticles.length === 0){
+        articleBox.innerHTML = `<div class="empty-tip">所有订阅暂未获取到文章内容，可更换RSS链接重试</div>`;
+        return;
+    }
+    if(currentArticles.length === 0){
+        currentArticles = [...allArticles];
+        renderPageNum = 1;
+        renderPagedList();
+        bindScrollLoadMore();
+        return;
+    }
+    // 复用已缓存数据对比更新，不再重复请求
+    const newItems = allArticles.filter(item => !currentArticles.some(c => c.link === item.link));
+    const tempBox = articleBox.innerHTML;
+    try{
+        if(newItems.length > 0){
+            let html = `<div class="update-tip-bar" onclick="mergeNewData()">检测到${newItems.length}条新内容，点击刷新</div>`;
+            html += renderPartialCardList(currentArticles, renderPageNum * PAGE_SIZE);
+            html += renderPageNum * PAGE_SIZE < currentArticles.length ? `<div class="load-more-tip">滚动加载更多...</div>` : `<div class="bottom-tip">全部内容加载完毕</div>`;
+            articleBox.innerHTML = html;
+        }else{
+            let html = `<div class="no-update-tip">暂无更新内容</div>`;
+            html += renderPartialCardList(currentArticles, renderPageNum * PAGE_SIZE);
+            html += renderPageNum * PAGE_SIZE < currentArticles.length ? `<div class="load-more-tip">滚动加载更多...</div>` : `<div class="bottom-tip">全部内容加载完毕</div>`;
+            articleBox.innerHTML = html;
+        }
+    }catch(err){
+        articleBox.innerHTML = tempBox;
+    }
+    bindScrollLoadMore();
+}
+
+window.mergeNewData = async function(){
+    if(scrollObserver) scrollObserver.disconnect();
+    currentArticles = [...allArticles];
+    renderPageNum = 1;
+    renderPagedList();
+    bindScrollLoadMore();
+}
+
+function renderPagedList(){
+    const slice = currentArticles.slice(0, PAGE_SIZE);
+    let html = renderCardList(slice);
+    html += currentArticles.length > PAGE_SIZE ? `<div class="load-more-tip">滚动加载更多...</div>` : `<div class="bottom-tip">全部内容加载完毕</div>`;
+    articleBox.innerHTML = html;
+    bindImageClick();
+}
+
+function renderPartialCardList(list, limit){
+    const slice = list.slice(0, limit);
+    return renderCardList(slice);
+}
+
+function renderCardList(list){
+    let html = "";
+    list.forEach(item => html += buildCard(item));
+    return html;
+}
+
+function bindScrollLoadMore(){
+    if(scrollObserver) scrollObserver.disconnect();
+    const loadTip = articleBox.querySelector(".load-more-tip");
+    if(!loadTip) return;
+    scrollObserver = new IntersectionObserver((entries)=>{
+        if(entries[0].isIntersecting){
+            scrollObserver.disconnect();
+            renderPageNum += 1;
+            const end = renderPageNum * PAGE_SIZE;
+            const newSlice = currentArticles.slice(0, end);
+            let html = "";
+            const tipBar = articleBox.querySelector(".update-tip-bar, .no-update-tip");
+            if(tipBar) html += tipBar.outerHTML;
+            html += renderCardList(newSlice);
+            html += end < currentArticles.length ? `<div class="load-more-tip">滚动加载更多...</div>` : `<div class="bottom-tip">全部内容加载完毕</div>`;
+            articleBox.innerHTML = html;
+            bindImageClick();
+            bindScrollLoadMore();
+        }
+    }, {rootMargin:"200px 0px"});
+    scrollObserver.observe(loadTip);
+}
+
+function renderManage(){
+    if(feedList.length === 0){
+        feedPanel.innerHTML = `<div class="empty-tip">暂无订阅源</div>`;
+        return;
+    }
+    let html = "";
+    feedList.forEach((f, idx)=>{
+        html += `
+        <div class="feed-item ${f.category==="video"?"type-video":"type-img"}" data-idx="${idx}">
             <div class="feed-info">
                 <div class="feed-name">${f.name||"未命名订阅"}</div>
+                <div style="font-size:12px;color:#777;">${f.category==="img"?"图片类":"视频类"}</div>
             </div>
             <div class="feed-btn-group">
-                <button class="view-feed" data-url="${f.url}" data-name="${f.name}">
-                    查看条目<span class="unread-badge"></span>
-                </button>
-                <button class="edit" data-idx="${i}">编辑</button>
-                <button class="danger" data-idx="${i}">删除</button>
+                <button class="view-feed" data-url="${f.url}" data-name="${f.name}">主页查看</button>
+                <button class="edit" data-idx="${idx}">编辑</button>
+                <button class="del" data-idx="${idx}">删除</button>
             </div>
-        `;
-        domArr.push({dom:div, feed:f});
-        feedPanel.appendChild(div);
-    }
-    domArr.forEach(async item=>{
-        let cnt = 0;
-        try{
-            const xml = await fetchRssFeed(item.feed.url);
-            const list = parseRSSRawText(xml, item.feed.name, item.feed.url);
-            cnt = list.filter(x=>!readLinks.includes(x.link)).length;
-        }catch(e){cnt=0;}
-        const badge = item.dom.querySelector(".unread-badge");
-        badge.textContent = cnt>0 ? cnt : "";
-        if(cnt>0) badge.classList.add("show");
-        else badge.classList.remove("show");
+        </div>`;
     })
-}
-
-importFileInput.onchange = function(e){
-    const file = e.target.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = function(ev){
-        try{
-            const data = JSON.parse(ev.target.result);
-            if(!Array.isArray(data)){alert("文件格式错误");return;}
-            let add = 0;
-            data.forEach(item=>{
-                const newF = {name:item.name||"",category:item.category||"",url:item.url};
-                if(!feedList.some(f=>f.url === newF.url)){
-                    feedList.push(newF);
-                    add++;
-                }
-            })
-            saveFeeds();
-            renderFeedList();
-            alert(`成功导入${add}条新订阅`);
-        }catch(err){alert("JSON解析失败");}
+    feedPanel.innerHTML = html;
+    feedPanel.onclick = function(e){
+        const t = e.target;
+        const idx = Number(t.dataset.idx);
+        if(t.classList.contains("del")){
+            feedList.splice(idx,1);
+            localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
+            renderManage();
+        }
+        if(t.classList.contains("view-feed")){
+            showPage(pageHome, "本地RSS媒体阅读器");
+        }
+        if(t.classList.contains("edit")){
+            const f = feedList[idx];
+            document.getElementById("editIndex").value = idx;
+            document.getElementById("editName").value = f.name||"";
+            document.getElementById("editCat").value = f.category||"img";
+            document.getElementById("editUrl").value = f.url;
+            editModal.style.display = "flex";
+        }
     }
-    reader.readAsText(file);
-    importFileInput.value = "";
 }
 
-function isFav(item){return favList.some(f=>f.link === item.link);}
-async function addFav(item, cardDom){
-    if(isFav(item)) return;
-    item.favTime = Date.now();
-    favList.push(item);
-    saveFav();
-    const imgs = item.media.imgs || [];
-    const videos = item.media.videos || [];
-    const mediaHtml = buildMediaHtml(imgs, videos);
-    const sourceName = item.sourceName || "";
-    const firstChar = sourceName.charAt(0) || "?";
-    const bgColor = getRandomBg();
-    const timeHtml = item.date ? `<span class="card-time">${item.date}</span>` : "";
-    const avatarHtml = `<div class="card-avatar" style="background:${bgColor}">${firstChar}</div>`;
-    cardDom.outerHTML = `
-        <div class="tweet-card">
+function renderFav(){
+    if(favList.length === 0){
+        favPanel.innerHTML = `<div class="empty-tip">暂无收藏内容，前往主页收藏文章</div>`;
+        return;
+    }
+    let html = "";
+    favList.forEach(item => html += buildCard(item, true));
+    html += `<div class="bottom-tip">无更多收藏</div>`;
+    favPanel.innerHTML = html;
+    bindImageClick();
+}
+
+function buildCard(item, isFav = false){
+    let mediaHtml = "";
+    if(item.media.videos && item.media.videos.length > 0){
+        mediaHtml = `<div class="video-single-wrap"><video class="media-video" controls src="${item.media.videos[0]}"></video></div>`;
+    }else if(item.media.imgs && item.media.imgs.length > 0){
+        const uniqueImgs = [...new Set(item.media.imgs)];
+        const showImgs = uniqueImgs.slice(0,4);
+        mediaHtml = `<div class="img-grid-wrap"><div class="img-grid">`;
+        showImgs.forEach(src=>{
+            mediaHtml += `<div class="grid-img-box"><img class="grid-img" data-imggroup='${JSON.stringify(uniqueImgs)}' src="${src}"></div>`;
+        })
+        mediaHtml += `</div></div>`;
+    }
+    if(isFav){
+        return `
+        <div class="tweet-card" data-link="${item.link}">
             <div class="card-top">
-                ${avatarHtml}
-                <div class="card-source-title">${sourceName}</div>
+                <div class="card-avatar">${item.sourceName.slice(0,1)}</div>
+                <div class="source-name-text">${item.sourceName}</div>
             </div>
             <div class="card-middle">
                 <a class="card-title" target="_blank" href="${item.link}">${item.title}</a>
                 ${mediaHtml}
             </div>
-            <div class="card-bottom">
-                ${timeHtml}
-                <div class="card-buttons">
-                    <button class="card-icon-btn fav-btn" data-item='${JSON.stringify(item).replaceAll("'","\\'")}'>已收藏</button>
-                    <button class="card-icon-btn download-btn" data-media='${JSON.stringify(item.media)}'>下载</button>
-                </div>
+            <div class="card-bottom" style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+                <span style="font-size:12px;color:#666;">${item.date}</span>
+                <button class="del-fav" data-link="${item.link}" style="border:none;background:transparent;color:#666;font-size:13px;">取消收藏</button>
             </div>
-        </div>
-    `;
-    bindMediaAction();
-}
-function removeFav(link){
-    favList = favList.filter(f=>f.link !== link);
-    saveFav();
-    if(currentPageType === "fav") renderFavPanel();
-}
-
-function fullDecodeXml(str){
-    let s = str.replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&amp;/g,"&").replace(/&quot;/g,"\"").replace(/&#039;/g,"'");
-    s = s.replace(/<br\s*\/?>/gi," ").replace(/[\r\n\t]+/g," ").replace(/\s+/g," ");
-    return s;
-}
-// 修复2：WebP图片匹配正则重写，兼容带参数、大小写
-function extractMediaFromRawText(rawText){
-    const allSrc = new Set();
-    // 提取img
-    const imgReg = /<img[^>]+src=["']([^"']+)["']/gi;
-    let m;
-    while((m = imgReg.exec(rawText)) !== null) allSrc.add(m[1]);
-    // 提取video
-    const videoReg = /<video[^>]+src=["']([^"']+)["']/gi;
-    while((m = videoReg.exec(rawText)) !== null) allSrc.add(m[1]);
-    // 提取embed
-    const embedReg = /<embed[^>]+src=["']([^"']+)["']/gi;
-    while((m = embedReg.exec(rawText)) !== null) allSrc.add(m[1]);
-
-    const imgs = [];
-    const videos = [];
-    // 正则：匹配 .后缀 后面可跟任意URL参数，忽略大小写
-    const imgPattern = new RegExp(`\\.(${IMG_EXT.join("|")})(\\?.*)?$`, "i");
-    const vidPattern = new RegExp(`\\.(${VIDEO_EXT.join("|")})(\\?.*)?$`, "i");
-    allSrc.forEach(url=>{
-        if(imgPattern.test(url)) imgs.push(url);
-        if(vidPattern.test(url)) videos.push(url);
-    })
-    return {imgs, videos};
-}
-function parseRSSRawText(xmlText, feedName, feedUrl){
-    const items = [];
-    const itemReg = /<item>([\s\S]*?)<\/item>/gi;
-    let block;
-    while((block = itemReg.exec(xmlText)) !== null){
-        const blockText = block[1];
-        const title = blockText.match(/<title>([\s\S]*?)<\/title>/)?.[1] || "";
-        const link = blockText.match(/<link>([\s\S]*?)<\/link>/)?.[1] || "";
-        const descRaw = blockText.match(/<description>([\s\S]*?)<\/description>/)?.[1] || "";
-        const media = extractMediaFromRawText(descRaw);
-        const pubDate = blockText.match(/<pubDate>(.*?)<\/pubDate>|<updated>(.*?)<\/updated>/)?.[1] || "";
-        items.push({title, link, date:fullDecodeXml(pubDate), media, sourceName:feedName, sourceUrl:feedUrl});
-    }
-    return items;
-}
-
-async function downloadFile(url, filename){
-    try{
-        const res = await fetch(url);
-        const blob = await res.blob();
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(a.href);
-    }catch(e){window.open(url,"_blank");}
-}
-async function fetchRssFeed(url){
-    try{
-        const res = await fetch(url,{signal:AbortSignal.timeout(8000)});
-        if(res.ok) return await res.text();
-        throw new Error();
-    }catch(err){
-        const proxyUrl = PROXY + encodeURIComponent(url);
-        const res = await fetch(proxyUrl,{signal:AbortSignal.timeout(10000)});
-        return await res.text();
+        </div>`;
+    }else{
+        const isCollected = favList.some(f=>f.link === item.link);
+        const favTxt = isCollected ? "已收藏" : "收藏";
+        const favColor = isCollected ? "#ff9500" : "#666";
+        return `
+        <div class="tweet-card" data-link="${item.link}">
+            <div class="card-top">
+                <div class="card-avatar">${item.sourceName.slice(0,1)}</div>
+                <div class="source-name-text">${item.sourceName}</div>
+            </div>
+            <div class="card-middle">
+                <a class="card-title" target="_blank" href="${item.link}">${item.title}</a>
+                ${mediaHtml}
+            </div>
+            <div class="card-bottom" style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+                <span style="font-size:12px;color:#666;">${item.date}</span>
+                <button class="fav-btn" data-link="${item.link}" style="border:none;background:transparent;color:${favColor};font-size:13px;">${favTxt}</button>
+            </div>
+        </div>`;
     }
 }
 
-function buildImageGridHtml(imgList){
-    const total = imgList.length;
-    const showMax = 4;
-    const needFold = total > showMax;
-    const showList = needFold ? imgList.slice(0, showMax) : imgList;
-    const cols = total === 1 ? "1fr" : "1fr 1fr";
-    let html = `<div class="img-grid-wrap" data-fullimgs='${JSON.stringify(imgList)}' data-fold='${needFold?"1":"0"}'>`;
-    html += `<div class="img-grid" style="grid-template-columns:${cols}">`;
-    showList.forEach(src=>html += `<div class="grid-img-box"><img class="grid-img" data-imggroup='${JSON.stringify(imgList)}' src="${src}" referrerpolicy="no-referrer"></div>`);
-    html += `</div>`;
-    if(needFold) html += `<button class="expand-btn">展开全部${total}张图片</button>`;
-    html += `</div>`;
-    return html;
-}
-// 修复1：video poster兜底，无图传空字符串不失效
-function buildMediaHtml(imgs, videos){
-    let html = "";
-    if(videos.length > 0){
-        videos.forEach(vSrc=>{
-            // 有图片取第一张，无图传空
-            const cover = imgs.length > 0 ? imgs[0] : "";
-            html += `<div class="video-single-wrap"><video class="media-video" controls src="${vSrc}" poster="${cover}"></video></div>`;
-        })
-    }
-    if(imgs.length > 0){
-        html += buildImageGridHtml(imgs);
-    }
-    return html;
-}
-function bindMediaAction(){
+function bindImageClick(){
     document.querySelectorAll(".grid-img").forEach(img=>{
         img.onclick = function(){
-            previewImages = JSON.parse(this.dataset.imggroup);
-            previewIndex = previewImages.indexOf(this.src);
-            previewImg.src = previewImages[previewIndex];
-            imgPreviewMask.style.display = "flex";
+            document.getElementById("previewImg").src = this.src;
+            document.getElementById("imgPreviewMask").style.display = "flex";
         }
     })
-    document.querySelectorAll(".expand-btn").forEach(btn=>{
+    // 取消收藏：静默更新本地数组，不刷新页面
+    document.querySelectorAll(".del-fav").forEach(btn=>{
         btn.onclick = function(){
-            const wrap = this.parentElement;
-            wrap.outerHTML = buildImageGridHtml(JSON.parse(wrap.dataset.fullimgs));
-            bindMediaAction();
+            const link = this.dataset.link;
+            favList = favList.filter(f=>f.link !== link);
+            localStorage.setItem(FAV_KEY, JSON.stringify(favList));
+            // 仅移除当前卡片DOM，无全局刷新
+            this.closest(".tweet-card").remove();
+        }
+    })
+    // 收藏按钮：静默更新本地数组，不刷新页面
+    document.querySelectorAll(".fav-btn").forEach(btn=>{
+        btn.onclick = function(){
+            const link = this.dataset.link;
+            const target = allArticles.find(i=>i.link === link);
+            if(target && !favList.some(f=>f.link === link)){
+                favList.push(target);
+                localStorage.setItem(FAV_KEY, JSON.stringify(favList));
+                // 仅修改按钮文字颜色，无页面刷新
+                this.innerText = "已收藏";
+                this.style.color = "#ff9500";
+            }
         }
     })
 }
 
-function renderArticleList(list){
-    articleBox.innerHTML = "";
-    if(list.length === 0){
-        articleBox.innerHTML = `<div class="empty-tip">暂无内容</div>`;
-        return;
+// 批量加载所有RSS，自动切换代理
+async function loadAllRSS(){
+    const taskList = feedList.map(async f=>{
+        try{
+            const xmlText = await fetchWithAutoProxy(f.url);
+            if(!xmlText) return [];
+            return parseRSS(xmlText, f.name, f.url, f.category);
+        }catch(e){
+            console.warn(`订阅【${f.name}】请求全部代理失败`);
+            return [];
+        }
+    })
+    const allGroups = await Promise.all(taskList);
+    let res = [];
+    allGroups.forEach(group=>res = res.concat(group));
+    // 按发布时间倒序排序
+    res.sort((a,b)=> new Date(b.date).getTime() - new Date(a.date).getTime());
+    return res;
+}
+
+// 兼容标准RSS / Atom 双格式解析函数
+function parseRSS(xml, sourceName, sourceUrl, cat){
+    let list = [];
+    const itemReg = /<(item|entry)>([\s\S]*?)<\/(item|entry)>/gi;
+    let m;
+    while((m = itemReg.exec(xml)) !== null){
+        let txt = m[2];
+        // 标题兼容
+        let title = (txt.match(/<title>([\s\S]*?)<\/title>/) || [])[1] || "无标题";
+        // 链接兼容两种写法
+        let link = "";
+        const linkHref = txt.match(/<link[^>]*href="([^"]+)"/);
+        if(linkHref) link = linkHref[1];
+        if(!link) link = (txt.match(/<guid>([\s\S]*?)<\/guid>/) || [])[1] || "#";
+        // 日期兼容 pubDate / updated
+        let date = (txt.match(/<pubDate>([\s\S]*?)<\/pubDate>/) || [])[1] || "";
+        if(!date) date = (txt.match(/<updated>([\s\S]*?)<\/updated>/) || [])[1] || "未知时间";
+        // 正文兼容 description / summary
+        let desc = (txt.match(/<description>([\s\S]*?)<\/description>/) || [])[1] || "";
+        if(!desc) desc = (txt.match(/<summary>([\s\S]*?)<\/summary>/) || [])[1] || "";
+
+        // 提取MP4视频链接
+        let videos = [];
+        const videoReg = /https?:\/\/[^\s"']+\.mp4/gi;
+        let vMatch;
+        while((vMatch = videoReg.exec(txt + desc)) !== null){
+            videos.push(vMatch[0]);
+        }
+        // 提取图片 jpg/png/webp/gif
+        let imgsRaw = [];
+        const imgReg = /https?:\/\/[^\s"']+\.(jpg|jpeg|png|gif|webp)/gi;
+        let imgMatch;
+        while((imgMatch = imgReg.exec(txt + desc)) !== null){
+            imgsRaw.push(imgMatch[0]);
+        }
+        const imgs = [...new Set(imgsRaw)];
+        list.push({
+            title: decodeXml(title),
+            link: decodeXml(link),
+            date: decodeXml(date),
+            media:{imgs:imgs,videos:videos},
+            sourceName,
+            sourceUrl
+        })
     }
-    list.forEach(art=>{
-        const imgs = art.media.imgs || [];
-        const videos = art.media.videos || [];
-        const mediaHtml = buildMediaHtml(imgs, videos);
-        const favFlag = isFav(art);
-        const favText = favFlag ? "已收藏" : "收藏";
-        const favClass = favFlag ? "card-icon-btn fav" : "card-icon-btn";
-        const sourceName = art.sourceName || "";
-        const firstChar = sourceName.charAt(0) || "?";
-        const bgColor = getRandomBg();
-        const timeHtml = art.date ? `<span class="card-time">${art.date}</span>` : "";
-        const avatarHtml = `<div class="card-avatar" style="background:${bgColor}">${firstChar}</div>`;
-        const card = document.createElement("div");
-        card.className = "tweet-card";
-        card.dataset.link = art.link;
-        card.innerHTML = `
-            <div class="card-top">
-                ${avatarHtml}
-                <div class="card-source-title">${sourceName}</div>
-            </div>
-            <div class="card-middle">
-                <a class="card-title" target="_blank" href="${art.link}">${art.title}</a>
-                ${mediaHtml}
-            </div>
-            <div class="card-bottom">
-                ${timeHtml}
-                <div class="card-buttons">
-                    <button class="${favClass} fav-btn" data-item='${JSON.stringify(art).replaceAll("'","\\'")}'>${favText}</button>
-                    <button class="card-icon-btn download-btn" data-media='${JSON.stringify(art.media)}'>下载</button>
-                </div>
-            </div>
-        `;
-        const observer = new IntersectionObserver((entries)=>{
-            entries.forEach(e=>{
-                if(e.isIntersecting){
-                    markRead(art.link);
-                    observer.disconnect();
-                }
-            })
-        },{threshold:0.2});
-        observer.observe(card);
-        const favBtn = card.querySelector(".fav-btn");
-        favBtn.onclick = function(){
-            const item = JSON.parse(this.dataset.item.replaceAll("\\'","'"));
-            addFav(item, card);
-        }
-        const downloadBtn = card.querySelector(".download-btn");
-        downloadBtn.onclick = async function(){
-            const media = JSON.parse(this.dataset.media);
-            const allMedia = [...media.imgs, ...media.videos];
-            if(allMedia.length === 0) return;
-            for(let url of allMedia) await downloadFile(url, url.split("/").pop());
-        }
-        articleBox.appendChild(card);
-    })
-    const tipDom = document.createElement("div");
-    tipDom.className = "bottom-tip";
-    tipDom.textContent = "已经到底了，没有更多未读内容";
-    articleBox.appendChild(tipDom);
-    bindMediaAction();
+    return list;
+}
+// XML特殊字符转义还原
+function decodeXml(s){
+    return s.replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&amp;/g,"&").replace(/&quot;/g,"\"");
 }
 
-function renderFavPanel(){
-    favPanel.innerHTML = "";
-    if(favList.length === 0){
-        favPanel.innerHTML = `<div class="empty-tip">暂无收藏条目，去主页添加收藏吧</div>`;
-        return;
-    }
-    const sortedFav = [...favList].sort((a,b)=> (b.favTime||0) - (a.favTime||0));
-    sortedFav.forEach(art=>{
-        const imgs = art.media.imgs || [];
-        const videos = art.media.videos || [];
-        const mediaHtml = buildMediaHtml(imgs, videos);
-        const sourceName = art.sourceName || "";
-        const firstChar = sourceName.charAt(0) || "?";
-        const bg = getRandomBg();
-        const timeHtml = art.date ? `<span class="card-time">${art.date}</span>` : "";
-        const avatarHtml = `<div class="card-avatar" style="background:${bg}">${firstChar}</div>`;
-        const card = document.createElement("div");
-        card.className = "tweet-card";
-        card.innerHTML = `
-            <div class="card-top">
-                ${avatarHtml}
-                <div class="card-source-title">${sourceName}</div>
-            </div>
-            <div class="card-middle">
-                <a class="card-title" target="_blank" href="${art.link}">${art.title}</a>
-                ${mediaHtml}
-            </div>
-            <div class="card-bottom">
-                ${timeHtml}
-                <div class="card-buttons">
-                    <button class="card-icon-btn del-fav" data-link="${art.link}">取消收藏</button>
-                </div>
-            </div>
-        `;
-        const delBtn = card.querySelector(".del-fav");
-        delBtn.onclick = ()=>removeFav(delBtn.dataset.link);
-        favPanel.appendChild(card);
-    })
-    const tipDom = document.createElement("div");
-    tipDom.className = "bottom-tip";
-    tipDom.textContent = "已经到底了，没有更多收藏内容";
-    favPanel.appendChild(tipDom);
-    bindMediaAction();
-}
-
+// 添加订阅按钮逻辑
 document.getElementById("confirmAdd").onclick = function(){
     const name = document.getElementById("feedName").value.trim();
-    const cat = document.getElementById("feedCat").value.trim();
+    const cat = document.getElementById("feedCat").value;
     const url = document.getElementById("feedUrl").value.trim();
     if(!url){alert("请输入RSS订阅链接");return;}
-    if(feedList.some(f=>f.url === url)){alert("该订阅源已添加");return;}
-    feedList.push({name, category: cat, url});
-    saveFeeds();
+    if(feedList.some(f=>f.url === url)){alert("该订阅已存在");return;}
+    feedList.push({name,category:cat,url});
+    localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
     document.getElementById("feedName").value = "";
-    document.getElementById("feedCat").value = "";
     document.getElementById("feedUrl").value = "";
-    addFeedBox.style.display = "none";
-    alert("订阅添加成功");
-    refreshAllBtn.click();
+    alert("添加成功，点击主页加载内容");
 }
-document.getElementById("cancelEdit").onclick = ()=>editModal.style.display = "none";
+// 编辑订阅保存
 document.getElementById("saveEdit").onclick = function(){
     const idx = Number(document.getElementById("editIndex").value);
     const name = document.getElementById("editName").value.trim();
-    const cat = document.getElementById("editCat").value.trim();
+    const cat = document.getElementById("editCat").value;
     const url = document.getElementById("editUrl").value.trim();
-    if(!url) return;
-    if(feedList.some((f,i)=>i!==idx&&f.url===url)){alert("该订阅链接已存在");return;}
+    const oldUrl = feedList[idx].url;
+    if(feedList.some((f,i)=>i!==idx && f.url === url)){
+        alert("该RSS链接已存在");return;
+    }
     feedList[idx].name = name;
     feedList[idx].category = cat;
-    saveFeeds();
+    feedList[idx].url = url;
+    localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
+    // 同步更新收藏内旧链接
+    favList.forEach(item=>{
+        if(item.sourceUrl === oldUrl) item.sourceUrl = url;
+    })
+    localStorage.setItem(FAV_KEY, JSON.stringify(favList));
     editModal.style.display = "none";
-    renderFeedList();
+    renderManage();
+}
+document.getElementById("cancelEdit").onclick = ()=>editModal.style.display = "none";
+
+// 导入导出备份
+document.getElementById("importFeed").onclick = ()=>document.getElementById("importFileInput").click();
+document.getElementById("importFileInput").onchange = function(e){
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = ev=>{
+        try{
+            const data = JSON.parse(ev.target.result);
+            let addNum = 0;
+            data.forEach(item=>{
+                if(item.url && !feedList.some(f=>f.url === item.url)){
+                    feedList.push(item);
+                    addNum++;
+                }
+            })
+            localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
+            renderManage();
+            alert(`成功导入${addNum}条订阅，切换主页加载内容`);
+        }catch(err){alert("备份文件格式错误");}
+    }
+    reader.readAsText(file);
+}
+document.getElementById("exportAllBtn").onclick = function(){
+    const jsonStr = JSON.stringify(feedList,null,2);
+    const blob = new Blob([jsonStr],{type:"application/json"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "rss订阅备份.json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+}
+document.getElementById("delAllFeed").onclick = function(){
+    if(confirm("确定清空全部订阅？收藏不会同步删除")){
+        feedList = [];
+        localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
+        renderManage();
+    }
+}
+// 图片预览关闭
+document.getElementById("previewClose").onclick = ()=>{
+    document.getElementById("imgPreviewMask").style.display = "none";
 }
 
-renderFeedList();
+window.onload = function(){
+    showPage(pageHome, "本地RSS媒体阅读器");
+}
 </script>
 </body>
 </html>
