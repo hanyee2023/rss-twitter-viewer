@@ -60,8 +60,9 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     flex-wrap:wrap;
     gap:8px;
 }
-.feed-item.type-img{background:#d4edda22;}
-.feed-item.type-video{background:#ffe6e622;}
+/* 加深行背景色，手机端区分更明显 */
+.feed-item.type-img{background:#d4edda;}
+.feed-item.type-video{background:#ffe6e6;}
 .feed-item:last-child{border-bottom:none;}
 .feed-btn-group button{
     border:none;
@@ -258,7 +259,8 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
 .card-bottom-right button{
     border:none;background:transparent;font-size:13px;
 }
-.btn-download{color:#1d9bf0;}
+/* 下载按钮改为黑色字体，和收藏默认色统一 */
+.btn-download{color:#666;}
 .btn-fav{color:#666;}
 .btn-fav.collected{color:#ff9500;}
 /* 手机屏幕适配 */
@@ -570,23 +572,23 @@ function renderFav(){
     bindAllCardEvent();
 }
 
-// 构建卡片HTML（修正图片网格逻辑、视频poster保留预览）
+// 构建卡片HTML（修复video自动填充poster）
 function buildCard(item, isFav = false){
     let mediaHtml = "";
     const imgs = [...new Set(item.media.imgs || [])];
     const videos = item.media.videos || [];
     if(videos.length > 0){
-        // 视频保留poster预览封面，播放器底色黑色
-        mediaHtml = `<div class="video-single-wrap"><video class="media-video" controls src="${videos[0]}"></video></div>`;
+        // 取第一张图作为video poster预览图
+        const posterImg = imgs.length > 0 ? imgs[0] : "";
+        const posterAttr = posterImg ? `poster="${posterImg}"` : "";
+        mediaHtml = `<div class="video-single-wrap"><video class="media-video" controls ${posterAttr} src="${videos[0]}"></video></div>`;
     }else if(imgs.length > 0){
         const total = imgs.length;
-        // 修正网格规则：1张通栏；2-4张两列；>4张第四张加遮罩
         const gridClass = total === 1 ? "grid-single" : "grid-multi";
         mediaHtml = `<div class="img-grid-wrap"><div class="img-grid ${gridClass}">`;
         const show = imgs.slice(0,4);
         show.forEach((src,i)=>{
             let overlay = "";
-            // 仅图片总数>4 且是第4张才加遮罩
             if(i === 3 && total > 4){
                 const rest = total - 4;
                 overlay = `<div class="img-overlay-more">+${rest}张</div>`;
@@ -621,21 +623,24 @@ function buildCard(item, isFav = false){
     </div>`;
 }
 
-// 绑定卡片全部事件：图片预览、标题展开、下载、收藏
+// 绑定卡片全部事件：修复点击图片下标定位预览
 function bindAllCardEvent(){
-    // 图片点击预览、滑动切换
-    document.querySelectorAll(".grid-img").forEach(img=>{
+    // 图片点击预览，携带当前下标
+    document.querySelectorAll(".grid-img").forEach((img, idx)=>{
         img.onclick = function(){
             const imgs = JSON.parse(this.dataset.imggroup);
             currentPreviewImgs = imgs;
-            renderPreviewSlider(imgs);
+            // 获取当前点击在数组内的下标
+            const box = this.closest(".grid-img-box");
+            const allBoxes = box.parentElement.querySelectorAll(".grid-img-box");
+            const clickIndex = Array.from(allBoxes).indexOf(box);
+            renderPreviewSlider(imgs, clickIndex);
             imgPreviewMask.style.display = "flex";
         }
     })
     // 标题展开/收起
     document.querySelectorAll(".title-toggle-btn").forEach(btn=>{
         const titleEl = btn.previousElementSibling;
-        // 自动判断文字是否超过两行，超过才显示按钮
         setTimeout(()=>{
             if(titleEl.scrollHeight > titleEl.clientHeight){
                 btn.style.display = "block";
@@ -693,8 +698,8 @@ function bindAllCardEvent(){
     })
 }
 
-// 渲染预览滑动容器
-function renderPreviewSlider(imgs){
+// 渲染预览滑动容器，支持指定起始下标
+function renderPreviewSlider(imgs, startIndex = 0){
     previewWrap.innerHTML = "";
     imgs.forEach(src=>{
         const slide = document.createElement("div");
@@ -704,6 +709,10 @@ function renderPreviewSlider(imgs){
     })
     previewTip.innerText = "";
     bindPreviewScroll();
+    // 滚动到点击的图片下标
+    setTimeout(()=>{
+        previewWrap.scrollLeft = previewWrap.clientWidth * startIndex;
+    }, 10);
 }
 // 预览滑动监听首尾提示
 function bindPreviewScroll(){
