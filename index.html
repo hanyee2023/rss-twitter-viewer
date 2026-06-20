@@ -11,20 +11,20 @@ html {
   -webkit-tap-highlight-color: transparent;
 }
 body{background:#f5f5f5;color:#111;min-height:100vh;}
+/* 增高头部高度，底部留白充足，按钮不会溢出下边界 */
 #mainHeader{
     position:fixed;
     top:0;
     left:0;
     width:100%;
-    height:64px;
+    height:70px;
     background:#fff;
     border-bottom:1px solid #eee;
     z-index:999;
-    padding:4px 10px 6px; /* 底部留白，按钮不贴紧分割线 */
+    padding:6px 10px 8px;
 }
 #pageTitle{font-size:18px;margin-bottom:6px;font-weight:600;}
 .top-bar{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px;}
-/* 放大导航按钮尺寸，一行完整展示 */
 .top-bar button{
     border:none;
     padding:8px 16px;
@@ -36,9 +36,9 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
 }
 .top-bar button.active{background:#28a745;}
 .main-wrap{
-    margin-top:68px;
+    margin-top:74px;
     padding:10px 8px;
-    min-height:calc(100vh - 68px);
+    min-height:calc(100vh - 74px);
 }
 .page-home,.page-manage,.page-add,.page-fav{display:none;}
 .feed-top-op{
@@ -64,6 +64,17 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
 .feed-item.type-img{background:#d4edda;}
 .feed-item.type-video{background:#ffe6e6;}
 .feed-item:last-child{border-bottom:none;}
+/* 订阅序号样式 */
+.feed-index{
+    width:24px;
+    text-align:center;
+    font-size:14px;
+    color:#666;
+}
+.feed-name{
+    font-weight:bold;
+    flex:1;
+}
 .feed-btn-group button{
     border:none;
     padding:4px 8px;
@@ -142,7 +153,12 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     font-weight:600;
     color:#111;
 }
-.card-title-wrap{display:flex;gap:6px;align-items:flex-start;}
+.card-title-wrap{display:flex;gap:6px;align-items:flex-start;margin-bottom:6px;}
+/* 标题链接整行可点击跳转 */
+.card-title-link{
+    flex:1;
+    text-decoration:none;
+}
 .card-title{
     font-size:15px;
     font-weight:normal;
@@ -151,8 +167,6 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     -webkit-line-clamp:2;
     overflow:hidden;
     line-height:1.45;
-    text-decoration:none;
-    flex:1;
 }
 .card-title.expand{
     -webkit-line-clamp:99;
@@ -221,7 +235,7 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     display:flex;
     overflow-x:auto;
     scroll-snap-type:x mandatory;
-    scroll-snap-stop:always; /* 单次滑动强制只停1张 */
+    scroll-snap-stop:always;
     scrollbar-width:none;
     -ms-overflow-style:none;
 }
@@ -261,7 +275,6 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
 .btn-download{color:#666;}
 .btn-fav{color:#666;}
 .btn-fav.collected{color:#ff9500;}
-/* 收藏页卡片底部单行布局，只保留时间+取消收藏 */
 .fav-card-bottom{
     display:flex;
     justify-content:space-between;
@@ -270,7 +283,7 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
 }
 /* 手机屏幕适配 */
 @media (max-width:768px){
-  #mainHeader{height:60px;padding:3px 8px 5px;}
+  #mainHeader{height:66px;padding:4px 8px 7px;}
   #pageTitle{font-size:16px;}
   .top-bar button{padding:7px 14px;font-size:14px;}
   .tweet-card{padding:12px;}
@@ -295,9 +308,10 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     </div>
     <div class="page-manage" id="pageManage">
         <div class="feed-top-op">
+            <!-- 修改按钮文字：一键导出、一键清空 -->
             <button id="importFeed">一键导入</button>
-            <button id="exportAllBtn">导出备份</button>
-            <button id="delAllFeed">清空全部订阅</button>
+            <button id="exportAllBtn">一键导出</button>
+            <button id="delAllFeed">一键清空</button>
             <input type="file" id="importFileInput" accept=".json" style="display:none;">
         </div>
         <div class="feed-list" id="feedPanel"></div>
@@ -349,10 +363,8 @@ let renderPageNum = 0;
 let allArticles = [];
 let scrollObserver = null;
 let currentPreviewImgs = [];
-// 视频可视区域监听，离开自动暂停
 let videoObserver = null;
 
-// 多代理池自动轮换
 const PROXY_POOL = [
     "https://api.codetabs.com/v1/proxy?quest=",
     "https://staging.corsproxy.io/?",
@@ -405,24 +417,18 @@ const previewWrap = document.getElementById("previewWrap");
 const previewTip = document.getElementById("previewTip");
 const previewClose = document.getElementById("previewClose");
 
-// 初始化视频监听：滑出屏幕自动暂停
 function initVideoObserver(){
     if(videoObserver) return;
     videoObserver = new IntersectionObserver((entries)=>{
         entries.forEach(item=>{
             const video = item.target;
-            if(!item.isIntersecting){
-                video.pause();
-            }
+            if(!item.isIntersecting) video.pause();
         })
     }, {threshold:0.01});
 }
-// 绑定页面所有video监听
 function bindVideoPauseObserver(){
     if(!videoObserver) initVideoObserver();
-    document.querySelectorAll(".media-video").forEach(v=>{
-        videoObserver.observe(v);
-    })
+    document.querySelectorAll(".media-video").forEach(v=>videoObserver.observe(v));
 }
 
 function showPage(pageEl, title) {
@@ -546,23 +552,28 @@ function bindScrollLoadMore(){
     scrollObserver.observe(loadTip);
 }
 
+// 管理订阅源：降序序号、名称加粗
 function renderManage(){
     if(feedList.length === 0){
         feedPanel.innerHTML = `<div class="empty-tip">暂无订阅源</div>`;
         return;
     }
     let html = "";
-    feedList.forEach((f, idx)=>{
+    // 倒序：最新添加在顶部，序号1、2、3...
+    const reverseFeed = [...feedList].reverse();
+    reverseFeed.forEach((f, idx)=>{
+        const realIndex = idx + 1;
         html += `
-        <div class="feed-item ${f.category==="video"?"type-video":"type-img"}" data-idx="${idx}">
+        <div class="feed-item ${f.category==="video"?"type-video":"type-img"}" data-idx="${feedList.indexOf(f)}">
+            <div class="feed-index">${realIndex}</div>
             <div class="feed-info">
                 <div class="feed-name">${f.name||"未命名订阅"}</div>
                 <div style="font-size:12px;color:#777;">${f.category==="img"?"图片类":"视频类"}</div>
             </div>
             <div class="feed-btn-group">
                 <button class="view-feed" data-url="${f.url}" data-name="${f.name}">主页查看</button>
-                <button class="edit" data-idx="${idx}">编辑</button>
-                <button class="del" data-idx="${idx}">删除</button>
+                <button class="edit" data-idx="${feedList.indexOf(f)}">编辑</button>
+                <button class="del" data-idx="${feedList.indexOf(f)}">删除</button>
             </div>
         </div>`;
     })
@@ -602,7 +613,7 @@ function renderFav(){
     bindVideoPauseObserver();
 }
 
-// 构建卡片HTML：收藏页单独底部布局，仅时间+取消收藏
+// 构建卡片：标题外层包裹跳转a链接
 function buildCard(item, isFav = false){
     let mediaHtml = "";
     const imgs = [...new Set(item.media.imgs || [])];
@@ -630,8 +641,8 @@ function buildCard(item, isFav = false){
     const favTxt = isCollected ? "已收藏" : "收藏";
     const favCls = isCollected ? "btn-fav collected" : "btn-fav";
     const titleRaw = item.title || "无标题";
+    const linkUrl = item.link;
     if(isFav){
-        // 收藏页：仅左侧时间、右侧取消收藏，单行布局
         return `
         <div class="tweet-card" data-link="${item.link}">
             <div class="card-top">
@@ -639,7 +650,9 @@ function buildCard(item, isFav = false){
                 <div class="source-name-text">${item.sourceName}</div>
             </div>
             <div class="card-title-wrap">
-                <a class="card-title" target="_blank" href="${item.link}">${titleRaw}</a>
+                <a class="card-title-link" target="_blank" href="${linkUrl}">
+                    <div class="card-title">${titleRaw}</div>
+                </a>
                 <button class="title-toggle-btn" style="display:none;">展开</button>
             </div>
             ${mediaHtml}
@@ -649,7 +662,6 @@ function buildCard(item, isFav = false){
             </div>
         </div>`;
     }else{
-        // 主页：下载+收藏双按钮
         return `
         <div class="tweet-card" data-link="${item.link}">
             <div class="card-top">
@@ -657,7 +669,9 @@ function buildCard(item, isFav = false){
                 <div class="source-name-text">${item.sourceName}</div>
             </div>
             <div class="card-title-wrap">
-                <a class="card-title" target="_blank" href="${item.link}">${titleRaw}</a>
+                <a class="card-title-link" target="_blank" href="${linkUrl}">
+                    <div class="card-title">${titleRaw}</div>
+                </a>
                 <button class="title-toggle-btn" style="display:none;">展开</button>
             </div>
             ${mediaHtml}
@@ -672,9 +686,8 @@ function buildCard(item, isFav = false){
     }
 }
 
-// 绑定卡片全部事件
 function bindAllCardEvent(){
-    document.querySelectorAll(".grid-img").forEach((img, idx)=>{
+    document.querySelectorAll(".grid-img").forEach((img)=>{
         img.onclick = function(){
             const imgs = JSON.parse(this.dataset.imggroup);
             currentPreviewImgs = imgs;
@@ -685,14 +698,18 @@ function bindAllCardEvent(){
             imgPreviewMask.style.display = "flex";
         }
     })
-    document.querySelectorAll(".title-toggle-btn").forEach(btn=>{
-        const titleEl = btn.previousElementSibling;
+    // 自动判断标题高度，超长显示展开按钮
+    document.querySelectorAll(".card-title-wrap").forEach(wrap=>{
+        const titleEl = wrap.querySelector(".card-title");
+        const toggleBtn = wrap.querySelector(".title-toggle-btn");
         setTimeout(()=>{
             if(titleEl.scrollHeight > titleEl.clientHeight){
-                btn.style.display = "block";
+                toggleBtn.style.display = "block";
+            }else{
+                toggleBtn.style.display = "none";
             }
-        },10)
-        btn.onclick = function(){
+        }, 20);
+        toggleBtn.onclick = function(){
             if(titleEl.classList.contains("expand")){
                 titleEl.classList.remove("expand");
                 this.innerText = "展开";
@@ -741,7 +758,6 @@ function bindAllCardEvent(){
     })
 }
 
-// 预览滑动容器，单次滑动只切换1张
 function renderPreviewSlider(imgs, startIndex = 0){
     previewWrap.innerHTML = "";
     imgs.forEach(src=>{
