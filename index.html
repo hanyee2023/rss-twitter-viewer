@@ -16,28 +16,29 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     top:0;
     left:0;
     width:100%;
-    height:60px;
+    height:64px;
     background:#fff;
     border-bottom:1px solid #eee;
     z-index:999;
-    padding:4px 10px;
+    padding:4px 10px 6px; /* 底部留白，按钮不贴紧分割线 */
 }
-#pageTitle{font-size:18px;margin-bottom:4px;font-weight:600;}
-.top-bar{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;}
+#pageTitle{font-size:18px;margin-bottom:6px;font-weight:600;}
+.top-bar{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px;}
+/* 放大导航按钮尺寸，一行完整展示 */
 .top-bar button{
     border:none;
-    padding:6px 12px;
+    padding:8px 16px;
     border-radius:999px;
-    font-size:14px;
+    font-size:15px;
     background:#1d9bf0;
     color:#fff;
     white-space:nowrap;
 }
 .top-bar button.active{background:#28a745;}
 .main-wrap{
-    margin-top:64px;
+    margin-top:68px;
     padding:10px 8px;
-    min-height:calc(100vh - 64px);
+    min-height:calc(100vh - 68px);
 }
 .page-home,.page-manage,.page-add,.page-fav{display:none;}
 .feed-top-op{
@@ -60,7 +61,6 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     flex-wrap:wrap;
     gap:8px;
 }
-/* 加深行背景色，手机端区分更明显 */
 .feed-item.type-img{background:#d4edda;}
 .feed-item.type-video{background:#ffe6e6;}
 .feed-item:last-child{border-bottom:none;}
@@ -143,7 +143,6 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     color:#111;
 }
 .card-title-wrap{display:flex;gap:6px;align-items:flex-start;}
-/* 标题两行截断 */
 .card-title{
     font-size:15px;
     font-weight:normal;
@@ -181,7 +180,6 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     justify-content:center;
     font-size:14px;
 }
-/* 视频播放器：保留poster预览封面，播放器底色黑色 */
 .video-single-wrap{width:100%;border-radius:12px;overflow:hidden;margin:6px 0;}
 .media-video{
     width:100%;
@@ -223,6 +221,7 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     display:flex;
     overflow-x:auto;
     scroll-snap-type:x mandatory;
+    scroll-snap-stop:always; /* 单次滑动强制只停1张 */
     scrollbar-width:none;
     -ms-overflow-style:none;
 }
@@ -259,15 +258,21 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
 .card-bottom-right button{
     border:none;background:transparent;font-size:13px;
 }
-/* 下载按钮改为黑色字体，和收藏默认色统一 */
 .btn-download{color:#666;}
 .btn-fav{color:#666;}
 .btn-fav.collected{color:#ff9500;}
+/* 收藏页卡片底部单行布局，只保留时间+取消收藏 */
+.fav-card-bottom{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-top:8px;
+}
 /* 手机屏幕适配 */
 @media (max-width:768px){
-  #mainHeader{height:56px;padding:3px 8px;}
+  #mainHeader{height:60px;padding:3px 8px 5px;}
   #pageTitle{font-size:16px;}
-  .top-bar button{padding:5px 10px;font-size:13px;}
+  .top-bar button{padding:7px 14px;font-size:14px;}
   .tweet-card{padding:12px;}
   .modal-btn-bar{justify-content:center;}
   #cancelEdit,#saveEdit{flex:1;text-align:center;}
@@ -344,6 +349,8 @@ let renderPageNum = 0;
 let allArticles = [];
 let scrollObserver = null;
 let currentPreviewImgs = [];
+// 视频可视区域监听，离开自动暂停
+let videoObserver = null;
 
 // 多代理池自动轮换
 const PROXY_POOL = [
@@ -397,6 +404,26 @@ const imgPreviewMask = document.getElementById("imgPreviewMask");
 const previewWrap = document.getElementById("previewWrap");
 const previewTip = document.getElementById("previewTip");
 const previewClose = document.getElementById("previewClose");
+
+// 初始化视频监听：滑出屏幕自动暂停
+function initVideoObserver(){
+    if(videoObserver) return;
+    videoObserver = new IntersectionObserver((entries)=>{
+        entries.forEach(item=>{
+            const video = item.target;
+            if(!item.isIntersecting){
+                video.pause();
+            }
+        })
+    }, {threshold:0.01});
+}
+// 绑定页面所有video监听
+function bindVideoPauseObserver(){
+    if(!videoObserver) initVideoObserver();
+    document.querySelectorAll(".media-video").forEach(v=>{
+        videoObserver.observe(v);
+    })
+}
 
 function showPage(pageEl, title) {
     pageHome.style.display = "none";
@@ -481,6 +508,7 @@ function renderPagedList(){
     html += currentArticles.length > PAGE_SIZE ? `<div class="load-more-tip">滚动加载更多...</div>` : `<div class="bottom-tip">全部内容加载完毕</div>`;
     articleBox.innerHTML = html;
     bindAllCardEvent();
+    bindVideoPauseObserver();
 }
 
 function renderPartialCardList(list, limit){
@@ -511,6 +539,7 @@ function bindScrollLoadMore(){
             html += end < currentArticles.length ? `<div class="load-more-tip">滚动加载更多...</div>` : `<div class="bottom-tip">全部内容加载完毕</div>`;
             articleBox.innerHTML = html;
             bindAllCardEvent();
+            bindVideoPauseObserver();
             bindScrollLoadMore();
         }
     }, {rootMargin:"200px 0px"});
@@ -570,15 +599,15 @@ function renderFav(){
     html += `<div class="bottom-tip">无更多收藏</div>`;
     favPanel.innerHTML = html;
     bindAllCardEvent();
+    bindVideoPauseObserver();
 }
 
-// 构建卡片HTML（修复video自动填充poster）
+// 构建卡片HTML：收藏页单独底部布局，仅时间+取消收藏
 function buildCard(item, isFav = false){
     let mediaHtml = "";
     const imgs = [...new Set(item.media.imgs || [])];
     const videos = item.media.videos || [];
     if(videos.length > 0){
-        // 取第一张图作为video poster预览图
         const posterImg = imgs.length > 0 ? imgs[0] : "";
         const posterAttr = posterImg ? `poster="${posterImg}"` : "";
         mediaHtml = `<div class="video-single-wrap"><video class="media-video" controls ${posterAttr} src="${videos[0]}"></video></div>`;
@@ -601,36 +630,54 @@ function buildCard(item, isFav = false){
     const favTxt = isCollected ? "已收藏" : "收藏";
     const favCls = isCollected ? "btn-fav collected" : "btn-fav";
     const titleRaw = item.title || "无标题";
-    return `
-    <div class="tweet-card" data-link="${item.link}">
-        <div class="card-top">
-            <div class="card-avatar">${item.sourceName.slice(0,1)}</div>
-            <div class="source-name-text">${item.sourceName}</div>
-        </div>
-        <div class="card-title-wrap">
-            <a class="card-title" target="_blank" href="${item.link}">${titleRaw}</a>
-            <button class="title-toggle-btn" style="display:none;">展开</button>
-        </div>
-        ${mediaHtml}
-        <div class="card-bottom">
-            <div class="card-bottom-left">${item.date || "未知时间"}</div>
-            <div class="card-bottom-right">
-                <button class="btn-download" data-link="${item.link}" data-img='${JSON.stringify(imgs)}' data-video='${JSON.stringify(videos)}'>下载</button>
-                <button class="${favCls}" data-link="${item.link}">${favTxt}</button>
-                ${isFav ? `<button class="del-fav" data-link="${item.link}">取消收藏</button>` : ""}
+    if(isFav){
+        // 收藏页：仅左侧时间、右侧取消收藏，单行布局
+        return `
+        <div class="tweet-card" data-link="${item.link}">
+            <div class="card-top">
+                <div class="card-avatar">${item.sourceName.slice(0,1)}</div>
+                <div class="source-name-text">${item.sourceName}</div>
             </div>
-        </div>
-    </div>`;
+            <div class="card-title-wrap">
+                <a class="card-title" target="_blank" href="${item.link}">${titleRaw}</a>
+                <button class="title-toggle-btn" style="display:none;">展开</button>
+            </div>
+            ${mediaHtml}
+            <div class="fav-card-bottom">
+                <div class="card-bottom-left">${item.date || "未知时间"}</div>
+                <button class="del-fav" data-link="${item.link}" style="border:none;background:transparent;font-size:13px;color:#666;">取消收藏</button>
+            </div>
+        </div>`;
+    }else{
+        // 主页：下载+收藏双按钮
+        return `
+        <div class="tweet-card" data-link="${item.link}">
+            <div class="card-top">
+                <div class="card-avatar">${item.sourceName.slice(0,1)}</div>
+                <div class="source-name-text">${item.sourceName}</div>
+            </div>
+            <div class="card-title-wrap">
+                <a class="card-title" target="_blank" href="${item.link}">${titleRaw}</a>
+                <button class="title-toggle-btn" style="display:none;">展开</button>
+            </div>
+            ${mediaHtml}
+            <div class="card-bottom">
+                <div class="card-bottom-left">${item.date || "未知时间"}</div>
+                <div class="card-bottom-right">
+                    <button class="btn-download" data-link="${item.link}" data-img='${JSON.stringify(imgs)}' data-video='${JSON.stringify(videos)}'>下载</button>
+                    <button class="${favCls}" data-link="${item.link}">${favTxt}</button>
+                </div>
+            </div>
+        </div>`;
+    }
 }
 
-// 绑定卡片全部事件：修复点击图片下标定位预览
+// 绑定卡片全部事件
 function bindAllCardEvent(){
-    // 图片点击预览，携带当前下标
     document.querySelectorAll(".grid-img").forEach((img, idx)=>{
         img.onclick = function(){
             const imgs = JSON.parse(this.dataset.imggroup);
             currentPreviewImgs = imgs;
-            // 获取当前点击在数组内的下标
             const box = this.closest(".grid-img-box");
             const allBoxes = box.parentElement.querySelectorAll(".grid-img-box");
             const clickIndex = Array.from(allBoxes).indexOf(box);
@@ -638,7 +685,6 @@ function bindAllCardEvent(){
             imgPreviewMask.style.display = "flex";
         }
     })
-    // 标题展开/收起
     document.querySelectorAll(".title-toggle-btn").forEach(btn=>{
         const titleEl = btn.previousElementSibling;
         setTimeout(()=>{
@@ -656,7 +702,6 @@ function bindAllCardEvent(){
             }
         }
     })
-    // 下载按钮
     document.querySelectorAll(".btn-download").forEach(btn=>{
         btn.onclick = function(){
             const imgs = JSON.parse(this.dataset.img);
@@ -674,7 +719,6 @@ function bindAllCardEvent(){
             }
         }
     })
-    // 收藏静默操作
     document.querySelectorAll(".btn-fav").forEach(btn=>{
         btn.onclick = function(){
             const link = this.dataset.link;
@@ -687,7 +731,6 @@ function bindAllCardEvent(){
             }
         }
     })
-    // 取消收藏静默移除卡片
     document.querySelectorAll(".del-fav").forEach(btn=>{
         btn.onclick = function(){
             const link = this.dataset.link;
@@ -698,7 +741,7 @@ function bindAllCardEvent(){
     })
 }
 
-// 渲染预览滑动容器，支持指定起始下标
+// 预览滑动容器，单次滑动只切换1张
 function renderPreviewSlider(imgs, startIndex = 0){
     previewWrap.innerHTML = "";
     imgs.forEach(src=>{
@@ -709,12 +752,10 @@ function renderPreviewSlider(imgs, startIndex = 0){
     })
     previewTip.innerText = "";
     bindPreviewScroll();
-    // 滚动到点击的图片下标
     setTimeout(()=>{
         previewWrap.scrollLeft = previewWrap.clientWidth * startIndex;
     }, 10);
 }
-// 预览滑动监听首尾提示
 function bindPreviewScroll(){
     previewWrap.onscroll = function(){
         const scrollX = this.scrollLeft;
@@ -731,7 +772,6 @@ function bindPreviewScroll(){
 }
 previewClose.onclick = ()=> imgPreviewMask.style.display = "none";
 
-// 下载文件工具
 function downloadFile(url, name){
     const a = document.createElement("a");
     a.href = url;
@@ -741,7 +781,6 @@ function downloadFile(url, name){
     a.remove();
 }
 
-// 批量加载RSS
 async function loadAllRSS(){
     const taskList = feedList.map(async f=>{
         try{
@@ -760,7 +799,6 @@ async function loadAllRSS(){
     return res;
 }
 
-// RSS/Atom兼容解析
 function parseRSS(xml, sourceName, sourceUrl, cat){
     let list = [];
     const itemReg = /<(item|entry)>([\s\S]*?)<\/(item|entry)>/gi;
@@ -799,7 +837,6 @@ function decodeXml(s){
     return s.replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&amp;/g,"&").replace(/&quot;/g,"\"");
 }
 
-// 添加订阅
 document.getElementById("confirmAdd").onclick = function(){
     const name = document.getElementById("feedName").value.trim();
     const cat = document.getElementById("feedCat").value;
@@ -812,7 +849,6 @@ document.getElementById("confirmAdd").onclick = function(){
     document.getElementById("feedUrl").value = "";
     alert("添加成功，点击主页加载内容");
 }
-// 编辑保存
 document.getElementById("saveEdit").onclick = function(){
     const idx = Number(document.getElementById("editIndex").value);
     const name = document.getElementById("editName").value.trim();
@@ -831,7 +867,6 @@ document.getElementById("saveEdit").onclick = function(){
 }
 document.getElementById("cancelEdit").onclick = ()=>editModal.style.display = "none";
 
-// 导入导出
 document.getElementById("importFeed").onclick = ()=>document.getElementById("importFileInput").click();
 document.getElementById("importFileInput").onchange = function(e){
     const file = e.target.files[0];
@@ -869,6 +904,7 @@ document.getElementById("delAllFeed").onclick = function(){
 }
 
 window.onload = function(){
+    initVideoObserver();
     showPage(pageHome, "本地RSS媒体阅读器");
 }
 </script>
