@@ -154,11 +154,9 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     color:#111;
 }
 .card-title-wrap{display:flex;gap:6px;align-items:flex-start;margin-bottom:6px;}
-.card-title-link{
-    flex:1;
-    text-decoration:none;
-}
+/* 纯文本标题，无超链接 */
 .card-title{
+    flex:1;
     font-size:15px;
     font-weight:normal;
     color:#000;
@@ -182,8 +180,10 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
 .grid-single{grid-template-columns:1fr;}
 .grid-multi{grid-template-columns:1fr 1fr;}
 .grid-img-box{position:relative;aspect-ratio:1/1;overflow:hidden;}
-/* 移除crossorigin属性 */
-.grid-img{width:100%;height:100%;object-fit:cover;display:block;}
+.grid-img{
+    width:100%;height:100%;object-fit:cover;display:block;
+    loading:"lazy"; /* 图片懒加载提速 */
+}
 .img-overlay-more{
     position:absolute;
     inset:0;
@@ -195,7 +195,6 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     font-size:14px;
 }
 .video-single-wrap{width:100%;border-radius:12px;overflow:hidden;margin:6px 0;}
-/* 视频仅保留缓冲优化，移除crossorigin */
 .media-video{
     width:100%;
     display:block;
@@ -252,7 +251,6 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     scroll-snap-align:center;
     padding:10px;
 }
-/* 预览图移除crossorigin */
 .preview-img{max-width:92vw;max-height:92vh;object-fit:contain;}
 .preview-close{position:absolute;top:20px;right:20px;color:#fff;font-size:28px;border:none;background:transparent;cursor:pointer;z-index:10;}
 .preview-tip{
@@ -357,7 +355,7 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
 const FEED_KEY = "local_rss_feeds";
 const FAV_KEY = "rss_fav_list";
 const PAGE_SIZE = 50;
-const FETCH_TIMEOUT = 4000;
+const FETCH_TIMEOUT = 3000; // 缩短超时，加快失败重试
 let feedList = JSON.parse(localStorage.getItem(FEED_KEY)) || [];
 let favList = JSON.parse(localStorage.getItem(FAV_KEY)) || [];
 let currentArticles = [];
@@ -376,6 +374,7 @@ const PROXY_POOL = [
     "https://api.cors.lol/?url=",
     "https://whateverorigin.org/get?url="
 ];
+// 通用代理请求
 async function fetchWithAutoProxy(targetUrl) {
     const encodedUrl = encodeURIComponent(targetUrl);
     for (const proxyPrefix of PROXY_POOL) {
@@ -393,12 +392,19 @@ async function fetchWithAutoProxy(targetUrl) {
                 }
                 return text;
             }
-        } catch (err) {
-            console.log(`代理 ${proxyPrefix} 请求失败，自动切换下一个`);
+        } catch (err)
             continue;
         }
     }
     return "";
+}
+// 视频专用代理链接生成（解决GitHub Pages跨域无法播放推特mp4）
+function getVideoProxySrc(rawUrl) {
+    // 本地file协议：直连不代理，保证本地流畅播放
+    if (window.location.protocol === "file:") return rawUrl;
+    // 线上HTTPS环境：强制走代理中转
+    const encoded = encodeURIComponent(rawUrl);
+    return PROXY_POOL[0] + encoded;
 }
 
 const pageHome = document.getElementById("pageHome");
@@ -448,9 +454,7 @@ function showPage(pageEl, title) {
     if (title === "管理订阅源") btnManage.classList.add("active");
     if (title === "添加订阅") btnAdd.classList.add("active");
     if (title === "我的收藏") btnFav.classList.add("active");
-    if(title !== "本地RSS媒体阅读器"){
-        filterSourceUrl = "";
-    }
+    if(title !== "本地RSS媒体阅读器") filterSourceUrl = "";
     if (title === "本地RSS媒体阅读器") handleHomeClick();
     if (title === "管理订阅源") renderManage();
     if (title === "我的收藏") renderFav();
@@ -479,9 +483,7 @@ async function handleHomeClick(){
         return;
     }
     let filterArticles = allArticles;
-    if(filterSourceUrl){
-        filterArticles = allArticles.filter(item => item.sourceUrl === filterSourceUrl);
-    }
+    if(filterSourceUrl) filterArticles = allArticles.filter(item => item.sourceUrl === filterSourceUrl);
     if(filterArticles.length === 0){
         articleBox.innerHTML = `<div class="empty-tip">暂无文章内容</div>`;
         return;
@@ -496,9 +498,7 @@ window.mergeNewData = async function(){
     if(scrollObserver) scrollObserver.disconnect();
     await loadAllRSS();
     let filterArticles = allArticles;
-    if(filterSourceUrl){
-        filterArticles = allArticles.filter(item => item.sourceUrl === filterSourceUrl);
-    }
+    if(filterSourceUrl) filterArticles = allArticles.filter(item => item.sourceUrl === filterSourceUrl);
     currentArticles = [...filterArticles];
     renderPageNum = 1;
     renderPagedList();
@@ -610,6 +610,7 @@ function renderFav(){
     bindVideoPauseObserver();
 }
 
+// 1. 标题改为纯文本，删除a链接；3.视频自动代理适配GitHub Pages
 function buildCard(item, isFav = false){
     let mediaHtml = "";
     const imgs = [...new Set(item.media.imgs || [])];
@@ -617,8 +618,9 @@ function buildCard(item, isFav = false){
     if(videos.length > 0){
         const posterImg = imgs.length > 0 ? imgs[0] : "";
         const posterAttr = posterImg ? `poster="${posterImg}"` : "";
-        // 视频移除crossorigin，保留预加载缓冲优化
-        mediaHtml = `<div class="video-single-wrap"><video class="media-video" controls preload="metadata" playsinline ${posterAttr} src="${videos[0]}"></video></div>`;
+        // 视频链接自动判断环境加代理，解决线上推特mp4无法播放
+        const videoSrc = getVideoProxySrc(videos[0]);
+        mediaHtml = `<div class="video-single-wrap"><video class="media-video" controls preload="metadata" playsinline ${posterAttr} src="${videoSrc}"></video></div>`;
     }else if(imgs.length > 0){
         const total = imgs.length;
         const gridClass = total === 1 ? "grid-single" : "grid-multi";
@@ -630,8 +632,7 @@ function buildCard(item, isFav = false){
                 const rest = total - 4;
                 overlay = `<div class="img-overlay-more">+${rest}张</div>`;
             }
-            // img标签移除crossorigin
-            mediaHtml += `<div class="grid-img-box"><img class="grid-img" data-imggroup='${JSON.stringify(imgs)}' src="${src}">${overlay}</div>`;
+            mediaHtml += `<div class="grid-img-box"><img class="grid-img" data-imggroup='${JSON.stringify(imgs)}' src="${src}" loading="lazy">${overlay}</div>`;
         })
         mediaHtml += `</div></div>`;
     }
@@ -639,7 +640,7 @@ function buildCard(item, isFav = false){
     const favTxt = isCollected ? "已收藏" : "收藏";
     const favCls = isCollected ? "btn-fav collected" : "btn-fav";
     const titleRaw = item.title || "无标题";
-    const linkUrl = item.link;
+    // 纯文本标题，彻底移除a超链接，无点击跳转
     if(isFav){
         return `
         <div class="tweet-card" data-link="${item.link}" data-source-url="${item.sourceUrl}">
@@ -648,9 +649,8 @@ function buildCard(item, isFav = false){
                 <div class="source-name-text">${item.sourceName}</div>
             </div>
             <div class="card-title-wrap">
-                <a class="card-title-link" target="_blank" href="${linkUrl}">
-                    <div class="card-title">${titleRaw}</div>
-                </a>
+                <!-- 纯文本，无<a>跳转标签 -->
+                <div class="card-title">${titleRaw}</div>
                 <button class="title-toggle-btn" style="display:none;">展开</button>
             </div>
             ${mediaHtml}
@@ -667,9 +667,8 @@ function buildCard(item, isFav = false){
                 <div class="source-name-text">${item.sourceName}</div>
             </div>
             <div class="card-title-wrap">
-                <a class="card-title-link" target="_blank" href="${linkUrl}">
-                    <div class="card-title">${titleRaw}</div>
-                </a>
+                <!-- 纯文本标题，取消点击跳转功能 -->
+                <div class="card-title">${titleRaw}</div>
                 <button class="title-toggle-btn" style="display:none;">展开</button>
             </div>
             ${mediaHtml}
@@ -686,11 +685,18 @@ function buildCard(item, isFav = false){
 
 function bindAllCardEvent(){
     document.querySelectorAll(".grid-img").forEach((img)=>{
-        // 图片加载失败自动切换代理重试，不依赖crossorigin
+        // 图片加载失败轮换代理重试，提速容错
         img.onerror = function(){
             const originalSrc = this.src;
-            const encoded = encodeURIComponent(originalSrc);
-            this.src = "https://api.codetabs.com/v1/proxy?quest=" + encoded;
+            let proxyIdx = 0;
+            const tryNextProxy = ()=>{
+                if(proxyIdx >= PROXY_POOL.length) return;
+                const encoded = encodeURIComponent(originalSrc);
+                this.src = PROXY_POOL[proxyIdx] + encoded;
+                proxyIdx++;
+                this.onerror = tryNextProxy;
+            }
+            tryNextProxy();
         }
         img.onclick = function(){
             const imgs = JSON.parse(this.dataset.imggroup);
@@ -727,7 +733,8 @@ function bindAllCardEvent(){
             const imgs = JSON.parse(this.dataset.img);
             const videos = JSON.parse(this.dataset.video);
             if(videos.length > 0){
-                downloadFile(videos[0], "video.mp4");
+                const dlUrl = window.location.protocol === "file:" ? videos[0] : getVideoProxySrc(videos[0]);
+                downloadFile(dlUrl, "video.mp4");
                 return;
             }
             if(imgs.length === 1){
@@ -759,6 +766,22 @@ function bindAllCardEvent(){
             this.closest(".tweet-card").remove();
         }
     })
+    // 视频加载失败自动切换代理重试
+    document.querySelectorAll(".media-video").forEach(vid=>{
+        vid.onerror = function(){
+            const rawVidUrl = this.src.split("quest=")[1];
+            if(!rawVidUrl) return;
+            const decodeUrl = decodeURIComponent(rawVidUrl);
+            let pIdx = 1;
+            const retryVid = ()=>{
+                if(pIdx >= PROXY_POOL.length) return;
+                this.src = PROXY_POOL[pIdx] + encodeURIComponent(decodeUrl);
+                pIdx++;
+                this.onerror = retryVid;
+            }
+            retryVid();
+        }
+    })
 }
 
 function renderPreviewSlider(imgs, startIndex = 0){
@@ -766,7 +789,7 @@ function renderPreviewSlider(imgs, startIndex = 0){
     imgs.forEach(src=>{
         const slide = document.createElement("div");
         slide.className = "preview-slide";
-        slide.innerHTML = `<img class="preview-img" src="${src}">`;
+        slide.innerHTML = `<img class="preview-img" src="${src}" loading="lazy">`;
         previewWrap.appendChild(slide);
     })
     previewTip.innerText = "";
