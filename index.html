@@ -372,7 +372,7 @@ async function fetchRSSFeed(rssUrl) {
     if (!res.ok) throw new Error("本地RSS请求失败");
     return await res.text();
   }
-  const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(rssUrl)}`;
+  const proxyUrl = `${window.location.origin}/rss-proxy?url=${encodeURIComponent(rssUrl)}`;
   const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(FETCH_TIMEOUT) });
   if (!res.ok) throw new Error("CF代理拉取RSS失败");
   return await res.text();
