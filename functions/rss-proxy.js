@@ -1,4 +1,3 @@
-// 仅匹配 /rss-proxy 路由
 export async function onRequest({ request }) {
   const urlObj = new URL(request.url);
   const targetUrl = urlObj.searchParams.get("url");
@@ -23,14 +22,16 @@ export async function onRequest({ request }) {
     const res = await fetch(targetUrl, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0.0.0 Safari/537.36",
-        "Accept": "application/rss+xml,application/xml;q=0.9"
+        "Accept": "application/rss+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Referer": "https://twitter.com/"
       },
-      signal: AbortSignal.timeout(10000)
+      signal: AbortSignal.timeout(8000)
     });
     const text = await res.text();
-    if (text.includes("<!DOCTYPE html>")) throw new Error("目标非RSS");
     const headers = new Headers(res.headers);
     headers.set("Access-Control-Allow-Origin", "*");
+    // RSS内容缓存5分钟
+    headers.set("Cache-Control", "public, max-age=300");
     return new Response(text, { status: res.status, headers });
   } catch (err) {
     return new Response("RSS代理失败：" + err.message, { status: 502 });
