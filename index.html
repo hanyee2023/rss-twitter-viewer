@@ -351,6 +351,28 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
 </div>
 <div class="tip-toast" id="slideTip"></div>
 <script>
+// 全局自动代理推特图片视频，解决跨域播放
+const origin = window.location.origin;
+const rawSetAttr = Element.prototype.setAttribute;
+Element.prototype.setAttribute = function(key, val) {
+  if ((key === "src" || key === "poster") && typeof val === "string") {
+    if (val.includes("video.twimg.com") || val.includes("pbs.twimg.com")) {
+      val = `${origin}/media-proxy?url=${encodeURIComponent(val)}`;
+    }
+  }
+  return rawSetAttr.call(this, key, val);
+};
+
+const FEED_KEY = "local_rss_feeds";
+const FAV_KEY = "rss_fav_list";
+const PAGE_SIZE = 50; // 固定每页50条不变
+const FETCH_TIMEOUT = 10000;
+let feedList = JSON.parse(localStorage.getItem(FEED_KEY)) || [];
+let favList = JSON.parse(localStorage.getItem(FAV_KEY)) || [];
+let currentArticles = [];
+let renderPageNum = 0;
+let allArticles = [];
+let scrollObserver = null;
 const FEED_KEY = "local_rss_feeds";
 const FAV_KEY = "rss_fav_list";
 const PAGE_SIZE = 50; // 固定每页50条不变
