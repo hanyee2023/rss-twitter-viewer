@@ -354,7 +354,7 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
 const FEED_KEY = "local_rss_feeds";
 const FAV_KEY = "rss_fav_list";
 const PAGE_SIZE = 50; // 固定每页50条不变
-const FETCH_TIMEOUT = 3000;
+const FETCH_TIMEOUT = 10000;
 let feedList = JSON.parse(localStorage.getItem(FEED_KEY)) || [];
 let favList = JSON.parse(localStorage.getItem(FAV_KEY)) || [];
 let currentArticles = [];
@@ -365,37 +365,48 @@ let currentPreviewImgs = [];
 let videoObserver = null;
 let filterSourceUrl = "";
 
-// RSS订阅解析代理（仅用于拉取feed，不处理视频图片）
-const PROXY_POOL = [
-    "https://api.codetabs.com/v1/proxy?quest=",
-    "https://staging.corsproxy.io/?",
-    "https://cors-proxy.htmldriven.com/?url=",
-    "https://proxy.cors.sh/",
-    "https://api.cors.lol/?url=",
-    "https://whateverorigin.org/get?url="
-];
-async function fetchWithAutoProxy(targetUrl) {
-    const encodedUrl = encodeURIComponent(targetUrl);
-    for (const proxyPrefix of PROXY_POOL) {
-        const fullUrl = proxyPrefix + encodedUrl;
-        try {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
-            const res = await fetch(fullUrl, { signal: controller.signal });
-            clearTimeout(timer);
-            if (res.ok) {
-                const text = await res.text();
-                if (proxyPrefix.includes("whateverorigin")) {
-                    const json = JSON.parse(text);
-                    return json.contents || "";
-                }
-                return text;
-            }
-        } catch (err) {
-            continue;
-        }
-    }
-    return "";
+// ========== CF统一RSS代理请求函数 本地file直连，线上Pages走同源/rss-proxy ==========
+async function fetchRSSFeed(rssUrl) {
+  if (window.location.protocol === "file:") {
+    const res = await fetch(rssUrl, { signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+    if (!res.ok) throw new Error("本地RSS请求失败");
+    return await res.text();
+  }
+  const proxyUrl = `${window.location.origin}/rss-proxy?url=${encodeURIComponent(rssUrl)}`;
+  const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+  if (!res.ok) throw new Error("CF代理拉取RSS失败");
+  return await res.text();
+}
+
+// ========== 安卓Via/iPhone 兼容导出JSON函数 修复blob无法下载 ==========
+function exportJsonFile(jsonData, fileName = "rss订阅备份.json") {
+  const jsonStr = JSON.stringify(jsonData, null, 2);
+  const blob = new Blob([jsonStr], { type: "application/octet-stream" });
+  const blobUrl = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = blobUrl;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+
+  setTimeout(() => {
+    URL.revokeObjectURL(blobUrl);
+    document.body.removeChild(a);
+  }, 800);
+
+  setTimeout(() => {
+    const reader = new FileReader();
+    reader.readAsDataURL(blob);
+    reader.onloadend = () => {
+      const a2 = document.createElement("a");
+      a2.href = reader.result;
+      a2.download = fileName;
+      document.body.appendChild(a2);
+      a2.click();
+      document.body.removeChild(a2);
+    };
+  }, 1000);
 }
 
 const pageHome = document.getElementById("pageHome");
@@ -470,7 +481,7 @@ async function handleHomeClick(){
     try{
         allArticles = await loadAllRSS();
     }catch(err){
-        articleBox.innerHTML = `<div class="error-tip">所有代理均请求失败，请稍后重试或更换RSS源</div>`;
+        articleBox.innerHTML = `<div class="error-tip">RSS拉取失败：${err.message}</div>`;
         return;
     }
     let filterArticles = allArticles;
@@ -601,7 +612,6 @@ function renderFav(){
     bindVideoPauseObserver();
 }
 
-// 视频直接原生src，移除所有代理拼接逻辑
 function buildCard(item, isFav = false){
     let mediaHtml = "";
     const imgs = [...new Set(item.media.imgs || [])];
@@ -609,15 +619,14 @@ function buildCard(item, isFav = false){
     if(videos.length > 0){
         const posterImg = imgs.length > 0 ? imgs[0] : "";
         const posterAttr = posterImg ? `poster="${posterImg}"` : "";
-        // 直接原生mp4链接，无codetabs代理前缀
         const rawVideoUrl = videos[0];
-let videoSrc;
-if(rawVideoUrl.includes("twimg.com")){
-  videoSrc = `/media-proxy?url=${encodeURIComponent(rawVideoUrl)}`;
-}else{
-  videoSrc = rawVideoUrl;
-}
-mediaHtml = `<div class="video-single-wrap"><video class="media-video" controls preload="metadata" playsinline ${posterAttr} src="${videoSrc}"></video></div>`;
+        let videoSrc;
+        if(rawVideoUrl.includes("twimg.com")){
+          videoSrc = `/media-proxy?url=${encodeURIComponent(rawVideoUrl)}`;
+        }else{
+          videoSrc = rawVideoUrl;
+        }
+        mediaHtml = `<div class="video-single-wrap"><video class="media-video" controls preload="metadata" playsinline ${posterAttr} src="${videoSrc}"></video></div>`;
     }else if(imgs.length > 0){
         const total = imgs.length;
         const gridClass = total === 1 ? "grid-single" : "grid-multi";
@@ -630,13 +639,13 @@ mediaHtml = `<div class="video-single-wrap"><video class="media-video" controls 
                 overlay = `<div class="img-overlay-more">+${rest}张</div>`;
             }
             const rawImgUrl = src;
-let imgSrc;
-if(rawImgUrl.includes("twimg.com")){
-  imgSrc = `/media-proxy?url=${encodeURIComponent(rawImgUrl)}`;
-}else{
-  imgSrc = rawImgUrl;
-}
-mediaHtml += `<div class="grid-img-box"><img class="grid-img" data-imggroup='${JSON.stringify(imgs)}' src="${imgSrc}" loading="lazy">${overlay}</div>`;
+            let imgSrc;
+            if(rawImgUrl.includes("twimg.com")){
+              imgSrc = `/media-proxy?url=${encodeURIComponent(rawImgUrl)}`;
+            }else{
+              imgSrc = rawImgUrl;
+            }
+            mediaHtml += `<div class="grid-img-box"><img class="grid-img" data-imggroup='${JSON.stringify(imgs)}' src="${imgSrc}" loading="lazy">${overlay}</div>`;
         })
         mediaHtml += `</div></div>`;
     }
@@ -644,7 +653,6 @@ mediaHtml += `<div class="grid-img-box"><img class="grid-img" data-imggroup='${J
     const favTxt = isCollected ? "已收藏" : "收藏";
     const favCls = isCollected ? "btn-fav collected" : "btn-fav";
     const titleRaw = item.title || "无标题";
-    // 纯文本标题，无a标签跳转
     if(isFav){
         return `
         <div class="tweet-card" data-link="${item.link}" data-source-url="${item.sourceUrl}">
@@ -798,11 +806,11 @@ function downloadFile(url, name){
 async function loadAllRSS(){
     const taskList = feedList.map(async f=>{
         try{
-            const xmlText = await fetchWithAutoProxy(f.url);
+            const xmlText = await fetchRSSFeed(f.url);
             if(!xmlText) return [];
             return parseRSS(xmlText, f.name, f.url, f.category);
         }catch(e){
-            console.warn(`订阅【${f.name}】请求全部代理失败`);
+            console.warn(`订阅【${f.name}】拉取失败：`, e.message);
             return [];
         }
     })
@@ -902,12 +910,7 @@ document.getElementById("importFileInput").onchange = function(e){
     reader.readAsText(file);
 }
 document.getElementById("exportAllBtn").onclick = function(){
-    const jsonStr = JSON.stringify(feedList,null,2);
-    const blob = new Blob([jsonStr],{type:"application/json"});
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "rss订阅备份.json";
-    document.body.appendChild(a);a.click();a.remove();
+    exportJsonFile(feedList, "rss订阅备份.json");
 }
 document.getElementById("delAllFeed").onclick = function(){
     if(confirm("确定清空全部订阅？收藏不会同步删除")){
