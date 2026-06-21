@@ -1,66 +1,66 @@
 export async function onRequest({ request }) {
   const urlObj = new URL(request.url);
   const path = urlObj.pathname;
-  const target = urlObj.searchParams.get("url");
+  const targetUrl = urlObj.searchParams.get("url");
 
-  if (!target) {
-    return new Response("缺少url参数", { status: 400 });
+  if (!targetUrl) {
+    return new Response("缺少url请求参数", { status: 400 });
   }
 
-  // RSS订阅代理 /rss-proxy
+  // RSS代理路由
   if (path === "/rss-proxy") {
     try {
-      const res = await fetch(target, {
+      const fetchRes = await fetch(targetUrl, {
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0.0.0 Safari/537.36",
-          "Accept": "application/rss+xml,application/xml;q=0.9,*/*;q=0.8",
-          "Referer": "https://reddit.com/"
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+          "Accept": "application/rss+xml,application/xml;q=0.9,*/*;q=0.8"
         },
         signal: AbortSignal.timeout(10000)
       });
-      const rawText = await res.text();
-      if(rawText.trim().length < 80 || rawText.includes("<!DOCTYPE html>")){
-          throw new Error("目标返回非XML");
+      const rawText = await fetchRes.text();
+      // 拦截HTML拦截页面
+      if(rawText.includes("<!DOCTYPE html>") || rawText.trim().length < 60) {
+        throw new Error("目标服务器返回非RSS XML内容");
       }
-      const headers = new Headers(res.headers);
-      headers.set("Access-Control-Allow-Origin", "*");
-      headers.set("Access-Control-Allow-Methods", "GET,OPTIONS");
-      headers.set("Cache-Control", "public, max-age=300");
-      return new Response(rawText, { status: res.status, headers });
+      const respHeaders = new Headers(fetchRes.headers);
+      respHeaders.set("Access-Control-Allow-Origin", "*");
+      respHeaders.set("Access-Control-Allow-Methods", "GET,OPTIONS");
+      respHeaders.set("Cache-Control", "public, max-age=300");
+      return new Response(rawText, { status: fetchRes.status, headers: respHeaders });
     } catch (err) {
-      return new Response("RSS代理失败：" + err.message, { status: 502 });
+      return new Response("RSS代理请求失败：" + err.message, { status: 502 });
     }
   }
 
-  // 媒体代理 /media-proxy
+  // 媒体图片/视频代理路由
   if (path === "/media-proxy") {
     const allowHosts = ["video.twimg.com", "pbs.twimg.com"];
-    const targetHost = new URL(target).hostname;
+    const targetHost = new URL(targetUrl).hostname;
     if (!allowHosts.includes(targetHost)) {
-      return Response.redirect(target, 302);
+      return Response.redirect(targetUrl, 302);
     }
     try {
-      const res = await fetch(target, {
+      const fetchRes = await fetch(targetUrl, {
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0.0.0 Safari/537.36"
         },
         signal: AbortSignal.timeout(10000)
       });
-      const headers = new Headers(res.headers);
-      headers.set("Access-Control-Allow-Origin", "*");
-      headers.set("Access-Control-Allow-Methods", "GET,OPTIONS");
-      headers.set("Cache-Control", "public, max-age=86400");
-      return new Response(res.body, { status: res.status, headers });
+      const respHeaders = new Headers(fetchRes.headers);
+      respHeaders.set("Access-Control-Allow-Origin", "*");
+      respHeaders.set("Access-Control-Allow-Methods", "GET,OPTIONS");
+      respHeaders.set("Cache-Control", "public, max-age=86400");
+      return new Response(fetchRes.body, { status: fetchRes.status, headers: respHeaders });
     } catch (err) {
-      return new Response("媒体代理失败：" + err.message, { status: 502 });
+      return new Response("媒体代理请求失败：" + err.message, { status: 502 });
     }
   }
 
-  // 无匹配路由返回404，杜绝返回首页
+  // 无匹配路由强制返回404，杜绝返回首页
   return new Response("接口不存在", { status: 404 });
 }
 
-// 跨域OPTIONS预检
+// 跨域OPTIONS预检请求处理
 export async function onRequestOptions() {
   return new Response(null, {
     status: 204,
