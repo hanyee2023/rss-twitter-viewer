@@ -610,7 +610,14 @@ function buildCard(item, isFav = false){
         const posterImg = imgs.length > 0 ? imgs[0] : "";
         const posterAttr = posterImg ? `poster="${posterImg}"` : "";
         // 直接原生mp4链接，无codetabs代理前缀
-        mediaHtml = `<div class="video-single-wrap"><video class="media-video" controls preload="metadata" playsinline ${posterAttr} src="${videos[0]}"></video></div>`;
+        const rawVideoUrl = videos[0];
+let videoSrc;
+if(rawVideoUrl.includes("twimg.com")){
+  videoSrc = `/media-proxy?url=${encodeURIComponent(rawVideoUrl)}`;
+}else{
+  videoSrc = rawVideoUrl;
+}
+mediaHtml = `<div class="video-single-wrap"><video class="media-video" controls preload="metadata" playsinline ${posterAttr} src="${videoSrc}"></video></div>`;
     }else if(imgs.length > 0){
         const total = imgs.length;
         const gridClass = total === 1 ? "grid-single" : "grid-multi";
@@ -622,7 +629,14 @@ function buildCard(item, isFav = false){
                 const rest = total - 4;
                 overlay = `<div class="img-overlay-more">+${rest}张</div>`;
             }
-            mediaHtml += `<div class="grid-img-box"><img class="grid-img" data-imggroup='${JSON.stringify(imgs)}' src="${src}" loading="lazy">${overlay}</div>`;
+            const rawImgUrl = src;
+let imgSrc;
+if(rawImgUrl.includes("twimg.com")){
+  imgSrc = `/media-proxy?url=${encodeURIComponent(rawImgUrl)}`;
+}else{
+  imgSrc = rawImgUrl;
+}
+mediaHtml += `<div class="grid-img-box"><img class="grid-img" data-imggroup='${JSON.stringify(imgs)}' src="${imgSrc}" loading="lazy">${overlay}</div>`;
         })
         mediaHtml += `</div></div>`;
     }
