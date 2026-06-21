@@ -353,7 +353,7 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
 <script>
 const FEED_KEY = "local_rss_feeds";
 const FAV_KEY = "rss_fav_list";
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 50; // 固定每页50条不变
 const FETCH_TIMEOUT = 3000;
 let feedList = JSON.parse(localStorage.getItem(FEED_KEY)) || [];
 let favList = JSON.parse(localStorage.getItem(FAV_KEY)) || [];
@@ -365,6 +365,7 @@ let currentPreviewImgs = [];
 let videoObserver = null;
 let filterSourceUrl = "";
 
+// RSS订阅解析代理（仅用于拉取feed，不处理视频图片）
 const PROXY_POOL = [
     "https://api.codetabs.com/v1/proxy?quest=",
     "https://staging.corsproxy.io/?",
@@ -396,13 +397,7 @@ async function fetchWithAutoProxy(targetUrl) {
     }
     return "";
 }
-function getVideoProxySrc(rawUrl) {
-    if (window.location.protocol === "file:") return rawUrl;
-    const encoded = encodeURIComponent(rawUrl);
-    return PROXY_POOL[0] + encoded;
-}
 
-// DOM元素全局缓存
 const pageHome = document.getElementById("pageHome");
 const pageManage = document.getElementById("pageManage");
 const pageAdd = document.getElementById("pageAdd");
@@ -436,57 +431,40 @@ function bindVideoPauseObserver(){
     document.querySelectorAll(".media-video").forEach(v=>videoObserver.observe(v));
 }
 
-// 修复页面切换函数，修复按钮失效核心BUG
-function showPage(targetPage, pageName) {
-    // 隐藏所有页面
+function showPage(targetDom, titleText) {
     pageHome.style.display = "none";
     pageManage.style.display = "none";
     pageAdd.style.display = "none";
     pageFav.style.display = "none";
-    // 清空面板
     feedPanel.innerHTML = "";
     favPanel.innerHTML = "";
-    // 激活目标页面
-    targetPage.style.display = "block";
-    pageTitle.textContent = pageName;
-    // 清除全部按钮active
+    targetDom.style.display = "block";
+    pageTitle.textContent = titleText;
     allBtns.forEach(b => b.classList.remove("active"));
-    // 标记当前按钮激活
-    if(pageName === "本地RSS媒体阅读器") btnHome.classList.add("active");
-    if(pageName === "管理订阅源") btnManage.classList.add("active");
-    if(pageName === "添加订阅") btnAdd.classList.add("active");
-    if(pageName === "我的收藏") btnFav.classList.add("active");
-    // 非主页清空筛选
-    if(pageName !== "本地RSS媒体阅读器") {
-        filterSourceUrl = "";
-    }
-    // 加载对应页面内容
-    if(pageName === "本地RSS媒体阅读器") handleHomeClick();
-    if(pageName === "管理订阅源") renderManage();
-    if(pageName === "我的收藏") renderFav();
+    if(titleText === "本地RSS媒体阅读器") btnHome.classList.add("active");
+    if(titleText === "管理订阅源") btnManage.classList.add("active");
+    if(titleText === "添加订阅") btnAdd.classList.add("active");
+    if(titleText === "我的收藏") btnFav.classList.add("active");
+    if(titleText !== "本地RSS媒体阅读器") filterSourceUrl = "";
+    if(titleText === "本地RSS媒体阅读器") handleHomeClick();
+    if(titleText === "管理订阅源") renderManage();
+    if(titleText === "我的收藏") renderFav();
 }
 
-// 修复按钮点击绑定，直接传参避免this上下文丢失
-btnHome.onclick = function(){
+btnHome.onclick = () => {
     filterSourceUrl = "";
     showPage(pageHome, "本地RSS媒体阅读器");
 };
-btnManage.onclick = function(){
-    showPage(pageManage, "管理订阅源");
-};
-btnAdd.onclick = function(){
-    showPage(pageAdd, "添加订阅");
-};
-btnFav.onclick = function(){
-    showPage(pageFav, "我的收藏");
-};
+btnManage.onclick = () => showPage(pageManage, "管理订阅源");
+btnAdd.onclick = () => showPage(pageAdd, "添加订阅");
+btnFav.onclick = () => showPage(pageFav, "我的收藏");
 
 async function handleHomeClick(){
     if(scrollObserver) scrollObserver.disconnect();
     renderPageNum = 0;
     articleBox.innerHTML = `<div class="empty-tip">正在加载订阅内容，请稍候...</div>`;
     if(feedList.length === 0){
-        articleBox.innerHTML = `<div class="empty-tip">暂无订阅，请切换至【添加订阅】新增RSS链接</div>`;
+        articleBox.innerHTML = `<div class="empty-tip">暂无文章内容</div>`;
         return;
     }
     try{
@@ -623,7 +601,7 @@ function renderFav(){
     bindVideoPauseObserver();
 }
 
-// 标题纯文本无a链接，视频自动代理适配线上/本地
+// 视频直接原生src，移除所有代理拼接逻辑
 function buildCard(item, isFav = false){
     let mediaHtml = "";
     const imgs = [...new Set(item.media.imgs || [])];
@@ -631,8 +609,8 @@ function buildCard(item, isFav = false){
     if(videos.length > 0){
         const posterImg = imgs.length > 0 ? imgs[0] : "";
         const posterAttr = posterImg ? `poster="${posterImg}"` : "";
-        const videoSrc = getVideoProxySrc(videos[0]);
-        mediaHtml = `<div class="video-single-wrap"><video class="media-video" controls preload="metadata" playsinline ${posterAttr} src="${videoSrc}"></video></div>`;
+        // 直接原生mp4链接，无codetabs代理前缀
+        mediaHtml = `<div class="video-single-wrap"><video class="media-video" controls preload="metadata" playsinline ${posterAttr} src="${videos[0]}"></video></div>`;
     }else if(imgs.length > 0){
         const total = imgs.length;
         const gridClass = total === 1 ? "grid-single" : "grid-multi";
@@ -652,6 +630,7 @@ function buildCard(item, isFav = false){
     const favTxt = isCollected ? "已收藏" : "收藏";
     const favCls = isCollected ? "btn-fav collected" : "btn-fav";
     const titleRaw = item.title || "无标题";
+    // 纯文本标题，无a标签跳转
     if(isFav){
         return `
         <div class="tweet-card" data-link="${item.link}" data-source-url="${item.sourceUrl}">
@@ -694,18 +673,6 @@ function buildCard(item, isFav = false){
 
 function bindAllCardEvent(){
     document.querySelectorAll(".grid-img").forEach((img)=>{
-        img.onerror = function(){
-            const originalSrc = this.src;
-            let proxyIdx = 0;
-            const tryNextProxy = ()=>{
-                if(proxyIdx >= PROXY_POOL.length) return;
-                const encoded = encodeURIComponent(originalSrc);
-                this.src = PROXY_POOL[proxyIdx] + encoded;
-                proxyIdx++;
-                this.onerror = tryNextProxy;
-            }
-            tryNextProxy();
-        }
         img.onclick = function(){
             const imgs = JSON.parse(this.dataset.imggroup);
             currentPreviewImgs = imgs;
@@ -741,8 +708,7 @@ function bindAllCardEvent(){
             const imgs = JSON.parse(this.dataset.img);
             const videos = JSON.parse(this.dataset.video);
             if(videos.length > 0){
-                const dlUrl = window.location.protocol === "file:" ? videos[0] : getVideoProxySrc(videos[0]);
-                downloadFile(dlUrl, "video.mp4");
+                downloadFile(videos[0], "video.mp4");
                 return;
             }
             if(imgs.length === 1){
@@ -772,20 +738,6 @@ function bindAllCardEvent(){
             favList = favList.filter(f=>f.link !== link);
             localStorage.setItem(FAV_KEY, JSON.stringify(favList));
             this.closest(".tweet-card").remove();
-        }
-    })
-    document.querySelectorAll(".media-video").forEach(vid=>{
-        vid.onerror = function(){
-            const rawVidUrl = decodeURIComponent(this.src.split("quest=")[1] || "");
-            if(!rawVidUrl) return;
-            let pIdx = 1;
-            const retryVid = ()=>{
-                if(pIdx >= PROXY_POOL.length) return;
-                this.src = PROXY_POOL[pIdx] + encodeURIComponent(rawVidUrl);
-                pIdx++;
-                this.onerror = retryVid;
-            }
-            retryVid();
         }
     })
 }
