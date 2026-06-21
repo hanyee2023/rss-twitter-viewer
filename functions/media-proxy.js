@@ -12,15 +12,22 @@ export async function onRequest({ request }) {
     try {
       const res = await fetch(target, {
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0.0.0 Safari/537.36",
+          "Accept": "application/rss+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Referer": "https://twitter.com/"
         },
         signal: AbortSignal.timeout(10000)
       });
+      const rawText = await res.text();
+      // 校验返回内容，拦截HTML错误页
+      if(rawText.trim().length < 80 || rawText.includes("<!DOCTYPE html>")){
+          throw new Error("目标RSS源被拦截，返回非XML内容");
+      }
       const newHeaders = new Headers(res.headers);
       newHeaders.set("Access-Control-Allow-Origin", "*");
       newHeaders.set("Access-Control-Allow-Methods", "GET,OPTIONS");
       newHeaders.set("Cache-Control", "public, max-age=300");
-      return new Response(res.body, { status: res.status, headers: newHeaders });
+      return new Response(rawText, { status: res.status, headers: newHeaders });
     } catch (err) {
       return new Response("RSS代理拉取失败：" + err.message, { status: 502 });
     }
@@ -36,7 +43,7 @@ export async function onRequest({ request }) {
     try {
       const res = await fetch(target, {
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0.0.0 Safari/537.36"
         },
         signal: AbortSignal.timeout(10000)
       });
@@ -50,6 +57,7 @@ export async function onRequest({ request }) {
     }
   }
 
+  // 【关键新增兜底】路由不匹配时返回404，不再返回首页HTML
   return new Response("接口不存在", { status: 404 });
 }
 
