@@ -203,7 +203,7 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     display:block;
     background:#000;
     object-fit:contain;
-    preload:"auto";
+    preload:"none";
     playsinline;
 }
 .bottom-tip{text-align:center;padding:18px 0;color:#999;font-size:12px;}
@@ -372,7 +372,7 @@ function getProxyUrl(rawUrl) {
 // 全局变量仅定义一次
 const FEED_KEY = "local_rss_feeds";
 const FAV_KEY = "rss_fav_list";
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 25;
 const FETCH_TIMEOUT = 10000;
 let feedList = JSON.parse(localStorage.getItem(FEED_KEY)) || [];
 let favList = JSON.parse(localStorage.getItem(FAV_KEY)) || [];
@@ -587,7 +587,7 @@ function renderCardList(list){
     return html;
 }
 
-// ========== 核心优化：构建卡片时直接输出代理链接，消除二次请求 ==========
+// ========== 核心优化：构建卡片时直接输出代理链接，静默不预加载视频 ==========
 function buildCard(item, isFav = false){
     let mediaHtml = "";
     const imgs = [...new Set(item.media.imgs || [])];
@@ -597,7 +597,8 @@ function buildCard(item, isFav = false){
         const posterProxy = posterImg ? getProxyUrl(posterImg) : "";
         const videoProxy = getProxyUrl(videos[0]);
         let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
-        mediaHtml = `<div class="video-single-wrap"><video class="media-video" controls preload="auto" playsinline ${posterAttr} src="${videoProxy}"></video></div>`;
+        // preload="none" 页面完全静默不加载视频，点击才缓冲播放
+        mediaHtml = `<div class="video-single-wrap"><video class="media-video" controls preload="none" playsinline ${posterAttr} src="${videoProxy}"></video></div>`;
     }else if(imgs.length > 0){
         const total = imgs.length;
         const gridClass = total === 1 ? "grid-single" : "grid-multi";
@@ -867,7 +868,6 @@ document.getElementById("importFeed").onchange = function(e){
                 }
             })
             localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
-            // 导入完成强制刷新管理订阅列表
             renderManage();
             alert(`成功导入${addNum}条订阅，切换主页加载内容`);
         }catch(err){alert("备份文件格式错误");}
@@ -937,7 +937,7 @@ function renderManage(){
 window.onload = async function(){
     initVideoObserver();
     await initLoadAllCache();
-    showPage(pageHome, "本地RSS媒体阅读器");
+    showPage(pageHome, "青柠媒体阅读器");
 }
 </script>
 </body>
