@@ -401,11 +401,37 @@ async function fetchRSSFeed(rssUrl) {
   return await res.text();
 }
 
-// ========== 【修复后全平台兼容导出函数】电脑/iPhone/安卓Via全部可用，解决blob拦截 ==========
-function exportJsonFile(jsonData, fileName = "rss订阅备份.json") {
+// ========== 升级后全兼容导出函数（Worker中转优先，双重降级兜底）
+async function exportJsonFile(jsonData, fileName = "rss订阅备份.json") {
+  // 第一层：优先调用Cloudflare Worker标准HTTP下载，绕过手机blob拦截
+  try {
+    const res = await fetch("/download-backup", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ feeds: jsonData })
+    })
+    if(res.ok) {
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      showToast("备份文件下载成功");
+      return;
+    }
+  } catch(e) {
+    console.warn("Worker中转下载失败，切换本地Blob方案", e);
+  }
+
+  // 第二层：原生Blob兜底（电脑、新版安卓Chrome）
   try {
     const jsonStr = JSON.stringify(jsonData, null, 2);
-    // 方案1：标准Blob下载（电脑、新版安卓Chrome可用）
     const blob = new Blob([jsonStr], { type: "application/json;charset=utf-8" });
     const blobUrl = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -417,10 +443,10 @@ function exportJsonFile(jsonData, fileName = "rss订阅备份.json") {
     URL.revokeObjectURL(blobUrl);
     return;
   } catch (e) {
-    console.warn("Blob导出失败，切换Base64兼容方案", e);
+    console.warn("Blob下载失败，切换Base64兜底", e);
   }
 
-  // 方案2：Base64兜底，兼容iPhone、Via浏览器、拦截blob的移动端
+  // 第三层：Base64 DataURL终极兜底（iPhone、Via、老旧安卓浏览器）
   const jsonStr = JSON.stringify(jsonData, null, 2);
   const base64 = btoa(unescape(encodeURIComponent(jsonStr)));
   const dataUrl = `data:application/json;base64,${base64}`;
@@ -430,6 +456,15 @@ function exportJsonFile(jsonData, fileName = "rss订阅备份.json") {
   document.body.appendChild(a2);
   a2.click();
   a2.remove();
+  showToast("已使用兼容模式导出，若仍失败请复制备份文本保存");
+}
+
+// 轻量提示弹窗（如果你的代码已有showToast函数，只保留上面exportJsonFile即可，不用重复粘贴）
+function showToast(msg) {
+  const toast = document.getElementById("slideTip");
+  toast.innerText = msg;
+  toast.style.display = "block";
+  setTimeout(()=>toast.style.display = "none", 3000);
 }
 
 const pageHome = document.getElementById("pageHome");
