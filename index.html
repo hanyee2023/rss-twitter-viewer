@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>本地RSS媒体阅读器 V2.0</title>
+<title>本地RSS媒体阅读器 V3.0</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto;}
 html {
@@ -199,7 +199,7 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     display:block;
     background:#000;
     object-fit:contain;
-    preload:none;
+    preload:"auto";
     playsinline;
 }
 .bottom-tip{text-align:center;padding:18px 0;color:#999;font-size:12px;}
@@ -351,55 +351,19 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
 </div>
 <div class="tip-toast" id="slideTip"></div>
 <script>
-// 全局自动代理推特图片视频，自执行函数避免变量污染阻塞脚本
-(function(){
-  const origin = window.location.origin;
-  // 统一媒体地址转换逻辑
-  function proxyMedia(prop, val) {
-    if ((prop === "src" || prop === "poster") && typeof val === "string") {
-      // 后续新增域名只在这里追加 || val.includes("xxx.xxx")
-      if (val.includes("video.twimg.com") 
-          || val.includes("pbs.twimg.com") 
-          || val.includes("video.3go.")) {
-        return `${origin}/media-proxy?url=${encodeURIComponent(val)}`;
-      }
+// 媒体域名白名单：推特 + 3go全部走代理，线上绕过跨域
+const PROXY_DOMAINS = ["video.twimg.com", "pbs.twimg.com", "video.3go.fun"];
+const origin = window.location.origin;
+// 统一转换媒体链接
+function getProxyUrl(rawUrl) {
+    if (typeof rawUrl !== "string") return rawUrl;
+    for (const d of PROXY_DOMAINS) {
+        if (rawUrl.includes(d)) {
+            return `${origin}/media-proxy?url=${encodeURIComponent(rawUrl)}`;
+        }
     }
-    return val;
-  }
-
-  // 劫持 <video> src 属性
-  Object.defineProperty(HTMLMediaElement.prototype, "src", {
-    set(v) {
-      this._src = proxyMedia("src", v);
-      this.setAttribute("src", this._src);
-    },
-    get() {
-      return this._src || "";
-    }
-  });
-
-  // 劫持 video poster 封面
-  Object.defineProperty(HTMLVideoElement.prototype, "poster", {
-    set(v) {
-      this._poster = proxyMedia("poster", v);
-      this.setAttribute("poster", this._poster);
-    },
-    get() {
-      return this._poster || "";
-    }
-  });
-
-  // 劫持 <img> 图片src
-  Object.defineProperty(HTMLImageElement.prototype, "src", {
-    set(v) {
-      this._src = proxyMedia("src", v);
-      this.setAttribute("src", this._src);
-    },
-    get() {
-      return this._src || "";
-    }
-  });
-})();
+    return rawUrl;
+}
 
 // 全局变量仅定义一次
 const FEED_KEY = "local_rss_feeds";
@@ -415,18 +379,17 @@ let scrollObserver = null;
 let currentPreviewImgs = [];
 let videoObserver = null;
 let filterSourceUrl = "";
-let localCacheArticles = []; // 本地缓存文章，用于打开页面秒渲染
+let localCacheArticles = [];
 let hasNewUpdate = false;
 let newArticleCount = 0;
 
-// ========== CF RSS代理请求函数【已修改：仅原生X / RSSHub推特订阅走代理，其余直连不减速】 ==========
+// ========== RSS拉取代理 ==========
 async function fetchRSSFeed(rssUrl) {
   if (window.location.protocol === "file:") {
     const res = await fetch(rssUrl, { signal: AbortSignal.timeout(FETCH_TIMEOUT) });
     if (!res.ok) throw new Error("本地RSS请求失败");
     return await res.text();
   }
-  // 精准判断两类需要代理的链接：原生X RSS / RSSHub中包含twitter的订阅
   const isNativeTwitter = rssUrl.includes("twitter.com") || rssUrl.includes("x.com");
   const isRssHubTwitter = rssUrl.includes("rsshub") && rssUrl.includes("twitter");
   let realFetchUrl = rssUrl;
@@ -438,11 +401,10 @@ async function fetchRSSFeed(rssUrl) {
   return await res.text();
 }
 
-// ========== 【修复后全平台兼容导出函数】电脑/iPhone/安卓Via全部可用，解决blob拦截 ==========
+// 导出兼容函数
 function exportJsonFile(jsonData, fileName = "rss订阅备份.json") {
   try {
     const jsonStr = JSON.stringify(jsonData, null, 2);
-    // 方案1：标准Blob下载（电脑、新版安卓Chrome可用）
     const blob = new Blob([jsonStr], { type: "application/json;charset=utf-8" });
     const blobUrl = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -454,19 +416,16 @@ function exportJsonFile(jsonData, fileName = "rss订阅备份.json") {
     URL.revokeObjectURL(blobUrl);
     return;
   } catch (e) {
-    console.warn("Blob导出失败，切换Base64兼容方案", e);
+    const jsonStr = JSON.stringify(jsonData, null, 2);
+    const base64 = btoa(unescape(encodeURIComponent(jsonStr)));
+    const dataUrl = `data:application/json;base64,${base64}`;
+    const a2 = document.createElement("a");
+    a2.href = dataUrl;
+    a2.download = fileName;
+    document.body.appendChild(a2);
+    a2.click();
+    a2.remove();
   }
-
-  // 方案2：Base64兜底，兼容iPhone、Via浏览器、拦截blob的移动端
-  const jsonStr = JSON.stringify(jsonData, null, 2);
-  const base64 = btoa(unescape(encodeURIComponent(jsonStr)));
-  const dataUrl = `data:application/json;base64,${base64}`;
-  const a2 = document.createElement("a");
-  a2.href = dataUrl;
-  a2.download = fileName;
-  document.body.appendChild(a2);
-  a2.click();
-  a2.remove();
 }
 
 const pageHome = document.getElementById("pageHome");
@@ -502,7 +461,7 @@ function bindVideoPauseObserver(){
     document.querySelectorAll(".media-video").forEach(v=>videoObserver.observe(v));
 }
 
-// 页面切换函数（修复：切换管理/收藏不破坏主页缓存）
+// 页面切换
 function showPage(targetDom, titleText) {
     pageHome.style.display = "none";
     pageManage.style.display = "none";
@@ -518,9 +477,7 @@ function showPage(targetDom, titleText) {
     if(titleText === "添加订阅") btnAdd.classList.add("active");
     if(titleText === "我的收藏") btnFav.classList.add("active");
     if(titleText === "本地RSS媒体阅读器") {
-        // 打开主页优先渲染本地缓存，不等待网络
         renderHomeFromCache();
-        // 后台静默检测更新
         silentCheckUpdate();
     } else if(titleText === "管理订阅源") {
         renderManage();
@@ -537,7 +494,7 @@ btnManage.onclick = () => showPage(pageManage, "管理订阅源");
 btnAdd.onclick = () => showPage(pageAdd, "添加订阅");
 btnFav.onclick = () => showPage(pageFav, "我的收藏");
 
-// 1. 优先读取本地缓存，秒渲染页面（核心提速逻辑）
+// 缓存优先渲染
 function renderHomeFromCache() {
     if(scrollObserver) scrollObserver.disconnect();
     renderPageNum = 0;
@@ -553,11 +510,10 @@ function renderHomeFromCache() {
     bindScrollLoadMore();
 }
 
-// 2. 后台静默拉取RSS，对比增量更新，不阻塞现有页面
+// 后台静默更新
 async function silentCheckUpdate() {
     try {
         const newAll = await loadAllRSS();
-        // 对比新旧文章数量
         const oldLinkSet = new Set(localCacheArticles.map(i=>i.link));
         let newCount = 0;
         newAll.forEach(item=>{
@@ -565,7 +521,6 @@ async function silentCheckUpdate() {
         })
         hasNewUpdate = newCount > 0;
         newArticleCount = newCount;
-        // 在页面顶部插入提示条，不清空现有内容
         if(hasNewUpdate) {
             const tipBar = document.createElement("div");
             tipBar.className = "update-tip-bar";
@@ -590,7 +545,6 @@ async function silentCheckUpdate() {
     }
 }
 
-// 手动强制刷新全部（点击更新提示条调用）
 window.mergeNewData = async function(){
     if(scrollObserver) scrollObserver.disconnect();
     allArticles = await loadAllRSS();
@@ -603,7 +557,6 @@ window.mergeNewData = async function(){
     bindScrollLoadMore();
 }
 
-// 初始化加载全部RSS（仅页面首次打开执行一次）
 async function initLoadAllCache() {
     if(feedList.length === 0) return;
     try{
@@ -624,127 +577,23 @@ function renderPagedList(){
     bindVideoPauseObserver();
 }
 
-function renderPartialCardList(list, limit){
-    const slice = list.slice(0, limit);
-    return renderCardList(slice);
-}
-
 function renderCardList(list){
     let html = "";
     list.forEach(item => html += buildCard(item));
     return html;
 }
 
-// 滚动到底追加50条，不一次性加载全部
-function bindScrollLoadMore(){
-    if(scrollObserver) scrollObserver.disconnect();
-    const loadTip = articleBox.querySelector(".load-more-tip");
-    if(!loadTip) return;
-    scrollObserver = new IntersectionObserver((entries)=>{
-        if(entries[0].isIntersecting){
-            scrollObserver.disconnect();
-            renderPageNum += 1;
-            const end = renderPageNum * PAGE_SIZE;
-            const newSlice = currentArticles.slice(0, end);
-            let html = "";
-            const tipBar = articleBox.querySelector(".update-tip-bar, .no-update-tip");
-            if(tipBar) html += tipBar.outerHTML;
-            html += renderCardList(newSlice);
-            html += end < currentArticles.length ? `<div class="load-more-tip">滚动加载更多...</div>` : `<div class="bottom-tip">全部内容加载完毕</div>`;
-            articleBox.innerHTML = html;
-            bindAllCardEvent();
-            bindVideoPauseObserver();
-            bindScrollLoadMore();
-        }
-    }, {rootMargin:"200px 0px"});
-    scrollObserver.observe(loadTip);
-}
-
-function renderManage(){
-    if(feedList.length === 0){
-        feedPanel.innerHTML = `<div class="empty-tip">暂无订阅源</div>`;
-        return;
-    }
-    let html = "";
-    const reverseFeed = [...feedList].reverse();
-    reverseFeed.forEach((f, idx)=>{
-        const realIndex = idx + 1;
-        html += `
-        <div class="feed-item ${f.category==="video"?"type-video":"type-img"}" data-idx="${feedList.indexOf(f)}" data-source-url="${f.url}">
-            <div class="feed-index">${realIndex}</div>
-            <div class="feed-info">
-                <div class="feed-name">${f.name||"未命名订阅"}</div>
-                <div style="font-size:12px;color:#777;">${f.category==="img"?"图片类":"视频类"}</div>
-            </div>
-            <div class="feed-btn-group">
-                <button class="view-feed" data-source="${f.url}">查看</button>
-                <button class="edit" data-idx="${feedList.indexOf(f)}">编辑</button>
-                <button class="del" data-idx="${feedList.indexOf(f)}">删除</button>
-            </div>
-        </div>`;
-    })
-    feedPanel.innerHTML = html;
-    feedPanel.onclick = function(e){
-        const t = e.target;
-        const idx = Number(t.dataset.idx);
-        if(t.classList.contains("view-feed")){
-            filterSourceUrl = t.dataset.source;
-            showPage(pageHome, "本地RSS媒体阅读器");
-            return;
-        }
-        if(t.classList.contains("del")){
-            feedList.splice(idx,1);
-            localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
-            renderManage();
-        }
-        if(t.classList.contains("edit")){
-            const f = feedList[idx];
-            document.getElementById("editIndex").value = idx;
-            document.getElementById("editName").value = f.name||"";
-            document.getElementById("editCat").value = f.category||"img";
-            document.getElementById("editUrl").value = f.url;
-            editModal.style.display = "flex";
-        }
-    }
-}
-
-function renderFav(){
-    if(favList.length === 0){
-        favPanel.innerHTML = `<div class="empty-tip">暂无收藏内容，前往主页收藏文章</div>`;
-        return;
-    }
-    let html = "";
-    favList.forEach(item => html += buildCard(item, true));
-    html += `<div class="bottom-tip">无更多收藏</div>`;
-    favPanel.innerHTML = html;
-    bindAllCardEvent();
-    bindVideoPauseObserver();
-}
-
-// 修复poster封面代理 + preload="none"
+// ========== 核心优化：构建卡片时直接输出代理链接，消除二次请求 ==========
 function buildCard(item, isFav = false){
     let mediaHtml = "";
     const imgs = [...new Set(item.media.imgs || [])];
     const videos = item.media.videos || [];
     if(videos.length > 0){
         const posterImg = imgs.length > 0 ? imgs[0] : "";
-        let posterAttr = "";
-        if(posterImg){
-            if(posterImg.includes("pbs.twimg.com")){
-                const proxyPoster = `${window.location.origin}/media-proxy?url=${encodeURIComponent(posterImg)}`;
-                posterAttr = `poster="${proxyPoster}"`;
-            }else{
-                posterAttr = `poster="${posterImg}"`;
-            }
-        }
-        const rawVideoUrl = videos[0];
-        let videoSrc;
-        if(rawVideoUrl.includes("twimg.com")){
-          videoSrc = `/media-proxy?url=${encodeURIComponent(rawVideoUrl)}`;
-        }else{
-          videoSrc = rawVideoUrl;
-        }
-        mediaHtml = `<div class="video-single-wrap"><video class="media-video" controls preload="none" playsinline ${posterAttr} src="${videoSrc}"></video></div>`;
+        const posterProxy = posterImg ? getProxyUrl(posterImg) : "";
+        const videoProxy = getProxyUrl(videos[0]);
+        let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
+        mediaHtml = `<div class="video-single-wrap"><video class="media-video" controls preload="auto" playsinline ${posterAttr} src="${videoProxy}"></video></div>`;
     }else if(imgs.length > 0){
         const total = imgs.length;
         const gridClass = total === 1 ? "grid-single" : "grid-multi";
@@ -756,14 +605,8 @@ function buildCard(item, isFav = false){
                 const rest = total - 4;
                 overlay = `<div class="img-overlay-more">+${rest}张</div>`;
             }
-            const rawImgUrl = src;
-            let imgSrc;
-            if(rawImgUrl.includes("twimg.com")){
-              imgSrc = `/media-proxy?url=${encodeURIComponent(rawImgUrl)}`;
-            }else{
-              imgSrc = rawImgUrl;
-            }
-            mediaHtml += `<div class="grid-img-box"><img class="grid-img" data-imggroup='${JSON.stringify(imgs)}' src="${imgSrc}" loading="lazy">${overlay}</div>`;
+            const imgProxy = getProxyUrl(src);
+            mediaHtml += `<div class="grid-img-box"><img class="grid-img" data-imggroup='${JSON.stringify(imgs)}' src="${imgProxy}" loading="lazy">${overlay}</div>`;
         })
         mediaHtml += `</div></div>`;
     }
@@ -848,11 +691,11 @@ function bindAllCardEvent(){
             const imgs = JSON.parse(this.dataset.img);
             const videos = JSON.parse(this.dataset.video);
             if(videos.length > 0){
-                downloadFile(videos[0], "video.mp4");
+                downloadFile(getProxyUrl(videos[0]), "video.mp4");
                 return;
             }
             if(imgs.length === 1){
-                downloadFile(imgs[0], "image.jpg");
+                downloadFile(getProxyUrl(imgs[0]), "image.jpg");
             }else if(imgs.length > 1){
                 alert("多图请长按单张图片保存");
             }else{
@@ -887,7 +730,7 @@ function renderPreviewSlider(imgs, startIndex = 0){
     imgs.forEach(src=>{
         const slide = document.createElement("div");
         slide.className = "preview-slide";
-        slide.innerHTML = `<img class="preview-img" src="${src}" loading="lazy">`;
+        slide.innerHTML = `<img class="preview-img" src="${getProxyUrl(src)}" loading="lazy">`;
         previewWrap.appendChild(slide);
     })
     previewTip.innerText = "";
@@ -1027,7 +870,6 @@ document.getElementById("importFileInput").onchange = function(e){
     }
     reader.readAsText(file);
 }
-// 导出按钮绑定
 document.getElementById("exportAllBtn").onclick = function(){
     exportJsonFile(feedList, "rss订阅备份.json");
 }
@@ -1039,7 +881,6 @@ document.getElementById("delAllFeed").onclick = function(){
     }
 }
 
-// 页面打开：先加载缓存，再渲染主页
 window.onload = async function(){
     initVideoObserver();
     await initLoadAllCache();
