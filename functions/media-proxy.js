@@ -17,7 +17,7 @@ export async function onRequest({ request }) {
   if (!targetUrl) return new Response("缺少url参数", { status: 400 });
 
   // 【修改1】新增video.shturl.域名放行，不再直接302跳转
-  const allowHost = ["video.twimg.com", "pbs.twimg.com", "video.shturl.fun"];
+  const allowHost = ["video.twimg.com", "pbs.twimg.com", "video.3go.fun"];
   const targetHost = new URL(targetUrl).hostname;
   if (!allowHost.includes(targetHost)) {
     return Response.redirect(targetUrl, 302);
