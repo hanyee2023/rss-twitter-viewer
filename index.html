@@ -354,15 +354,51 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
 // 全局自动代理推特图片视频，自执行函数避免变量污染阻塞脚本
 (function(){
   const origin = window.location.origin;
-  const rawSetAttr = Element.prototype.setAttribute;
-  Element.prototype.setAttribute = function(key, val) {
-    if ((key === "src" || key === "poster") && typeof val === "string") {
-      if (val.includes("video.twimg.com") || val.includes("pbs.twimg.com") || val.includes("video.3go.fun")) {
-        val = `${origin}/media-proxy?url=${encodeURIComponent(val)}`;
+  // 统一媒体地址转换逻辑
+  function proxyMedia(prop, val) {
+    if ((prop === "src" || prop === "poster") && typeof val === "string") {
+      // 后续新增域名只在这里追加 || val.includes("xxx.xxx")
+      if (val.includes("video.twimg.com") 
+          || val.includes("pbs.twimg.com") 
+          || val.includes("video.3go.")) {
+        return `${origin}/media-proxy?url=${encodeURIComponent(val)}`;
       }
     }
-    return rawSetAttr.call(this, key, val);
-  };
+    return val;
+  }
+
+  // 劫持 <video> src 属性
+  Object.defineProperty(HTMLMediaElement.prototype, "src", {
+    set(v) {
+      this._src = proxyMedia("src", v);
+      this.setAttribute("src", this._src);
+    },
+    get() {
+      return this._src || "";
+    }
+  });
+
+  // 劫持 video poster 封面
+  Object.defineProperty(HTMLVideoElement.prototype, "poster", {
+    set(v) {
+      this._poster = proxyMedia("poster", v);
+      this.setAttribute("poster", this._poster);
+    },
+    get() {
+      return this._poster || "";
+    }
+  });
+
+  // 劫持 <img> 图片src
+  Object.defineProperty(HTMLImageElement.prototype, "src", {
+    set(v) {
+      this._src = proxyMedia("src", v);
+      this.setAttribute("src", this._src);
+    },
+    get() {
+      return this._src || "";
+    }
+  });
 })();
 
 // 全局变量仅定义一次
