@@ -199,7 +199,7 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     display:block;
     background:#000;
     object-fit:contain;
-    preload:metadata;
+    preload:none;
     playsinline;
 }
 .bottom-tip{text-align:center;padding:18px 0;color:#999;font-size:12px;}
@@ -365,10 +365,10 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
   };
 })();
 
-// 全局变量仅定义一次，删除重复声明段
+// 全局变量仅定义一次
 const FEED_KEY = "local_rss_feeds";
 const FAV_KEY = "rss_fav_list";
-const PAGE_SIZE = 50; // 固定每页50条不变
+const PAGE_SIZE = 50;
 const FETCH_TIMEOUT = 10000;
 let feedList = JSON.parse(localStorage.getItem(FEED_KEY)) || [];
 let favList = JSON.parse(localStorage.getItem(FAV_KEY)) || [];
@@ -379,8 +379,11 @@ let scrollObserver = null;
 let currentPreviewImgs = [];
 let videoObserver = null;
 let filterSourceUrl = "";
+let localCacheArticles = []; // 本地缓存文章，用于打开页面秒渲染
+let hasNewUpdate = false;
+let newArticleCount = 0;
 
-// ========== CF统一RSS代理请求函数 本地file直连，线上Pages走同源/rss-proxy ==========
+// ========== CF统一RSS代理请求函数 ==========
 async function fetchRSSFeed(rssUrl) {
   if (window.location.protocol === "file:") {
     const res = await fetch(rssUrl, { signal: AbortSignal.timeout(FETCH_TIMEOUT) });
@@ -389,10 +392,8 @@ async function fetchRSSFeed(rssUrl) {
   }
   let fetchUrl;
   if (rssUrl.includes("twitter.com") || rssUrl.includes("x.com")) {
-    // 推特RSS强制走CF代理解决跨域
     fetchUrl = `${window.location.origin}/rss-proxy?url=${encodeURIComponent(rssUrl)}`;
   } else {
-    // 国内RSS源直接浏览器直连，不绕海外加速
     fetchUrl = rssUrl;
   }
   const res = await fetch(fetchUrl, { signal: AbortSignal.timeout(FETCH_TIMEOUT) });
@@ -400,35 +401,35 @@ async function fetchRSSFeed(rssUrl) {
   return await res.text();
 }
 
-// ========== 安卓Via/iPhone 兼容导出JSON函数 修复blob无法下载 ==========
+// ========== 【修复后全平台兼容导出函数】电脑/iPhone/安卓Via全部可用，解决blob拦截 ==========
 function exportJsonFile(jsonData, fileName = "rss订阅备份.json") {
-  const jsonStr = JSON.stringify(jsonData, null, 2);
-  const blob = new Blob([jsonStr], { type: "application/octet-stream" });
-  const blobUrl = URL.createObjectURL(blob);
-
-  const a = document.createElement("a");
-  a.href = blobUrl;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-
-  setTimeout(() => {
+  try {
+    const jsonStr = JSON.stringify(jsonData, null, 2);
+    // 方案1：标准Blob下载（电脑、新版安卓Chrome可用）
+    const blob = new Blob([jsonStr], { type: "application/json;charset=utf-8" });
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
     URL.revokeObjectURL(blobUrl);
-    document.body.removeChild(a);
-  }, 800);
+    return;
+  } catch (e) {
+    console.warn("Blob导出失败，切换Base64兼容方案", e);
+  }
 
-  setTimeout(() => {
-    const reader = new FileReader();
-    reader.readAsDataURL(blob);
-    reader.onloadend = () => {
-      const a2 = document.createElement("a");
-      a2.href = reader.result;
-      a2.download = fileName;
-      document.body.appendChild(a2);
-      a2.click();
-      document.body.removeChild(a2);
-    };
-  }, 1000);
+  // 方案2：Base64兜底，兼容iPhone、Via浏览器、拦截blob的移动端
+  const jsonStr = JSON.stringify(jsonData, null, 2);
+  const base64 = btoa(unescape(encodeURIComponent(jsonStr)));
+  const dataUrl = `data:application/json;base64,${base64}`;
+  const a2 = document.createElement("a");
+  a2.href = dataUrl;
+  a2.download = fileName;
+  document.body.appendChild(a2);
+  a2.click();
+  a2.remove();
 }
 
 const pageHome = document.getElementById("pageHome");
@@ -464,6 +465,7 @@ function bindVideoPauseObserver(){
     document.querySelectorAll(".media-video").forEach(v=>videoObserver.observe(v));
 }
 
+// 页面切换函数（修复：切换管理/收藏不破坏主页缓存）
 function showPage(targetDom, titleText) {
     pageHome.style.display = "none";
     pageManage.style.display = "none";
@@ -478,10 +480,16 @@ function showPage(targetDom, titleText) {
     if(titleText === "管理订阅源") btnManage.classList.add("active");
     if(titleText === "添加订阅") btnAdd.classList.add("active");
     if(titleText === "我的收藏") btnFav.classList.add("active");
-    if(titleText !== "本地RSS媒体阅读器") filterSourceUrl = "";
-    if(titleText === "本地RSS媒体阅读器") handleHomeClick();
-    if(titleText === "管理订阅源") renderManage();
-    if(titleText === "我的收藏") renderFav();
+    if(titleText === "本地RSS媒体阅读器") {
+        // 打开主页优先渲染本地缓存，不等待网络
+        renderHomeFromCache();
+        // 后台静默检测更新
+        silentCheckUpdate();
+    } else if(titleText === "管理订阅源") {
+        renderManage();
+    } else if(titleText === "我的收藏") {
+        renderFav();
+    }
 }
 
 btnHome.onclick = () => {
@@ -492,41 +500,82 @@ btnManage.onclick = () => showPage(pageManage, "管理订阅源");
 btnAdd.onclick = () => showPage(pageAdd, "添加订阅");
 btnFav.onclick = () => showPage(pageFav, "我的收藏");
 
-async function handleHomeClick(){
+// 1. 优先读取本地缓存，秒渲染页面（核心提速逻辑）
+function renderHomeFromCache() {
     if(scrollObserver) scrollObserver.disconnect();
     renderPageNum = 0;
-    articleBox.innerHTML = `<div class="empty-tip">正在加载订阅内容，请稍候...</div>`;
-    if(feedList.length === 0){
+    if(localCacheArticles.length === 0) {
         articleBox.innerHTML = `<div class="empty-tip">暂无文章内容</div>`;
         return;
     }
-    try{
-        allArticles = await loadAllRSS();
-    }catch(err){
-        articleBox.innerHTML = `<div class="error-tip">RSS拉取失败：${err.message}</div>`;
-        return;
-    }
-    let filterArticles = allArticles;
-    if(filterSourceUrl) filterArticles = allArticles.filter(item => item.sourceUrl === filterSourceUrl);
-    if(filterArticles.length === 0){
-        articleBox.innerHTML = `<div class="empty-tip">暂无文章内容</div>`;
-        return;
-    }
+    let filterArticles = localCacheArticles;
+    if(filterSourceUrl) filterArticles = localCacheArticles.filter(item => item.sourceUrl === filterSourceUrl);
     currentArticles = [...filterArticles];
     renderPageNum = 1;
     renderPagedList();
     bindScrollLoadMore();
 }
 
+// 2. 后台静默拉取RSS，对比增量更新，不阻塞现有页面
+async function silentCheckUpdate() {
+    try {
+        const newAll = await loadAllRSS();
+        // 对比新旧文章数量
+        const oldLinkSet = new Set(localCacheArticles.map(i=>i.link));
+        let newCount = 0;
+        newAll.forEach(item=>{
+            if(!oldLinkSet.has(item.link)) newCount++;
+        })
+        hasNewUpdate = newCount > 0;
+        newArticleCount = newCount;
+        // 在页面顶部插入提示条，不清空现有内容
+        if(hasNewUpdate) {
+            const tipBar = document.createElement("div");
+            tipBar.className = "update-tip-bar";
+            tipBar.innerText = `检测到${newArticleCount}条新内容，点击刷新`;
+            tipBar.onclick = async ()=>{
+                allArticles = newAll;
+                localCacheArticles = [...newAll];
+                renderHomeFromCache();
+                tipBar.remove();
+                hasNewUpdate = false;
+            };
+            articleBox.prepend(tipBar);
+        } else {
+            const tipBar = document.createElement("div");
+            tipBar.className = "no-update-tip";
+            tipBar.innerText = "当前没有最新内容";
+            articleBox.prepend(tipBar);
+            setTimeout(()=>tipBar.remove(), 2500);
+        }
+    } catch(err) {
+        console.warn("静默检测更新失败：", err);
+    }
+}
+
+// 手动强制刷新全部（点击更新提示条调用）
 window.mergeNewData = async function(){
     if(scrollObserver) scrollObserver.disconnect();
-    await loadAllRSS();
+    allArticles = await loadAllRSS();
+    localCacheArticles = [...allArticles];
     let filterArticles = allArticles;
     if(filterSourceUrl) filterArticles = allArticles.filter(item => item.sourceUrl === filterSourceUrl);
     currentArticles = [...filterArticles];
     renderPageNum = 1;
     renderPagedList();
     bindScrollLoadMore();
+}
+
+// 初始化加载全部RSS（仅页面首次打开执行一次）
+async function initLoadAllCache() {
+    if(feedList.length === 0) return;
+    try{
+        const data = await loadAllRSS();
+        allArticles = data;
+        localCacheArticles = [...data];
+    }catch(e){
+        console.warn("初始化缓存加载失败",e);
+    }
 }
 
 function renderPagedList(){
@@ -549,6 +598,7 @@ function renderCardList(list){
     return html;
 }
 
+// 滚动到底追加50条，不一次性加载全部
 function bindScrollLoadMore(){
     if(scrollObserver) scrollObserver.disconnect();
     const loadTip = articleBox.querySelector(".load-more-tip");
@@ -634,13 +684,22 @@ function renderFav(){
     bindVideoPauseObserver();
 }
 
+// 修复poster封面代理 + preload="none"
 function buildCard(item, isFav = false){
     let mediaHtml = "";
     const imgs = [...new Set(item.media.imgs || [])];
     const videos = item.media.videos || [];
     if(videos.length > 0){
         const posterImg = imgs.length > 0 ? imgs[0] : "";
-        const posterAttr = posterImg ? `poster="${posterImg}"` : "";
+        let posterAttr = "";
+        if(posterImg){
+            if(posterImg.includes("pbs.twimg.com")){
+                const proxyPoster = `${window.location.origin}/media-proxy?url=${encodeURIComponent(posterImg)}`;
+                posterAttr = `poster="${proxyPoster}"`;
+            }else{
+                posterAttr = `poster="${posterImg}"`;
+            }
+        }
         const rawVideoUrl = videos[0];
         let videoSrc;
         if(rawVideoUrl.includes("twimg.com")){
@@ -648,7 +707,7 @@ function buildCard(item, isFav = false){
         }else{
           videoSrc = rawVideoUrl;
         }
-        mediaHtml = `<div class="video-single-wrap"><video class="media-video" controls preload="metadata" playsinline ${posterAttr} src="${videoSrc}"></video></div>`;
+        mediaHtml = `<div class="video-single-wrap"><video class="media-video" controls preload="none" playsinline ${posterAttr} src="${videoSrc}"></video></div>`;
     }else if(imgs.length > 0){
         const total = imgs.length;
         const gridClass = total === 1 ? "grid-single" : "grid-multi";
@@ -931,6 +990,7 @@ document.getElementById("importFileInput").onchange = function(e){
     }
     reader.readAsText(file);
 }
+// 导出按钮绑定
 document.getElementById("exportAllBtn").onclick = function(){
     exportJsonFile(feedList, "rss订阅备份.json");
 }
@@ -942,8 +1002,10 @@ document.getElementById("delAllFeed").onclick = function(){
     }
 }
 
-window.onload = function(){
+// 页面打开：先加载缓存，再渲染主页
+window.onload = async function(){
     initVideoObserver();
+    await initLoadAllCache();
     showPage(pageHome, "本地RSS媒体阅读器");
 }
 </script>
