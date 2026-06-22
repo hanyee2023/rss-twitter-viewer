@@ -277,7 +277,7 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
 .card-bottom-right button{
     border:none;background:transparent;font-size:13px;
 }
-.btn-download{color:#666;}
+.btn-share{color:#666;}
 .btn-fav{color:#666;}
 .btn-fav.collected{color:#ff9500;}
 .fav-card-bottom{
@@ -358,12 +358,15 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
 // 媒体域名白名单：推特 + 3go全部走代理，线上绕过跨域
 const PROXY_DOMAINS = ["video.twimg.com", "pbs.twimg.com", "video.3go.fun"];
 const origin = window.location.origin;
-// 统一转换媒体链接
-function getProxyUrl(rawUrl) {
+// 统一转换媒体链接，新增isFav收藏长效缓存标记
+function getProxyUrl(rawUrl, isFav = false) {
     if (typeof rawUrl !== "string") return rawUrl;
     for (const d of PROXY_DOMAINS) {
         if (rawUrl.includes(d)) {
-            return `${origin}/media-proxy?url=${encodeURIComponent(rawUrl)}`;
+            let url = `${origin}/media-proxy?url=${encodeURIComponent(rawUrl)}`;
+            // 收藏资源追加缓存标识，Worker返回7天长缓存
+            if(isFav) url += "&cache=long";
+            return url;
         }
     }
     return rawUrl;
@@ -450,6 +453,14 @@ const imgPreviewMask = document.getElementById("imgPreviewMask");
 const previewWrap = document.getElementById("previewWrap");
 const previewTip = document.getElementById("previewTip");
 const previewClose = document.getElementById("previewClose");
+const toastDom = document.getElementById("slideTip");
+
+// 轻提示弹窗
+function showToast(msg){
+    toastDom.innerText = msg;
+    toastDom.style.display = "block";
+    setTimeout(()=>toastDom.style.display = "none",1500);
+}
 
 function initVideoObserver(){
     if(videoObserver) return;
@@ -583,19 +594,37 @@ function renderPagedList(){
 
 function renderCardList(list){
     let html = "";
-    list.forEach(item => html += buildCard(item));
+    list.forEach(item => html += buildCard(item, false));
     return html;
 }
 
-// ========== 核心优化：构建卡片时直接输出代理链接，静默不预加载视频 ==========
+// 新增：收藏页面渲染函数，修复空白塌陷，空数据居中提示
+function renderFav(){
+    if(scrollObserver) scrollObserver.disconnect();
+    renderPageNum = 0;
+    // 空收藏垂直居中全屏提示，解决页面看不见内容
+    if(favList.length === 0) {
+        favPanel.innerHTML = `<div class="empty-tip" style="min-height:70vh;display:flex;align-items:center;justify-content:center;flex-direction:column;">暂无收藏内容<br>浏览主页卡片点击收藏按钮添加</div>`;
+        return;
+    }
+    const slice = favList.slice(0, PAGE_SIZE);
+    let html = "";
+    slice.forEach(item => html += buildCard(item, true)); // 标记isFav=true，媒体走长效缓存
+    html += favList.length > PAGE_SIZE ? `<div class="load-more-tip">滚动加载更多...</div>` : `<div class="bottom-tip">全部收藏加载完毕</div>`;
+    favPanel.innerHTML = html;
+    bindAllCardEvent();
+    bindVideoPauseObserver();
+}
+
+// ========== 核心优化：构建卡片，新增isFav缓存标识；下载按钮改为分享 ==========
 function buildCard(item, isFav = false){
     let mediaHtml = "";
     const imgs = [...new Set(item.media.imgs || [])];
     const videos = item.media.videos || [];
     if(videos.length > 0){
         const posterImg = imgs.length > 0 ? imgs[0] : "";
-        const posterProxy = posterImg ? getProxyUrl(posterImg) : "";
-        const videoProxy = getProxyUrl(videos[0]);
+        const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
+        const videoProxy = getProxyUrl(videos[0], isFav);
         let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
         // preload="none" 页面完全静默不加载视频，点击才缓冲播放
         mediaHtml = `<div class="video-single-wrap"><video class="media-video" controls preload="none" playsinline ${posterAttr} src="${videoProxy}"></video></div>`;
@@ -610,7 +639,7 @@ function buildCard(item, isFav = false){
                 const rest = total - 4;
                 overlay = `<div class="img-overlay-more">+${rest}张</div>`;
             }
-            const imgProxy = getProxyUrl(src);
+            const imgProxy = getProxyUrl(src, isFav);
             mediaHtml += `<div class="grid-img-box"><img class="grid-img" data-imggroup='${JSON.stringify(imgs)}' src="${imgProxy}" loading="lazy">${overlay}</div>`;
         })
         mediaHtml += `</div></div>`;
@@ -619,9 +648,10 @@ function buildCard(item, isFav = false){
     const favTxt = isCollected ? "已收藏" : "收藏";
     const favCls = isCollected ? "btn-fav collected" : "btn-fav";
     const titleRaw = item.title || "无标题";
+    const itemLink = item.link;
     if(isFav){
         return `
-        <div class="tweet-card" data-link="${item.link}" data-source-url="${item.sourceUrl}">
+        <div class="tweet-card" data-link="${itemLink}" data-source-url="${item.sourceUrl}">
             <div class="card-top">
                 <div class="card-avatar">${item.sourceName.slice(0,1)}</div>
                 <div class="source-name-text">${item.sourceName}</div>
@@ -633,12 +663,13 @@ function buildCard(item, isFav = false){
             ${mediaHtml}
             <div class="fav-card-bottom">
                 <div class="card-bottom-left">${item.date || "未知时间"}</div>
-                <button class="del-fav" data-link="${item.link}" style="border:none;background:transparent;font-size:13px;color:#666;">取消收藏</button>
+                <button class="del-fav" data-link="${itemLink}" style="border:none;background:transparent;font-size:13px;color:#666;">取消收藏</button>
             </div>
         </div>`;
     }else{
+        // 【下载】改为【分享】，携带data-link存储文章链接
         return `
-        <div class="tweet-card" data-link="${item.link}" data-source-url="${item.sourceUrl}">
+        <div class="tweet-card" data-link="${itemLink}" data-source-url="${item.sourceUrl}">
             <div class="card-top">
                 <div class="card-avatar">${item.sourceName.slice(0,1)}</div>
                 <div class="source-name-text">${item.sourceName}</div>
@@ -651,8 +682,8 @@ function buildCard(item, isFav = false){
             <div class="card-bottom">
                 <div class="card-bottom-left">${item.date || "未知时间"}</div>
                 <div class="card-bottom-right">
-                    <button class="btn-download" data-link="${item.link}" data-img='${JSON.stringify(imgs)}' data-video='${JSON.stringify(videos)}'>下载</button>
-                    <button class="${favCls}" data-link="${item.link}">${favTxt}</button>
+                    <button class="btn-share" data-link="${itemLink}">分享</button>
+                    <button class="${favCls}" data-link="${itemLink}">${favTxt}</button>
                 </div>
             </div>
         </div>`;
@@ -691,25 +722,29 @@ function bindAllCardEvent(){
             }
         }
     })
-    document.querySelectorAll(".btn-download").forEach(btn=>{
-        btn.onclick = function(){
-            const imgs = JSON.parse(this.dataset.img);
-            const videos = JSON.parse(this.dataset.video);
-            if(videos.length > 0){
-                downloadFile(getProxyUrl(videos[0]), "video.mp4");
-                return;
-            }
-            if(imgs.length === 1){
-                downloadFile(getProxyUrl(imgs[0]), "image.jpg");
-            }else if(imgs.length > 1){
-                alert("多图请长按单张图片保存");
-            }else{
-                alert("无媒体资源可下载");
+    // 分享按钮：复制链接到剪贴板
+    document.querySelectorAll(".btn-share").forEach(btn=>{
+        btn.onclick = async function(e){
+            e.stopPropagation();
+            const link = this.dataset.link;
+            try{
+                await navigator.clipboard.writeText(link);
+                showToast("链接已复制，可直接粘贴分享/下载");
+            }catch(err){
+                // 兼容低版本浏览器
+                const input = document.createElement("input");
+                input.value = link;
+                document.body.appendChild(input);
+                input.select();
+                document.execCommand("copy");
+                input.remove();
+                showToast("链接已复制，可直接粘贴分享/下载");
             }
         }
     })
     document.querySelectorAll(".btn-fav").forEach(btn=>{
-        btn.onclick = function(){
+        btn.onclick = function(e){
+            e.stopPropagation();
             const link = this.dataset.link;
             const target = allArticles.find(i=>i.link === link);
             if(target && !favList.some(f=>f.link === link)){
@@ -717,15 +752,18 @@ function bindAllCardEvent(){
                 localStorage.setItem(FAV_KEY, JSON.stringify(favList));
                 this.innerText = "已收藏";
                 this.classList.add("collected");
+                showToast("已添加到收藏");
             }
         }
     })
     document.querySelectorAll(".del-fav").forEach(btn=>{
-        btn.onclick = function(){
+        btn.onclick = function(e){
+            e.stopPropagation();
             const link = this.dataset.link;
             favList = favList.filter(f=>f.link !== link);
             localStorage.setItem(FAV_KEY, JSON.stringify(favList));
             this.closest(".tweet-card").remove();
+            showToast("已取消收藏");
         }
     })
 }
