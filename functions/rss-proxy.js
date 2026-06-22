@@ -22,10 +22,10 @@ export async function onRequest({ request }) {
     const res = await fetch(targetUrl, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0.0.0 Safari/537.36",
-        "Accept": "application/rss+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Referer": "https://twitter.com/"
+        "Accept": "application/rss+xml,application/xml;q=0.9,*/*;q=0.8"
+        // 删除固定推特Referer，避免其他RSS源被拦截
       },
-      signal: AbortSignal.timeout(8000)
+      signal: AbortSignal.timeout(12000) // 8000 → 12000 延长超时
     });
     const text = await res.text();
     const headers = new Headers(res.headers);
