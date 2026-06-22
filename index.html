@@ -357,7 +357,7 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
   const rawSetAttr = Element.prototype.setAttribute;
   Element.prototype.setAttribute = function(key, val) {
     if ((key === "src" || key === "poster") && typeof val === "string") {
-      if (val.includes("video.twimg.com") || val.includes("pbs.twimg.com")) {
+      if (val.includes("video.twimg.com") || val.includes("pbs.twimg.com") || val.includes("video.3go.fun")) {
         val = `${origin}/media-proxy?url=${encodeURIComponent(val)}`;
       }
     }
