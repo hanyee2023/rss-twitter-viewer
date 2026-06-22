@@ -40,6 +40,10 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     min-height:calc(100vh - 74px);
 }
 .page-home,.page-manage,.page-add,.page-fav{display:none;}
+/* 新增：给所有页面容器设置最小高度，防止无内容塌陷 */
+#pageHome,#pageManage,#pageAdd,#pageFav{
+    min-height: calc(100vh - 74px);
+}
 .feed-top-op{
     display:flex;
     gap:8px;
@@ -850,8 +854,7 @@ document.getElementById("saveEdit").onclick = function(){
 }
 document.getElementById("cancelEdit").onclick = ()=>editModal.style.display = "none";
 
-document.getElementById("importFeed").onclick = ()=>document.getElementById("importFileInput").click();
-document.getElementById("importFileInput").onchange = function(e){
+document.getElementById("importFeed").onchange = function(e){
     const file = e.target.files[0];
     const reader = new FileReader();
     reader.onload = ev=>{
@@ -864,6 +867,7 @@ document.getElementById("importFileInput").onchange = function(e){
                 }
             })
             localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
+            // 导入完成强制刷新管理订阅列表
             renderManage();
             alert(`成功导入${addNum}条订阅，切换主页加载内容`);
         }catch(err){alert("备份文件格式错误");}
@@ -878,6 +882,55 @@ document.getElementById("delAllFeed").onclick = function(){
         feedList = [];
         localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
         renderManage();
+    }
+}
+
+// 修复渲染管理页函数：空订阅居中提示，最小高度防止视觉空白
+function renderManage(){
+    if(feedList.length === 0){
+        feedPanel.innerHTML = `<div class="empty-tip" style="min-height:70vh;display:flex;align-items:center;justify-content:center;flex-direction:column;">暂无订阅源<br>请切换【添加订阅】页面新增RSS链接</div>`;
+        return;
+    }
+    let html = "";
+    const reverseFeed = [...feedList].reverse();
+    reverseFeed.forEach((f, idx)=>{
+        const realIndex = idx + 1;
+        html += `
+        <div class="feed-item ${f.category==="video"?"type-video":"type-img"}" data-idx="${feedList.indexOf(f)}" data-source-url="${f.url}">
+            <div class="feed-index">${realIndex}</div>
+            <div class="feed-info">
+                <div class="feed-name">${f.name||"未命名订阅"}</div>
+                <div style="font-size:12px;color:#777;">${f.category==="img"?"图片类":"视频类"}</div>
+            </div>
+            <div class="feed-btn-group">
+                <button class="view-feed" data-source="${f.url}">查看</button>
+                <button class="edit" data-idx="${feedList.indexOf(f)}">编辑</button>
+                <button class="del" data-idx="${feedList.indexOf(f)}">删除</button>
+            </div>
+        </div>`;
+    })
+    feedPanel.innerHTML = html;
+    feedPanel.onclick = function(e){
+        const t = e.target;
+        const idx = Number(t.dataset.idx);
+        if(t.classList.contains("view-feed")){
+            filterSourceUrl = t.dataset.source;
+            showPage(pageHome, "本地RSS媒体阅读器");
+            return;
+        }
+        if(t.classList.contains("del")){
+            feedList.splice(idx,1);
+            localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
+            renderManage();
+        }
+        if(t.classList.contains("edit")){
+            const f = feedList[idx];
+            document.getElementById("editIndex").value = idx;
+            document.getElementById("editName").value = f.name||"";
+            document.getElementById("editCat").value = f.category||"img";
+            document.getElementById("editUrl").value = f.url;
+            editModal.style.display = "flex";
+        }
     }
 }
 
