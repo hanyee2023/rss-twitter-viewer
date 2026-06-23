@@ -393,7 +393,7 @@ function getProxyUrl(rawUrl, isFav = false) {
 // 全局变量仅定义一次
 const FEED_KEY = "local_rss_feeds";
 const FAV_KEY = "rss_fav_list";
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 30; // 修复：每页条数改为30
 const FETCH_TIMEOUT = 10000;
 let feedList = JSON.parse(localStorage.getItem(FEED_KEY)) || [];
 let favList = JSON.parse(localStorage.getItem(FAV_KEY)) || [];
@@ -633,7 +633,7 @@ function renderPagedList(){
     bindVideoPauseObserver();
 }
 
-// 【修复问题1：滚动加载监听逻辑】
+// 【修复问题1：滚动加载监听逻辑】重写，DOM刷新后重新绑定监听
 function bindScrollLoadMore(){
     if(scrollObserver) scrollObserver.disconnect();
     const loadDom = document.getElementById("loadMoreDom");
@@ -644,6 +644,8 @@ function bindScrollLoadMore(){
             loadLock = true;
             renderPageNum += 1;
             renderPagedList();
+            // 渲染完成后重新绑定滚动监听，修复加载失效
+            setTimeout(()=>bindScrollLoadMore(), 30);
             loadLock = false;
         }
     }, {rootMargin: "150px 0px"});
@@ -695,6 +697,11 @@ function renderFav(){
                 bindAllCardEvent();
                 bindVideoPauseObserver();
                 favObserver.disconnect();
+                // 重新绑定收藏滚动监听
+                setTimeout(()=>{
+                    const newFavLoad = document.getElementById("favLoadMore");
+                    if(newFavLoad) favObserver.observe(newFavLoad);
+                },30);
                 loadLock = false;
             }
         },{rootMargin:"150px 0"});
@@ -753,7 +760,7 @@ function buildCard(item, isFav = false){
             </div>
         </div>`;
     }else{
-        // 【下载】改为【分享】，携带data-link存储文章链接
+        // 【修复分享】移除按钮data-link，从父卡片读取data-link，保证链接正确
         return `
         <div class="tweet-card" data-link="${itemLink}" data-source-url="${item.sourceUrl}">
             <div class="card-top">
@@ -768,7 +775,7 @@ function buildCard(item, isFav = false){
             <div class="card-bottom">
                 <div class="card-bottom-left">${item.date || "未知时间"}</div>
                 <div class="card-bottom-right">
-                    <button class="btn-share" data-link="${itemLink}">分享</button>
+                    <button class="btn-share">分享</button>
                     <button class="${favCls}" data-link="${itemLink}">${favTxt}</button>
                 </div>
             </div>
@@ -808,11 +815,13 @@ function bindAllCardEvent(){
             }
         }
     })
-    // 分享按钮：复制链接到剪贴板
+    // 【修复分享链接BUG】从卡片根节点读取data-link，不再依赖按钮自身参数
     document.querySelectorAll(".btn-share").forEach(btn=>{
         btn.onclick = async function(e){
             e.stopPropagation();
-            const link = this.dataset.link;
+            // 向上查找卡片根节点获取真实link
+            const cardDom = this.closest(".tweet-card");
+            const link = cardDom.dataset.link;
             try{
                 await navigator.clipboard.writeText(link);
                 showToast("链接已复制，可直接粘贴分享/下载");
