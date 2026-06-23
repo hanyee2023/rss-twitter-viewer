@@ -38,9 +38,9 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     margin-top:74px;
     padding:10px 8px;
     min-height:calc(100vh - 74px);
+    overflow-y: auto;
 }
 .page-home,.page-manage,.page-add,.page-fav{display:none;}
-/* 新增：给所有页面容器设置最小高度，防止无内容塌陷 */
 #pageHome,#pageManage,#pageAdd,#pageFav{
     min-height: calc(100vh - 74px);
 }
@@ -298,7 +298,7 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
 </head>
 <body>
 <header id="mainHeader">
-    <h1 id="pageTitle">本地RSS媒体阅读器</h1>
+    <h1 id="pageTitle">本地RSS媒体阅读器 V3.0</h1>
     <div class="top-bar">
         <button id="btnHome">主页</button>
         <button id="btnManage">管理订阅源</button>
@@ -312,11 +312,11 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     </div>
     <div class="page-manage" id="pageManage">
         <div class="feed-top-op">
-            <button id="importFeed">一键导入</button>
-            <button id="exportAllBtn">一键导出</button>
-            <button id="delAllFeed">一键清空</button>
-            <input type="file" id="importFileInput" accept=".json" style="display:none;">
-        </div>
+    <button id="importFeed">一键导入</button>
+    <button id="exportAllBtn">一键导出</button>
+    <button id="delAllFeed">一键清空</button>
+    <input type="file" id="importFileInput" accept=".json" style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none;">
+</div>
         <div class="feed-list" id="feedPanel"></div>
     </div>
     <div class="page-add" id="pageAdd">
@@ -383,6 +383,7 @@ let currentArticles = [];
 let renderPageNum = 0;
 let allArticles = [];
 let scrollObserver = null;
+let loadLock = false; // 分页加载锁，防止重复请求
 let currentPreviewImgs = [];
 let videoObserver = null;
 let filterSourceUrl = "";
@@ -454,6 +455,7 @@ const previewWrap = document.getElementById("previewWrap");
 const previewTip = document.getElementById("previewTip");
 const previewClose = document.getElementById("previewClose");
 const toastDom = document.getElementById("slideTip");
+const mainWrap = document.querySelector(".main-wrap");
 
 // 轻提示弹窗
 function showToast(msg){
@@ -476,21 +478,34 @@ function bindVideoPauseObserver(){
     document.querySelectorAll(".media-video").forEach(v=>videoObserver.observe(v));
 }
 
-// 页面切换
+// ========== 【彻底修复切换页面不回顶部】重写showPage ==========
 function showPage(targetDom, titleText) {
+    // 1. 外层滚动容器强制置顶
+    mainWrap.scrollTop = 0;
+    // 2. 清空所有页面内容，避免旧滚动残留
+    feedPanel.innerHTML = "";
+    favPanel.innerHTML = "";
+    articleBox.innerHTML = "";
+    // 3. 隐藏全部页面
     pageHome.style.display = "none";
     pageManage.style.display = "none";
     pageAdd.style.display = "none";
     pageFav.style.display = "none";
-    feedPanel.innerHTML = "";
-    favPanel.innerHTML = "";
+    // 4. 显示目标页面
     targetDom.style.display = "block";
+    // 5. 再次强制置顶（解决DOM渲染延迟导致滚动失效）
+    setTimeout(() => {
+        mainWrap.scrollTop = 0;
+    }, 20);
+    // 切换按钮激活状态
     pageTitle.textContent = titleText;
     allBtns.forEach(b => b.classList.remove("active"));
     if(titleText === "本地RSS媒体阅读器") btnHome.classList.add("active");
     if(titleText === "管理订阅源") btnManage.classList.add("active");
     if(titleText === "添加订阅") btnAdd.classList.add("active");
     if(titleText === "我的收藏") btnFav.classList.add("active");
+
+    // 对应页面加载逻辑
     if(titleText === "本地RSS媒体阅读器") {
         renderHomeFromCache();
         silentCheckUpdate();
@@ -501,7 +516,8 @@ function showPage(targetDom, titleText) {
     }
 }
 
-btnHome.onclick = () => {
+// 【修复问题3：点击主页强制刷新、静默检测更新】
+btnHome.onclick = async () => {
     filterSourceUrl = "";
     showPage(pageHome, "本地RSS媒体阅读器");
 };
@@ -513,6 +529,7 @@ btnFav.onclick = () => showPage(pageFav, "我的收藏");
 function renderHomeFromCache() {
     if(scrollObserver) scrollObserver.disconnect();
     renderPageNum = 0;
+    loadLock = false;
     if(localCacheArticles.length === 0) {
         articleBox.innerHTML = `<div class="empty-tip">暂无文章内容</div>`;
         return;
@@ -536,6 +553,8 @@ async function silentCheckUpdate() {
         })
         hasNewUpdate = newCount > 0;
         newArticleCount = newCount;
+        // 清除原有提示条
+        articleBox.querySelectorAll(".update-tip-bar,.no-update-tip").forEach(el=>el.remove());
         if(hasNewUpdate) {
             const tipBar = document.createElement("div");
             tipBar.className = "update-tip-bar";
@@ -584,12 +603,34 @@ async function initLoadAllCache() {
 }
 
 function renderPagedList(){
-    const slice = currentArticles.slice(0, PAGE_SIZE);
+    const slice = currentArticles.slice(0, renderPageNum * PAGE_SIZE);
     let html = renderCardList(slice);
-    html += currentArticles.length > PAGE_SIZE ? `<div class="load-more-tip">滚动加载更多...</div>` : `<div class="bottom-tip">全部内容加载完毕</div>`;
+    const remain = currentArticles.length - slice.length;
+    if(remain > 0){
+        html += `<div class="load-more-tip" id="loadMoreDom">滚动加载更多...</div>`;
+    }else{
+        html += `<div class="bottom-tip">全部内容加载完毕</div>`;
+    }
     articleBox.innerHTML = html;
     bindAllCardEvent();
     bindVideoPauseObserver();
+}
+
+// 【修复问题1：滚动加载监听逻辑】
+function bindScrollLoadMore(){
+    if(scrollObserver) scrollObserver.disconnect();
+    const loadDom = document.getElementById("loadMoreDom");
+    if(!loadDom) return;
+    scrollObserver = new IntersectionObserver(async (entries)=>{
+        const entry = entries[0];
+        if(entry.isIntersecting && !loadLock){
+            loadLock = true;
+            renderPageNum += 1;
+            renderPagedList();
+            loadLock = false;
+        }
+    }, {rootMargin: "150px 0px"});
+    scrollObserver.observe(loadDom);
 }
 
 function renderCardList(list){
@@ -602,6 +643,7 @@ function renderCardList(list){
 function renderFav(){
     if(scrollObserver) scrollObserver.disconnect();
     renderPageNum = 0;
+    loadLock = false;
     // 空收藏垂直居中全屏提示，解决页面看不见内容
     if(favList.length === 0) {
         favPanel.innerHTML = `<div class="empty-tip" style="min-height:70vh;display:flex;align-items:center;justify-content:center;flex-direction:column;">暂无收藏内容<br>浏览主页卡片点击收藏按钮添加</div>`;
@@ -610,10 +652,37 @@ function renderFav(){
     const slice = favList.slice(0, PAGE_SIZE);
     let html = "";
     slice.forEach(item => html += buildCard(item, true)); // 标记isFav=true，媒体走长效缓存
-    html += favList.length > PAGE_SIZE ? `<div class="load-more-tip">滚动加载更多...</div>` : `<div class="bottom-tip">全部收藏加载完毕</div>`;
+    const remain = favList.length - slice.length;
+    if(remain > 0){
+        html += `<div class="load-more-tip" id="favLoadMore">滚动加载更多...</div>`;
+    }else{
+        html += `<div class="bottom-tip">全部收藏加载完毕</div>`;
+    }
     favPanel.innerHTML = html;
     bindAllCardEvent();
     bindVideoPauseObserver();
+    // 收藏列表分页监听
+    const favLoad = document.getElementById("favLoadMore");
+    if(favLoad){
+        const favObserver = new IntersectionObserver(async (e)=>{
+            if(e[0].isIntersecting && !loadLock){
+                loadLock = true;
+                renderPageNum += 1;
+                const favSlice = favList.slice(0, renderPageNum * PAGE_SIZE);
+                let favHtml = "";
+                favSlice.forEach(i=>favHtml += buildCard(i,true));
+                const rem = favList.length - favSlice.length;
+                if(rem>0) favHtml += `<div class="load-more-tip" id="favLoadMore">滚动加载更多...</div>`;
+                else favHtml += `<div class="bottom-tip">全部收藏加载完毕</div>`;
+                favPanel.innerHTML = favHtml;
+                bindAllCardEvent();
+                bindVideoPauseObserver();
+                favObserver.disconnect();
+                loadLock = false;
+            }
+        },{rootMargin:"150px 0"});
+        favObserver.observe(favLoad);
+    }
 }
 
 // ========== 核心优化：构建卡片，新增isFav缓存标识；下载按钮改为分享 ==========
@@ -863,6 +932,40 @@ function decodeXml(s){
     return s.replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&amp;/g,"&").replace(/&quot;/g,"\"");
 }
 
+// ========== 修复：一键导入点击唤起文件选择框 ==========
+document.getElementById("importFeed").onclick = function(){
+    document.getElementById("importFileInput").click();
+};
+document.getElementById("importFileInput").onchange = function(e){
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = ev=>{
+        try{
+            const data = JSON.parse(ev.target.result);
+            let addNum = 0;
+            data.forEach(item=>{
+                if(item.url && !feedList.some(f=>f.url === item.url)){
+                    feedList.push(item);addNum++;
+                }
+            })
+            localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
+            renderManage();
+            alert(`成功导入${addNum}条订阅，切换主页加载内容`);
+        }catch(err){alert("备份文件格式错误");}
+    }
+    reader.readAsText(file);
+}
+document.getElementById("exportAllBtn").onclick = function(){
+    exportJsonFile(feedList, "rss订阅备份.json");
+}
+document.getElementById("delAllFeed").onclick = function(){
+    if(confirm("确定清空全部订阅？收藏不会同步删除")){
+        feedList = [];
+        localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
+        renderManage();
+    }
+}
+
 document.getElementById("confirmAdd").onclick = function(){
     const name = document.getElementById("feedName").value.trim();
     const cat = document.getElementById("feedCat").value;
@@ -892,36 +995,6 @@ document.getElementById("saveEdit").onclick = function(){
     renderManage();
 }
 document.getElementById("cancelEdit").onclick = ()=>editModal.style.display = "none";
-
-document.getElementById("importFeed").onchange = function(e){
-    const file = e.target.files[0];
-    const reader = new FileReader();
-    reader.onload = ev=>{
-        try{
-            const data = JSON.parse(ev.target.result);
-            let addNum = 0;
-            data.forEach(item=>{
-                if(item.url && !feedList.some(f=>f.url === item.url)){
-                    feedList.push(item);addNum++;
-                }
-            })
-            localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
-            renderManage();
-            alert(`成功导入${addNum}条订阅，切换主页加载内容`);
-        }catch(err){alert("备份文件格式错误");}
-    }
-    reader.readAsText(file);
-}
-document.getElementById("exportAllBtn").onclick = function(){
-    exportJsonFile(feedList, "rss订阅备份.json");
-}
-document.getElementById("delAllFeed").onclick = function(){
-    if(confirm("确定清空全部订阅？收藏不会同步删除")){
-        feedList = [];
-        localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
-        renderManage();
-    }
-}
 
 // 修复渲染管理页函数：空订阅居中提示，最小高度防止视觉空白
 function renderManage(){
