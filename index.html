@@ -9,8 +9,15 @@
 html {
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
+  height: 100%;
+  overflow: hidden; /* 全局禁止页面外层滚动 */
 }
-body{background:#f5f5f5;color:#111;min-height:100vh;}
+body{
+  background:#f5f5f5;color:#111;
+  min-height:100vh;
+  height: 100%;
+  overflow: hidden; /* 根除body外层滚动条 */
+}
 #mainHeader{
     position:fixed;
     top:0;
@@ -34,15 +41,26 @@ body{background:#f5f5f5;color:#111;min-height:100vh;}
     white-space:nowrap;
 }
 .top-bar button.active{background:#28a745;}
+/* 外层容器取消滚动，仅做布局承载 */
 .main-wrap{
     margin-top:74px;
     padding:10px 8px;
     min-height:calc(100vh - 74px);
-    overflow-y: auto;
+    height: calc(100vh - 74px);
+    overflow: hidden;
 }
 .page-home,.page-manage,.page-add,.page-fav{display:none;}
-#pageHome,#pageManage,#pageAdd,#pageFav{
-    min-height: calc(100vh - 74px);
+/* 主页/管理/收藏：独立内部滚动 */
+#pageHome,#pageManage,#pageFav{
+    width: 100%;
+    height: 100%;
+    overflow-y: auto;
+}
+/* 添加订阅页面：完全无滚动 */
+#pageAdd{
+    width: 100%;
+    height: 100%;
+    overflow-y: hidden;
 }
 .feed-top-op{
     display:flex;
@@ -478,24 +496,23 @@ function bindVideoPauseObserver(){
     document.querySelectorAll(".media-video").forEach(v=>videoObserver.observe(v));
 }
 
-// ========== 【彻底修复切换页面不回顶部】重写showPage ==========
+// ========== 【修复核心：页面独立滚动，切换自动置顶】重写showPage ==========
 function showPage(targetDom, titleText) {
-    // 1. 外层滚动容器强制置顶
-    mainWrap.scrollTop = 0;
-    // 2. 清空所有页面内容，避免旧滚动残留
+    // 清空页面内容，销毁旧DOM滚动缓存
     feedPanel.innerHTML = "";
     favPanel.innerHTML = "";
     articleBox.innerHTML = "";
-    // 3. 隐藏全部页面
+    // 隐藏全部页面
     pageHome.style.display = "none";
     pageManage.style.display = "none";
     pageAdd.style.display = "none";
     pageFav.style.display = "none";
-    // 4. 显示目标页面
+    // 显示目标页面
     targetDom.style.display = "block";
-    // 5. 再次强制置顶（解决DOM渲染延迟导致滚动失效）
+    // 当前页面内部滚动条强制归零
+    targetDom.scrollTop = 0;
     setTimeout(() => {
-        mainWrap.scrollTop = 0;
+        targetDom.scrollTop = 0;
     }, 20);
     // 切换按钮激活状态
     pageTitle.textContent = titleText;
