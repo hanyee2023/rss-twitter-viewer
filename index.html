@@ -668,10 +668,12 @@ function renderFav(){
         favPanel.innerHTML = `<div class="empty-tip" style="min-height:70vh;display:flex;align-items:center;justify-content:center;flex-direction:column;">暂无收藏内容<br>浏览主页卡片点击收藏按钮添加</div>`;
         return;
     }
-    const slice = favList.slice(0, PAGE_SIZE);
+    // 按文章日期从新到旧排序，不修改原数组
+    const sortedFavList = [...favList].sort((a,b)=>new Date(b.date).getTime() - new Date(a.date).getTime());
+    const slice = sortedFavList.slice(0, PAGE_SIZE);
     let html = "";
     slice.forEach(item => html += buildCard(item, true)); // 标记isFav=true，媒体走长效缓存
-    const remain = favList.length - slice.length;
+    const remain = sortedFavList.length - slice.length;
     if(remain > 0){
         html += `<div class="load-more-tip" id="favLoadMore">滚动加载更多...</div>`;
     }else{
@@ -687,10 +689,10 @@ function renderFav(){
             if(e[0].isIntersecting && !loadLock){
                 loadLock = true;
                 renderPageNum += 1;
-                const favSlice = favList.slice(0, renderPageNum * PAGE_SIZE);
+                const favSlice = sortedFavList.slice(0, renderPageNum * PAGE_SIZE);
                 let favHtml = "";
                 favSlice.forEach(i=>favHtml += buildCard(i,true));
-                const rem = favList.length - favSlice.length;
+                const rem = sortedFavList.length - favSlice.length;
                 if(rem>0) favHtml += `<div class="load-more-tip" id="favLoadMore">滚动加载更多...</div>`;
                 else favHtml += `<div class="bottom-tip">全部收藏加载完毕</div>`;
                 favPanel.innerHTML = favHtml;
