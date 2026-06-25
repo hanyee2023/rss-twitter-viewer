@@ -10,42 +10,33 @@ html {
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
   height: 100%;
-  overflow: hidden;
 }
 body{
   background:#f5f5f5;color:#111;
   height: 100%;
-  overflow: hidden;
-  /* 删掉多余的min-height和padding-bottom，消除底部空白 */
-  padding: 0;
   margin: 0;
-  display: flex;
-  flex-direction: column;
 }
 
-/* 顶部标题栏 */
+/* 顶部悬浮固定栏 磨砂玻璃 */
 #mainHeader{
-    position:fixed;
-    top:0;
-    left:0;
-    width:100%;
-    height:48px;
-    background:#fff;
-    border-bottom:1px solid #eee;
-    z-index:999;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 48px;
+    background: rgba(255,255,255,0.22);
+    backdrop-filter: blur(26px);
+    -webkit-backdrop-filter: blur(26px);
+    z-index: 9999;
     display:flex;
     align-items:center;
     justify-content:center;
 }
 
-/* 标题相对定位锚点 */
 .title-wrap {
   position: relative;
-  /* 宽度紧贴文字，不要自动铺满整行 */
   width: fit-content;
 }
-
-/* 只保留这一段beta-tag，彻底删除重复的第二段！ */
 .beta-tag {
   position: absolute;
   top: -3px;
@@ -58,16 +49,13 @@ body{
   z-index:9999;
   white-space:nowrap;
 }
-
 #pageTitle{
     font-size:20px;
     font-weight:600;
     white-space:nowrap;
-    /* 取消右侧内边距，防止挤占标签位置 */
-    padding-right: 0;
 }
 
-/* 卡片整体：直角，底部分割线 */
+/* 卡片样式 */
 .tweet-card{
     background:#fff;
     border:none;
@@ -77,7 +65,6 @@ body{
     margin-bottom:0;
 }
 
-/* 仅媒体区域加圆角，卡片本体不变 */
 .img-grid-wrap{
     border-radius:10px;
     overflow:hidden;
@@ -91,64 +78,67 @@ body{
     margin:6px 0;
 }
 
-/* 底部导航栏 */
+/* 底部悬浮导航栏 磨砂玻璃 */
 .bottom-nav-bar{
-    position:fixed;
-    bottom:0;
-    left:0;
-    width:100%;
-    height:50px;
-    background:#ffffff;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 50px;
+    background: rgba(255,255,255,0.22);
+    backdrop-filter: blur(26px);
+    -webkit-backdrop-filter: blur(26px);
+    z-index: 9999;
     display:flex;
-    align-items:center;
     justify-content:space-around;
-    z-index:999;
+    overflow: hidden;
 }
 .bottom-nav-bar button{
     flex:1;
     height:100%;
     border:none;
-    border-radius:0;
-    font-size:17px;
     background:transparent;
-    color:#555555;
-    font-weight:bold;
-    font-family:"Heiti SC",黑体,sans-serif;
-    position:relative;
+    /* 统一黑体加粗 */
+    font-family: "Heiti SC",黑体,sans-serif;
+    font-weight: bold;
+    font-size: 17px;
+    color:#888; /* 未选中：灰色 */
+    position: relative;
 }
+/* 激活态：黑色文字 */
 .bottom-nav-bar button.active{
-    color:#000000;
+    color:#000;
 }
-/* 蓝色线条加粗 */
+/* 激活项下方蓝色粗下划线 */
 .bottom-nav-bar button.active::after{
     content:"";
     position:absolute;
-    left:18%;
-    right:18%;
+    left:15%;
+    right:15%;
     bottom:0;
     height:4px;
     background:#0066dd;
-    border-radius:2px;
+    border-radius:4px;
+}
+/* 彻底隐藏多余滚动条 */
+.bottom-nav-bar::-webkit-scrollbar {
+    display: none !important;
 }
 
-/* 核心修复：中间内容自动填满剩余空间，消除上下空白 */
+/* 中间内容容器：唯一滚动区域，解决截断问题 */
 .main-wrap{
-    flex: 1;
-    width: 100%;
-    margin-top: 48px;
-    margin-bottom: 50px;
-    overflow: hidden;
+    padding-top: 48px;
+    padding-bottom: 50px;
+    height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 .page-home,.page-manage,.page-add,.page-fav{display:none;}
 #pageHome,#pageManage,#pageFav{
     width: 100%;
-    height: 100%;
-    overflow-y: auto;
 }
 #pageAdd{
     width: 100%;
-    height: 100%;
-    overflow-y: hidden;
 }
 
 .feed-top-op{
@@ -415,6 +405,7 @@ body{
     margin-top:8px;
 }
 </style>
+
 </head>
 <body>
 <header id="mainHeader">
@@ -622,7 +613,6 @@ function showPage(targetDom, titleText) {
     setTimeout(() => {
         targetDom.scrollTop = 0;
     }, 20);
-    // 只修改文字节点，保留右侧beta标签
 const textNode = Array.from(pageTitle.childNodes).find(n => n.nodeType === 3);
 if(textNode){
     textNode.textContent = titleText;
