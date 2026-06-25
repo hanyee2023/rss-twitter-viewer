@@ -98,18 +98,15 @@ body{
     height:100%;
     border:none;
     background:transparent;
-    /* 统一黑体加粗 */
     font-family: "Heiti SC",黑体,sans-serif;
     font-weight: bold;
     font-size: 17px;
-    color:#888; /* 未选中：灰色 */
+    color:#888;
     position: relative;
 }
-/* 激活态：黑色文字 */
 .bottom-nav-bar button.active{
     color:#000;
 }
-/* 激活项下方蓝色粗下划线 */
 .bottom-nav-bar button.active::after{
     content:"";
     position:absolute;
@@ -120,12 +117,10 @@ body{
     background:#0066dd;
     border-radius:4px;
 }
-/* 彻底隐藏多余滚动条 */
 .bottom-nav-bar::-webkit-scrollbar {
     display: none !important;
 }
 
-/* 中间内容容器：唯一滚动区域，解决截断问题 */
 .main-wrap{
     padding-top: 48px;
     padding-bottom: 50px;
@@ -474,13 +469,16 @@ body{
 <div class="tip-toast" id="slideTip"></div>
 
 <script>
-const PROXY_DOMAINS = ["video.twimg.com", "pbs.twimg.com", "video.3go.fun", "2026down.cc"];
+const PROXY_DOMAINS = ["video.twimg.com", "pbs.twimg.com", "video.3go.fun"];
+// ==== 在这里填入你的Worker代理地址 ====
+const CF_WORKER_PROXY = "";
 const origin = window.location.origin;
+
 function getProxyUrl(rawUrl, isFav = false) {
     if (typeof rawUrl !== "string") return rawUrl;
     for (const d of PROXY_DOMAINS) {
         if (rawUrl.includes(d)) {
-            let url = `${origin}/media-proxy?url=${encodeURIComponent(rawUrl)}`;
+            let url = CF_WORKER_PROXY + encodeURIComponent(rawUrl);
             if(isFav) url += "&cache=long";
             return url;
         }
@@ -515,61 +513,58 @@ let localCacheArticles = [];
 let hasNewUpdate = false;
 let newArticleCount = 0;
 
+// 唯一的RSS拉取函数（已清理重复代码）
 async function fetchRSSFeed(rssUrl) {
-  let realFetchUrl = rssUrl;
-  // 给推特类RSS添加公共跨域代理，解决浏览器跨域报错
-  if (rssUrl.includes("xcancel.com") || rssUrl.includes("twitter") || rssUrl.includes("x.com")) {
-    const proxy = "https://corsproxy.io/?";
-    realFetchUrl = proxy + encodeURIComponent(rssUrl);
-  }
-
-  const res = await fetch(realFetchUrl, {
-    headers: {
-      "User-Agent": "RSSReader Client"
+    let realFetchUrl = rssUrl;
+    // 仅推特、xcancel域名走CF Worker代理，其余直连
+    const needProxy = /xcancel\.com|twitter|x\.com/.test(rssUrl);
+    if (needProxy) {
+        realFetchUrl = CF_WORKER_PROXY + encodeURIComponent(rssUrl);
     }
-  });
 
-  if (!res.ok) {
-    throw new Error("订阅源拉取失败");
-  }
-  return await res.text();
-}
+    // 超时保护，避免页面卡死
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
 
-  // 在线网页部署环境：继续使用你自己的Cloudflare Worker代理
-  const isNativeTwitter = rssUrl.includes("twitter.com") || rssUrl.includes("x.com");
-  if(isNativeTwitter || isRssHubTwitter){
-    realFetchUrl = `${window.location.origin}/rss-proxy?url=${encodeURIComponent(rssUrl)}`;
-  }
-
-  const res = await fetch(realFetchUrl, { signal: AbortSignal.timeout(FETCH_TIMEOUT) });
-  if (!res.ok) throw new Error("RSS拉取失败");
-  return await res.text();
+    try {
+        const res = await fetch(realFetchUrl, {
+            headers: {
+                "User-Agent": "RSSReader Client"
+            },
+            signal: controller.signal
+        });
+        clearTimeout(timer);
+        if (!res.ok) throw new Error("请求失败");
+        return await res.text();
+    } catch (err) {
+        clearTimeout(timer);
+        throw err;
+    }
 }
 
 function exportJsonFile(jsonData, fileName = "rss订阅备份.json") {
-  try {
-    const jsonStr = JSON.stringify(jsonData, null, 2);
-    const blob = new Blob([jsonStr], { type: "application/json;charset=utf-8" });
-    const blobUrl = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = blobUrl;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(blobUrl);
-    return;
-  } catch (e) {
-    const jsonStr = JSON.stringify(jsonData, null, 2);
-    const base64 = btoa(unescape(encodeURIComponent(jsonStr)));
-    const dataUrl = `data:application/json;base64,${base64}`;
-    const a2 = document.createElement("a");
-    a2.href = dataUrl;
-    a2.download = fileName;
-    document.body.appendChild(a2);
-    a2.click();
-    a2.remove();
-  }
+    try {
+        const jsonStr = JSON.stringify(jsonData, null, 2);
+        const blob = new Blob([jsonStr], { type: "application/json;charset=utf-8" });
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(blobUrl);
+    } catch (e) {
+        const jsonStr = JSON.stringify(jsonData, null, 2);
+        const base64 = btoa(unescape(encodeURIComponent(jsonStr)));
+        const dataUrl = `data:application/json;base64,${base64}`;
+        const a2 = document.createElement("a");
+        a2.href = dataUrl;
+        a2.download = fileName;
+        document.body.appendChild(a2);
+        a2.click();
+        a2.remove();
+    }
 }
 
 const pageHome = document.getElementById("pageHome");
@@ -992,15 +987,6 @@ function bindPreviewScroll(){
     }
 }
 previewClose.onclick = ()=> imgPreviewMask.style.display = "none";
-
-function downloadFile(url, name){
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-}
 
 async function loadAllRSS(){
     const taskList = feedList.map(async f=>{
