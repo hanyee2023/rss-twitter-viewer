@@ -469,14 +469,15 @@ body{
 
 <script>
 const PROXY_DOMAINS = ["video.twimg.com", "pbs.twimg.com", "video.3go.fun"];
-// ==== 在这里填入你的Worker代理地址 ====
 const CF_WORKER_PROXY = "https://rss-twitter-viewer.pages.dev/proxy?url=";
 const origin = window.location.origin;
 
+// 代理URL 只编码一次，杜绝双重编码
 function getProxyUrl(rawUrl, isFav = false) {
     if (typeof rawUrl !== "string") return rawUrl;
     for (const d of PROXY_DOMAINS) {
         if (rawUrl.includes(d)) {
+            // 只进行一次URL编码
             let url = CF_WORKER_PROXY + encodeURIComponent(rawUrl);
             if(isFav) url += "&cache=long";
             return url;
@@ -492,6 +493,16 @@ function escapeHtml(str) {
                .replace(/>/g,"&gt;")
                .replace(/"/g,"&quot;")
                .replace(/'/g,"&#039;");
+}
+
+// XML转义字符解码
+function fullDecodeXml(str){
+    if(!str) return str;
+    return str.replace(/&amp;/g,"&")
+    .replace(/&lt;/g,"<")
+    .replace(/&gt;/g,">")
+    .replace(/&quot;/g,"\"")
+    .replace(/&#039;/g,"'");
 }
 
 const FEED_KEY = "local_rss_feeds";
@@ -512,7 +523,6 @@ let localCacheArticles = [];
 let hasNewUpdate = false;
 let newArticleCount = 0;
 
-// 唯一的RSS拉取函数
 async function fetchRSSFeed(rssUrl) {
     let realFetchUrl = rssUrl;
     const needProxy = /xcancel\.com|twitter|x\.com/.test(rssUrl);
@@ -532,7 +542,9 @@ async function fetchRSSFeed(rssUrl) {
         });
         clearTimeout(timer);
         if (!res.ok) throw new Error("请求失败");
-        return await res.text();
+        let text = await res.text();
+        text = fullDecodeXml(text);
+        return text;
     } catch (err) {
         clearTimeout(timer);
         throw err;
@@ -596,50 +608,53 @@ function initVideoObserver(){
     videoObserver = new IntersectionObserver((entries)=>{
         entries.forEach(item=>{
             const video = item.target;
-            if(!item.isIntersecting) video.pause();
+            if(!item.isIntersecting){
+                video.pause();
+                // 暂停销毁HLS实例，防止内存溢出
+                if(video.hlsInstance){
+                    video.hlsInstance.destroy();
+                    video.hlsInstance = null;
+                }
+            }
         })
     }, {threshold:0.01});
 }
+
 function bindVideoPauseObserver(){
     if(!videoObserver) initVideoObserver();
 
     document.querySelectorAll(".media-video").forEach(videoEl=>{
-        // 避免重复赋值
-        if(videoEl.src) return;
+        if(videoEl.dataset.loaded) return;
+        videoEl.dataset.loaded = "1";
 
         const vidSrc = videoEl.dataset.src;
         const vidType = videoEl.dataset.type;
         if(!vidSrc) return;
 
-        // ========= MP4 与 m3u8 完全分开，互不干扰 =========
         if(vidType === "mp4"){
-            // MP4直接原生播放，完全不执行HLS代码
             videoEl.src = vidSrc;
         }
         else if(vidType === "hls"){
-            // 只有m3u8才进入HLS逻辑，出错不会影响MP4
             try {
                 if (Hls.isSupported()) {
                     const hls = new Hls();
+                    videoEl.hlsInstance = hls;
                     hls.loadSource(vidSrc);
                     hls.attachMedia(videoEl);
                     videoEl.onended = () => {
                         hls.destroy();
                     };
                 } else {
-                    // 移动端Safari原生支持m3u8，直接赋值
                     videoEl.src = vidSrc;
                 }
             } catch (err) {
-                console.warn("m3u8流媒体加载失败，不影响其他视频", err);
+                console.warn("m3u8加载失败", err);
             }
         }
-
         videoObserver.observe(videoEl);
     })
 }
 
-// 页面切换
 function showPage(targetDom, titleText) {
     feedPanel.innerHTML = "";
     favPanel.innerHTML = "";
@@ -793,7 +808,6 @@ function renderCardList(list){
     return html;
 }
 
-// ====================== 完整修复后的buildCard函数 ======================
 function buildCard(item, isFav = false){
     let mediaHtml = "";
     const imgs = [...new Set(item.media.imgs || [])];
@@ -803,7 +817,6 @@ function buildCard(item, isFav = false){
     const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
     const videoProxy = getProxyUrl(videos[0], isFav);
     let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
-    // 判断视频类型，存入data-type
     const videoType = videoProxy.includes(".m3u8") ? "hls" : "mp4";
 
     mediaHtml = `
@@ -832,7 +845,6 @@ function buildCard(item, isFav = false){
         mediaHtml += `</div></div>`;
     }
 
-    // 清除所有HTML标签，杜绝<a>造成卡片嵌套错乱
     function getPureText(str){
         if(!str) return "无标题";
         let div = document.createElement("div");
@@ -887,7 +899,6 @@ function buildCard(item, isFav = false){
         </div>`;
     }
 }
-// ======================================================
 
 function renderFav(){
     if(scrollObserver) scrollObserver.disconnect();
@@ -1047,7 +1058,7 @@ previewClose.onclick = ()=> imgPreviewMask.style.display = "none";
 async function loadAllRSS(){
     const taskList = feedList.map(async f=>{
         try{
-            const xmlText = await fetchRSSFeed(f.url);
+            let xmlText = await fetchRSSFeed(f.url);
             if(!xmlText) return [];
             return parseRSS(xmlText, f.name, f.url, f.category);
         }catch(e){
@@ -1062,6 +1073,7 @@ async function loadAllRSS(){
     return res;
 }
 
+// 重点修复：同时捕获src/data-src里带引号的mp4/m3u8链接
 function parseRSS(xml, sourceName, sourceUrl, cat){
     let list = [];
     const itemReg = /<(item|entry)>([\s\S]*?)<\/(item|entry)>/gi;
@@ -1069,40 +1081,60 @@ function parseRSS(xml, sourceName, sourceUrl, cat){
     while((m = itemReg.exec(xml)) !== null){
         let txt = m[2];
         let titleRaw = (txt.match(/<title>([\s\S]*?)<\/title>/) || [])[1] || "无标题";
+        titleRaw = fullDecodeXml(titleRaw);
 
         let link = "";
         const linkHref = txt.match(/<link[^>]*href="([^"]+)"/);
         if(linkHref) link = linkHref[1];
         if(!link) link = (txt.match(/<guid>([\s\S]*?)<\/guid>/) || [])[1] || "#";
+        link = fullDecodeXml(link);
+
         let date = (txt.match(/<pubDate>([\s\S]*?)<\/pubDate>/) || [])[1] || "";
         if(!date) date = (txt.match(/<updated>([\s\S]*?)<\/updated>/) || [])[1] || "未知时间";
+        date = fullDecodeXml(date);
+
         let desc = (txt.match(/<description>([\s\S]*?)<\/description>/) || [])[1] || "";
         if(!desc) desc = (txt.match(/<summary>([\s\S]*?)<\/summary>/) || [])[1] || "";
+        desc = fullDecodeXml(desc);
 
-        // 同时匹配mp4 和 m3u8视频
-        const videoReg = /https?:\/\/[^\s"']+\.(mp4|m3u8)/gi;
+        // ========== 修复1：支持捕获src="" 和 data-src="" 内的视频URL ==========
+        const videoAttrReg = /(?:src|data-src)=["']([^"']+\.(mp4|m3u8))["']/gi;
         let videos = [];
         let vMatch;
-        while((vMatch = videoReg.exec(txt + desc)) !== null) videos.push(vMatch[0]);
+        while((vMatch = videoAttrReg.exec(txt + desc)) !== null){
+            let url = fullDecodeXml(vMatch[1]);
+            videos.push(url);
+        }
+        // 额外保留裸文本URL兼容旧格式
+        const videoRawReg = /https?:\/\/[^\s<>]+\.(mp4|m3u8)/gi;
+        while((vMatch = videoRawReg.exec(txt + desc)) !== null){
+            videos.push(vMatch[0]);
+        }
+        videos = [...new Set(videos)];
 
+        // 图片正则
+        const imgAttrReg = /src=["']([^"']+\.(jpg|jpeg|png|gif|webp))["']/gi;
         let imgsRaw = [];
-        const imgReg = /https?:\/\/[^\s"']+\.(jpg|jpeg|png|gif|webp)/gi;
         let imgMatch;
-        while((imgMatch = imgReg.exec(txt + desc)) !== null) imgsRaw.push(imgMatch[0]);
+        while((imgMatch = imgAttrReg.exec(txt + desc)) !== null){
+            imgsRaw.push(fullDecodeXml(imgMatch[1]));
+        }
+        // 裸图片链接
+        const imgRawReg = /https?:\/\/[^\s<>]+\.(jpg|jpeg|png|gif|webp)/gi;
+        while((imgMatch = imgRawReg.exec(txt + desc)) !== null){
+            imgsRaw.push(imgMatch[0]);
+        }
         const imgs = [...new Set(imgsRaw)];
 
         list.push({
             title: titleRaw,
-            link: decodeXml(link),
-            date: decodeXml(date),
+            link: link,
+            date: date,
             media:{imgs,videos},
             sourceName,sourceUrl
         })
     }
     return list;
-}
-function decodeXml(s){
-    return s.replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&amp;/g,"&").replace(/&quot;/g,"\"");
 }
 
 document.getElementById("importFeed").onclick = function(){
