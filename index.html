@@ -517,20 +517,23 @@ let newArticleCount = 0;
 
 async function fetchRSSFeed(rssUrl) {
   let realFetchUrl = rssUrl;
-  // 只对RSSHub+推特链接启用代理，国内普通RSS保持直连
-  const isRssHubTwitter = rssUrl.includes("rsshub") && rssUrl.includes("twitter");
-
-  // 本地file协议：使用CORS跨域中转
-  if (window.location.protocol === "file:") {
-    if (isRssHubTwitter) {
-      // 仅推特RSSHub走中转，其他订阅直连
-      const corsProxy = "https://corsproxy.io/?";
-      realFetchUrl = corsProxy + encodeURIComponent(rssUrl);
-    }
-    const res = await fetch(realFetchUrl, { signal: AbortSignal.timeout(FETCH_TIMEOUT) });
-    if (!res.ok) throw new Error("RSS拉取失败");
-    return await res.text();
+  // 给推特类RSS添加公共跨域代理，解决浏览器跨域报错
+  if (rssUrl.includes("xcancel.com") || rssUrl.includes("twitter") || rssUrl.includes("x.com")) {
+    const proxy = "https://corsproxy.io/?";
+    realFetchUrl = proxy + encodeURIComponent(rssUrl);
   }
+
+  const res = await fetch(realFetchUrl, {
+    headers: {
+      "User-Agent": "RSSReader Client"
+    }
+  });
+
+  if (!res.ok) {
+    throw new Error("订阅源拉取失败");
+  }
+  return await res.text();
+}
 
   // 在线网页部署环境：继续使用你自己的Cloudflare Worker代理
   const isNativeTwitter = rssUrl.includes("twitter.com") || rssUrl.includes("x.com");
