@@ -809,33 +809,48 @@ function renderCardList(list){
 
 function buildCard(item, isFav = false){
     let mediaHtml = "";
-    const imgs = [...new Set(item.media.imgs || [])];
-    const videos = item.media.videos || [];
-    if(videos.length > 0){
-    const posterImg = imgs.length > 0 ? imgs[0] : "";
-    const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
-    const videoProxy = getProxyUrl(videos[0], isFav);
-    let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
-    const videoType = videoProxy.includes(".m3u8") ? "hls" : "mp4";
 
-    mediaHtml = `<div class="video-single-wrap">
+    // 如果本条RSS自带iframe播放器（m3u8视频），优先渲染iframe
+    if(item.iframe){
+        // 自动固定iframe尺寸，避免卡片变形
+        let iframeStr = item.iframe;
+        // 强制统一播放器宽高，和video卡片尺寸对齐
+        iframeStr = iframeStr.replace(/width=".*?"/gi, 'width="100%"');
+        iframeStr = iframeStr.replace(/height=".*?"/gi, 'height="260px"');
+        iframeStr = iframeStr.replace('frameborder="0"','frameborder="0" allowfullscreen');
+
+        mediaHtml = `<div class="video-single-wrap" style="background:#000;overflow:hidden;border-radius:10px;">
+            ${iframeStr}
+        </div>`;
+    }else{
+        // 无iframe：保留原有图片 + MP4视频逻辑，完全不变
+        const imgs = [...new Set(item.media.imgs || [])];
+        const videos = item.media.videos || [];
+        if(videos.length > 0){
+            const posterImg = imgs.length > 0 ? imgs[0] : "";
+            const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
+            const videoProxy = getProxyUrl(videos[0], isFav);
+            let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
+
+            mediaHtml = `<div class="video-single-wrap">
 <video class="media-video" controls preload="none" playsinline ${posterAttr} src="${videoProxy}"></video>
 </div>`;
-}else if(imgs.length > 0){
-        const total = imgs.length;
-        const gridClass = total === 1 ? "grid-single" : "grid-multi";
-        mediaHtml = `<div class="img-grid-wrap"><div class="img-grid ${gridClass}">`;
-        const show = imgs.slice(0,4);
-        show.forEach((src,i)=>{
-            let overlay = "";
-            if(i === 3 && total > 4){
-                const rest = total - 4;
-                overlay = `<div class="img-overlay-more">+${rest}张</div>`;
-            }
-            const imgProxy = getProxyUrl(src, isFav);
-            mediaHtml += `<div class="grid-img-box"><img class="grid-img" data-imggroup='${JSON.stringify(imgs)}' src="${imgProxy}" loading="lazy">${overlay}</div>`;
-        })
-        mediaHtml += `</div></div>`;
+        }else if(imgs.length > 0){
+            const total = imgs.length;
+            const gridClass = total === 1 ? "grid-single" : "grid-multi";
+            mediaHtml = `<div class="img-grid-wrap"><div class="img-grid ${gridClass}">`;
+            const show = imgs.slice(0,4);
+            show.forEach((src,i)=>{
+                let overlay = "";
+                if(i === 3 && total > 4){
+                    const rest = total - 4;
+                    overlay = `<div class="img-overlay-more">+${rest}张</div>`;
+                }
+                const imgProxy = getProxyUrl(src, isFav);
+                mediaHtml += `<div class="grid-img-box"><img class="grid-img" data-imggroup='${JSON.stringify(imgs)}' src="${imgProxy}" loading="lazy">${overlay}</div>`;
+            })
+            mediaHtml += `</div></div>`;
+        }
     }
 
     function getPureText(str){
@@ -1090,29 +1105,34 @@ function parseRSS(xml, sourceName, sourceUrl, cat){
         if(!desc) desc = (txt.match(/<summary>([\s\S]*?)<\/summary>/) || [])[1] || "";
         desc = fullDecodeXml(desc);
 
-        // ========== 修复1：支持捕获src="" 和 data-src="" 内的视频URL ==========
-        const videoAttrReg = /(?:src|data-src)=["']([^"']+\.(mp4|m3u8))["']/gi;
+        // 提取description内的iframe播放器代码
+        let iframeCode = "";
+        const iframeMatch = desc.match(/<iframe[\s\S]*?<\/iframe>/i);
+        if(iframeMatch){
+            iframeCode = iframeMatch[0];
+        }
+
+        // 仅抓取MP4视频，不再抓取m3u8链接
+        const videoAttrReg = /(?:src|data-src)=["']([^"']+\.mp4)["']/gi;
         let videos = [];
         let vMatch;
         while((vMatch = videoAttrReg.exec(txt + desc)) !== null){
             let url = fullDecodeXml(vMatch[1]);
             videos.push(url);
         }
-        // 额外保留裸文本URL兼容旧格式
-        const videoRawReg = /https?:\/\/[^\s<>]+\.(mp4|m3u8)/gi;
+        const videoRawReg = /https?:\/\/[^\s<>]+\.mp4/gi;
         while((vMatch = videoRawReg.exec(txt + desc)) !== null){
             videos.push(vMatch[0]);
         }
         videos = [...new Set(videos)];
 
-        // 图片正则
+        // 图片抓取逻辑保持原样
         const imgAttrReg = /src=["']([^"']+\.(jpg|jpeg|png|gif|webp))["']/gi;
         let imgsRaw = [];
         let imgMatch;
         while((imgMatch = imgAttrReg.exec(txt + desc)) !== null){
             imgsRaw.push(fullDecodeXml(imgMatch[1]));
         }
-        // 裸图片链接
         const imgRawReg = /https?:\/\/[^\s<>]+\.(jpg|jpeg|png|gif|webp)/gi;
         while((imgMatch = imgRawReg.exec(txt + desc)) !== null){
             imgsRaw.push(imgMatch[0]);
@@ -1124,6 +1144,7 @@ function parseRSS(xml, sourceName, sourceUrl, cat){
             link: link,
             date: date,
             media:{imgs,videos},
+            iframe: iframeCode,
             sourceName,sourceUrl
         })
     }
