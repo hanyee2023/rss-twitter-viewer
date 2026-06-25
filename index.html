@@ -477,8 +477,7 @@ function getProxyUrl(rawUrl, isFav = false) {
     if (typeof rawUrl !== "string") return rawUrl;
     for (const d of PROXY_DOMAINS) {
         if (rawUrl.includes(d)) {
-            // 只进行一次URL编码
-            let url = CF_WORKER_PROXY + encodeURIComponent(rawUrl);
+            let url = `${origin}/media-proxy?url=${encodeURIComponent(rawUrl)}`;
             if(isFav) url += "&cache=long";
             return url;
         }
@@ -819,15 +818,9 @@ function buildCard(item, isFav = false){
     let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
     const videoType = videoProxy.includes(".m3u8") ? "hls" : "mp4";
 
-    mediaHtml = `
-    <div class="video-single-wrap">
-      <video class="media-video" 
-             data-src="${videoProxy}" 
-             data-type="${videoType}"
-             controls preload="none" playsinline ${posterAttr}>
-      </video>
-    </div>
-    `;
+    mediaHtml = `<div class="video-single-wrap">
+<video class="media-video" controls preload="none" playsinline ${posterAttr} src="${videoProxy}"></video>
+</div>`;
 }else if(imgs.length > 0){
         const total = imgs.length;
         const gridClass = total === 1 ? "grid-single" : "grid-multi";
