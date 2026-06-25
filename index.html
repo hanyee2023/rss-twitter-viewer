@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>本地RSS媒体阅读器</title>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto;}
 html {
@@ -299,8 +300,6 @@ body{
     display:block;
     background:#000;
     object-fit:contain;
-    preload:"none";
-    playsinline;
 }
 .bottom-tip{text-align:center;padding:18px 0;color:#999;font-size:12px;}
 
@@ -513,16 +512,14 @@ let localCacheArticles = [];
 let hasNewUpdate = false;
 let newArticleCount = 0;
 
-// 唯一的RSS拉取函数（已清理重复代码）
+// 唯一的RSS拉取函数
 async function fetchRSSFeed(rssUrl) {
     let realFetchUrl = rssUrl;
-    // 仅推特、xcancel域名走CF Worker代理，其余直连
     const needProxy = /xcancel\.com|twitter|x\.com/.test(rssUrl);
     if (needProxy) {
         realFetchUrl = CF_WORKER_PROXY + encodeURIComponent(rssUrl);
     }
 
-    // 超时保护，避免页面卡死
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
 
@@ -762,6 +759,113 @@ function renderCardList(list){
     return html;
 }
 
+// ====================== 完整修复后的buildCard函数 ======================
+function buildCard(item, isFav = false){
+    let mediaHtml = "";
+    const imgs = [...new Set(item.media.imgs || [])];
+    const videos = item.media.videos || [];
+    if(videos.length > 0){
+        const posterImg = imgs.length > 0 ? imgs[0] : "";
+        const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
+        const videoProxy = getProxyUrl(videos[0], isFav);
+        let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
+
+        mediaHtml = `
+        <div class="video-single-wrap">
+          <video class="media-video" controls preload="none" playsinline ${posterAttr}></video>
+          <script>
+            (function(vidSrc) {
+              const videoEl = document.currentScript.previousElementSibling;
+              if(vidSrc.includes(".m3u8")){
+                if (Hls.isSupported()) {
+                  const hls = new Hls();
+                  hls.loadSource(vidSrc);
+                  hls.attachMedia(videoEl);
+                  videoEl.onended = () => hls.destroy();
+                } else {
+                  videoEl.src = vidSrc;
+                }
+              } else {
+                videoEl.src = vidSrc;
+              }
+            })("${videoProxy}");
+          <\/script>
+        </div>
+        `;
+    }else if(imgs.length > 0){
+        const total = imgs.length;
+        const gridClass = total === 1 ? "grid-single" : "grid-multi";
+        mediaHtml = `<div class="img-grid-wrap"><div class="img-grid ${gridClass}">`;
+        const show = imgs.slice(0,4);
+        show.forEach((src,i)=>{
+            let overlay = "";
+            if(i === 3 && total > 4){
+                const rest = total - 4;
+                overlay = `<div class="img-overlay-more">+${rest}张</div>`;
+            }
+            const imgProxy = getProxyUrl(src, isFav);
+            mediaHtml += `<div class="grid-img-box"><img class="grid-img" data-imggroup='${JSON.stringify(imgs)}' src="${imgProxy}" loading="lazy">${overlay}</div>`;
+        })
+        mediaHtml += `</div></div>`;
+    }
+
+    // 清除所有HTML标签，杜绝<a>造成卡片嵌套错乱
+    function getPureText(str){
+        if(!str) return "无标题";
+        let div = document.createElement("div");
+        div.innerHTML = str;
+        let text = div.textContent || div.innerText;
+        text = text.replace(/<[^>]+>/g, "").trim();
+        return text || "无标题";
+    }
+    const titleRaw = getPureText(item.title);
+
+    const isCollected = favList.some(f=>f.link === item.link);
+    const favTxt = isCollected ? "已收藏" : "收藏";
+    const favCls = isCollected ? "btn-fav collected" : "btn-fav";
+    const itemLink = item.link;
+
+    if(isFav){
+        return `
+        <div class="tweet-card" data-link="${itemLink}" data-source-url="${item.sourceUrl}">
+            <div class="card-top">
+                <div class="card-avatar">${item.sourceName.slice(0,1)}</div>
+                <div class="source-name-text">${item.sourceName}</div>
+            </div>
+            <div class="card-title-wrap">
+                <div class="card-title">${titleRaw}</div>
+                <button class="title-toggle-btn" style="display:none;">展开</button>
+            </div>
+            ${mediaHtml}
+            <div class="fav-card-bottom">
+                <div class="card-bottom-left">${item.date || "未知时间"}</div>
+                <button class="del-fav" data-link="${itemLink}" style="border:none;background:transparent;font-size:13px;color:#666;">取消收藏</button>
+            </div>
+        </div>`;
+    }else{
+        return `
+        <div class="tweet-card" data-link="${itemLink}" data-source-url="${item.sourceUrl}">
+            <div class="card-top">
+                <div class="card-avatar">${item.sourceName.slice(0,1)}</div>
+                <div class="source-name-text">${item.sourceName}</div>
+            </div>
+            <div class="card-title-wrap">
+                <div class="card-title">${titleRaw}</div>
+                <button class="title-toggle-btn" style="display:none;">展开</button>
+            </div>
+            ${mediaHtml}
+            <div class="card-bottom">
+                <div class="card-bottom-left">${item.date || "未知时间"}</div>
+                <div class="card-bottom-right">
+                    <button class="btn-share">分享</button>
+                    <button class="${favCls}" data-link="${itemLink}">${favTxt}</button>
+                </div>
+            </div>
+        </div>`;
+    }
+}
+// ======================================================
+
 function renderFav(){
     if(scrollObserver) scrollObserver.disconnect();
     renderPageNum = 0;
@@ -807,40 +911,6 @@ function renderFav(){
             }
         },{rootMargin:"150px 0"});
         favObserver.observe(favLoad);
-    }
-}
-
-const titleRaw = escapeHtml(item.title || "无标题");
-            <div class="card-title-wrap">
-                <div class="card-title">${titleRaw}</div>
-                <button class="title-toggle-btn" style="display:none;">展开</button>
-            </div>
-            ${mediaHtml}
-            <div class="fav-card-bottom">
-                <div class="card-bottom-left">${item.date || "未知时间"}</div>
-                <button class="del-fav" data-link="${itemLink}" style="border:none;background:transparent;font-size:13px;color:#666;">取消收藏</button>
-            </div>
-        </div>`;
-    }else{
-        return `
-        <div class="tweet-card" data-link="${itemLink}" data-source-url="${item.sourceUrl}">
-            <div class="card-top">
-                <div class="card-avatar">${item.sourceName.slice(0,1)}</div>
-                <div class="source-name-text">${item.sourceName}</div>
-            </div>
-            <div class="card-title-wrap">
-                <div class="card-title">${titleRaw}</div>
-                <button class="title-toggle-btn" style="display:none;">展开</button>
-            </div>
-            ${mediaHtml}
-            <div class="card-bottom">
-                <div class="card-bottom-left">${item.date || "未知时间"}</div>
-                <div class="card-bottom-right">
-                    <button class="btn-share">分享</button>
-                    <button class="${favCls}" data-link="${itemLink}">${favTxt}</button>
-                </div>
-            </div>
-        </div>`;
     }
 }
 
@@ -976,7 +1046,6 @@ function parseRSS(xml, sourceName, sourceUrl, cat){
     while((m = itemReg.exec(xml)) !== null){
         let txt = m[2];
         let titleRaw = (txt.match(/<title>([\s\S]*?)<\/title>/) || [])[1] || "无标题";
-        let title = escapeHtml(titleRaw);
 
         let link = "";
         const linkHref = txt.match(/<link[^>]*href="([^"]+)"/);
@@ -986,17 +1055,21 @@ function parseRSS(xml, sourceName, sourceUrl, cat){
         if(!date) date = (txt.match(/<updated>([\s\S]*?)<\/updated>/) || [])[1] || "未知时间";
         let desc = (txt.match(/<description>([\s\S]*?)<\/description>/) || [])[1] || "";
         if(!desc) desc = (txt.match(/<summary>([\s\S]*?)<\/summary>/) || [])[1] || "";
+
+        // 同时匹配mp4 和 m3u8视频
+        const videoReg = /https?:\/\/[^\s"']+\.(mp4|m3u8)/gi;
         let videos = [];
-        const videoReg = /https?:\/\/[^\s"']+\.mp4/gi;
         let vMatch;
         while((vMatch = videoReg.exec(txt + desc)) !== null) videos.push(vMatch[0]);
+
         let imgsRaw = [];
         const imgReg = /https?:\/\/[^\s"']+\.(jpg|jpeg|png|gif|webp)/gi;
         let imgMatch;
         while((imgMatch = imgReg.exec(txt + desc)) !== null) imgsRaw.push(imgMatch[0]);
         const imgs = [...new Set(imgsRaw)];
+
         list.push({
-            title: title,
+            title: titleRaw,
             link: decodeXml(link),
             date: decodeXml(date),
             media:{imgs,videos},
