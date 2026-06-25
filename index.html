@@ -602,7 +602,41 @@ function initVideoObserver(){
 }
 function bindVideoPauseObserver(){
     if(!videoObserver) initVideoObserver();
-    document.querySelectorAll(".media-video").forEach(v=>videoObserver.observe(v));
+
+    document.querySelectorAll(".media-video").forEach(videoEl=>{
+        // 避免重复赋值
+        if(videoEl.src) return;
+
+        const vidSrc = videoEl.dataset.src;
+        const vidType = videoEl.dataset.type;
+        if(!vidSrc) return;
+
+        // ========= MP4 与 m3u8 完全分开，互不干扰 =========
+        if(vidType === "mp4"){
+            // MP4直接原生播放，完全不执行HLS代码
+            videoEl.src = vidSrc;
+        }
+        else if(vidType === "hls"){
+            // 只有m3u8才进入HLS逻辑，出错不会影响MP4
+            try {
+                if (Hls.isSupported()) {
+                    const hls = new Hls();
+                    hls.loadSource(vidSrc);
+                    hls.attachMedia(videoEl);
+                    videoEl.onended = () => {
+                        hls.destroy();
+                    };
+                } else {
+                    // 移动端Safari原生支持m3u8，直接赋值
+                    videoEl.src = vidSrc;
+                }
+            } catch (err) {
+                console.warn("m3u8流媒体加载失败，不影响其他视频", err);
+            }
+        }
+
+        videoObserver.observe(videoEl);
+    })
 }
 
 // 页面切换
@@ -765,34 +799,23 @@ function buildCard(item, isFav = false){
     const imgs = [...new Set(item.media.imgs || [])];
     const videos = item.media.videos || [];
     if(videos.length > 0){
-        const posterImg = imgs.length > 0 ? imgs[0] : "";
-        const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
-        const videoProxy = getProxyUrl(videos[0], isFav);
-        let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
+    const posterImg = imgs.length > 0 ? imgs[0] : "";
+    const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
+    const videoProxy = getProxyUrl(videos[0], isFav);
+    let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
+    // 判断视频类型，存入data-type
+    const videoType = videoProxy.includes(".m3u8") ? "hls" : "mp4";
 
-        mediaHtml = `
-        <div class="video-single-wrap">
-          <video class="media-video" controls preload="none" playsinline ${posterAttr}></video>
-          <script>
-            (function(vidSrc) {
-              const videoEl = document.currentScript.previousElementSibling;
-              if(vidSrc.includes(".m3u8")){
-                if (Hls.isSupported()) {
-                  const hls = new Hls();
-                  hls.loadSource(vidSrc);
-                  hls.attachMedia(videoEl);
-                  videoEl.onended = () => hls.destroy();
-                } else {
-                  videoEl.src = vidSrc;
-                }
-              } else {
-                videoEl.src = vidSrc;
-              }
-            })("${videoProxy}");
-          <\/script>
-        </div>
-        `;
-    }else if(imgs.length > 0){
+    mediaHtml = `
+    <div class="video-single-wrap">
+      <video class="media-video" 
+             data-src="${videoProxy}" 
+             data-type="${videoType}"
+             controls preload="none" playsinline ${posterAttr}>
+      </video>
+    </div>
+    `;
+}else if(imgs.length > 0){
         const total = imgs.length;
         const gridClass = total === 1 ? "grid-single" : "grid-multi";
         mediaHtml = `<div class="img-grid-wrap"><div class="img-grid ${gridClass}">`;
