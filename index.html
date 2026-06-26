@@ -514,17 +514,13 @@ const CF_WORKER_PROXY = "https://rss-twitter-viewer.pages.dev/proxy?url=";
 
 function getProxyUrl(rawUrl, isFav = false) {
     if (typeof rawUrl !== "string") return rawUrl || "";
-
-    // 只要包含推特/3go域名就自动启用代理
-    const needProxy = rawUrl.includes("twimg.com") || rawUrl.includes("3go");
-
+    const proxyHosts = ["twimg.com"];
+    const needProxy = proxyHosts.some(host => rawUrl.includes(host));
     if (needProxy) {
-        let encoded = encodeURIComponent(rawUrl);
-        let url = CF_WORKER_PROXY + encoded;
+        let url = rawUrl;
         if (isFav) url += "&cache=long";
         return url;
     }
-    // 国内资源原样返回，不中转、不编码
     return rawUrl;
 }
 
@@ -573,7 +569,7 @@ async function fetchRSSFeed(rssUrl) {
     let realFetchUrl = rssUrl;
     const needProxyRSS = /xcancel\.com|twitter|x\.com/.test(rssUrl);
     if (needProxyRSS) {
-        realFetchUrl = CF_WORKER_PROXY + rssUrl;
+        realFetchUrl = CF_WORKER_PROXY + encodeURIComponent(rssUrl);
     }
 
     const controller = new AbortController();
@@ -953,14 +949,9 @@ function buildCard(item, isFav = false){
         let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
         const videoProxy = getProxyUrl(videoUrl, isFav);
         
-        // 仅境外视频添加跨域
-        let crossAttr = "";
-        if (videoUrl.includes("twimg.com") || videoUrl.includes("3go")) {
-            crossAttr = 'crossorigin="anonymous"';
-        }
-
+        // 已彻底删除crossorigin跨域属性
         mediaHtml = `<div class="video-single-wrap">
-        <video class="media-video" ${crossAttr} preload="none" playsinline controls ${posterAttr} src="${videoProxy}">
+        <video class="media-video" preload="none" playsinline controls ${posterAttr} src="${videoProxy}">
         </video></div>`;
     }else if(imgs.length > 0){
         const total = imgs.length;
@@ -974,13 +965,8 @@ function buildCard(item, isFav = false){
                 overlay = `<div class="img-overlay-more">+${rest}张</div>`;
             }
             const imgProxy = getProxyUrl(src, isFav);
-            // 图片动态跨域属性
-            let crossImg = "";
-            if (src.includes("twimg.com") || src.includes("3go")) {
-                crossImg = 'crossorigin="anonymous"';
-            }
             mediaHtml += `<div class="grid-img-box">
-                <img class="grid-img" ${crossImg} data-imggroup='${JSON.stringify(imgs)}' src="${imgProxy}" loading="lazy">${overlay}
+                <img class="grid-img" data-imggroup='${JSON.stringify(imgs)}' src="${imgProxy}" loading="lazy">${overlay}
             </div>`;
         })
         mediaHtml += `</div></div>`;
