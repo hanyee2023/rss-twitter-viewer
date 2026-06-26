@@ -929,8 +929,9 @@ function buildCard(item, isFav = false){
     let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
     const videoProxy = getProxyUrl(item.videoUrl, isFav);
 
+    // 已删除crossorigin跨域属性
     mediaHtml = `<div class="video-single-wrap">
-        <video crossorigin="anonymous" class="media-video" data-m3u8="1" playsinline controls ${posterAttr} data-src="${videoProxy}">
+        <video class="media-video" data-m3u8="1" playsinline controls ${posterAttr} data-src="${videoProxy}">
 </video></div>`;
 }else if(item.iframe){
     let iframeStr = item.iframe;
@@ -952,9 +953,9 @@ function buildCard(item, isFav = false){
         let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
         const videoProxy = getProxyUrl(videoUrl, isFav);
         
-        // 已彻底删除crossorigin跨域属性
+        // 彻底删除crossorigin跨域属性
         mediaHtml = `<div class="video-single-wrap">
-        <video crossorigin="anonymous" class="media-video" preload="metadata" playsinline controls ${posterAttr} src="${videoProxy}">
+        <video class="media-video" preload="metadata" playsinline controls ${posterAttr} src="${videoProxy}">
 </video></div>`;
     }else if(imgs.length > 0){
         const total = imgs.length;
