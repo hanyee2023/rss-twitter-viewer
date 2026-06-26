@@ -514,11 +514,11 @@ const CF_WORKER_PROXY = "https://rss-twitter-viewer.pages.dev/proxy?url=";
 
 function getProxyUrl(rawUrl, isFav = false) {
     if (typeof rawUrl !== "string") return rawUrl || "";
-    const proxyHosts = ["twimg.com"];
+    const proxyHosts = ["twimg.com", "video.twimg.com"];
     const needProxy = proxyHosts.some(host => rawUrl.includes(host));
     if (needProxy) {
-        // 去掉 encodeURIComponent，不再前端编码
-        let url = CF_WORKER_PROXY + rawUrl;
+        // 恢复URL编码，和旧版可播放代码保持一致
+        let url = CF_WORKER_PROXY + encodeURIComponent(rawUrl);
         if (isFav) url += "&cache=long";
         return url;
     }
@@ -571,7 +571,7 @@ async function fetchRSSFeed(rssUrl) {
     const needProxyRSS = /xcancel\.com|twitter|x\.com/.test(rssUrl);
     if (needProxyRSS) {
         // 和视频代理保持一致：前端不做URL编码，交给后端处理
-        realFetchUrl = CF_WORKER_PROXY + rssUrl;
+        realFetchUrl = CF_WORKER_PROXY + encodeURIComponent(rssUrl);
     }
 
     const controller = new AbortController();
@@ -930,8 +930,8 @@ function buildCard(item, isFav = false){
     const videoProxy = getProxyUrl(item.videoUrl, isFav);
 
     mediaHtml = `<div class="video-single-wrap">
-        <video class="media-video" data-m3u8="1" playsinline controls ${posterAttr} data-src="${videoProxy}">
-        </video></div>`;
+        <video crossorigin="anonymous" class="media-video" data-m3u8="1" playsinline controls ${posterAttr} data-src="${videoProxy}">
+</video></div>`;
 }else if(item.iframe){
     let iframeStr = item.iframe;
     iframeStr = iframeStr.replace(/"+/g, '"');
@@ -954,8 +954,8 @@ function buildCard(item, isFav = false){
         
         // 已彻底删除crossorigin跨域属性
         mediaHtml = `<div class="video-single-wrap">
-        <video class="media-video" preload="none" playsinline controls ${posterAttr} src="${videoProxy}">
-        </video></div>`;
+        <video crossorigin="anonymous" class="media-video" preload="metadata" playsinline controls ${posterAttr} src="${videoProxy}">
+</video></div>`;
     }else if(imgs.length > 0){
         const total = imgs.length;
         const gridClass = total === 1 ? "grid-single" : "grid-multi";
