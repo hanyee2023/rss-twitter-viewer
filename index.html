@@ -99,15 +99,17 @@ body{
     height:100%;
     border:none;
     background:transparent;
-    font-family: "Heiti SC",黑体,sans-serif;
-    font-weight: bold;
-    font-size: 17px;
-    color:#888;
     position: relative;
+    /* 图标居中 */
+    display:flex;
+    align-items:center;
+    justify-content:center;
 }
-.bottom-nav-bar button.active{
-    color:#000;
+/* 选中状态：图标变绿色 */
+.bottom-nav-bar button.active svg{
+    stroke:#28a745 !important;
 }
+/* 底部蓝色横线，保留不动 */
 .bottom-nav-bar button.active::after{
     content:"";
     position:absolute;
@@ -118,6 +120,18 @@ body{
     background:#0066dd;
     border-radius:4px;
 }
+/*底部蓝色横条，只保留这一段，不要再重复写*/
+.bottom-nav-bar button.active::after{
+    content:"";
+    position:absolute;
+    left:15%;
+    right:15%;
+    bottom:0;
+    height:4px;
+    background:#0066dd;
+    border-radius:4px;
+}
+
 .bottom-nav-bar::-webkit-scrollbar {
     display: none !important;
 }
@@ -129,8 +143,8 @@ body{
     overflow-y: auto;
     overflow-x: hidden;
 }
-.page-home,.page-manage,.page-add,.page-fav{display:none;}
-#pageHome,#pageManage,#pageFav{
+.page-home,.page-manage,.page-add,.page-fav,.page-search{display:none;}
+#pageHome,#pageManage,#pageFav,#pageSearch{
     width: 100%;
 }
 #pageAdd{
@@ -434,13 +448,49 @@ body{
         </div>
     </div>
     <div class="page-fav" id="pageFav"><div id="favPanel"></div></div>
+    <!-- 新增搜索页面 -->
+    <div class="page-search" id="pageSearch">
+        <div style="padding:12px;">
+            <input id="searchInput" placeholder="输入关键词精确匹配标题" style="width:100%;padding:12px;border-radius:8px;border:1px solid #ddd;font-size:16px;">
+            <div id="searchResultBox"></div>
+        </div>
+    </div>
 </div>
 
 <div class="bottom-nav-bar">
-    <button id="btnHome">主页</button>
-    <button id="btnManage">管理订阅</button>
-    <button id="btnAdd">添加订阅</button>
-    <button id="btnFav">我的收藏</button>
+    <button id="btnHome">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#111111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+            <polyline points="9 22 9 12 15 12 15 22"></polyline>
+        </svg>
+    </button>
+    <button id="btnSearch">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#111111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <path d="m21 21-4.35-4.35"></path>
+        </svg>
+    </button>
+    <button id="btnAdd">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#111111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+            <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"></path>
+        </svg>
+    </button>
+    <button id="btnManage">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#111111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="8" x2="21" y1="6" y2="6"></line>
+            <line x1="8" x2="21" y1="12" y2="12"></line>
+            <line x1="8" x2="21" y1="18" y2="18"></line>
+            <line x1="3" x2="3.01" y1="6" y2="6"></line>
+            <line x1="3" x2="3.01" y1="12" y2="12"></line>
+            <line x1="3" x2="3.01" y1="18" y2="18"></line>
+        </svg>
+    </button>
+    <button id="btnFav">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#111111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+        </svg>
+    </button>
 </div>
 
 <div class="modal-mask" id="editModal">
@@ -522,6 +572,18 @@ let localCacheArticles = [];
 let hasNewUpdate = false;
 let newArticleCount = 0;
 
+// 页面切换记录
+let lastPageTitle = "";
+// 阅读断点 方案A
+let lastReadLink = localStorage.getItem("last_read_article_link") || "";
+
+// 已读监听对象
+let readObserver = null;
+// 缓存主页DOM与滚动位置
+let homeScrollTop = 0;
+let homeArticleHtml = "";
+let homeIsCached = false;
+
 async function fetchRSSFeed(rssUrl) {
     let realFetchUrl = rssUrl;
     const needProxy = /xcancel\.com|twitter|x\.com/.test(rssUrl);
@@ -579,15 +641,24 @@ const pageHome = document.getElementById("pageHome");
 const pageManage = document.getElementById("pageManage");
 const pageAdd = document.getElementById("pageAdd");
 const pageFav = document.getElementById("pageFav");
+const pageSearch = document.getElementById("pageSearch");
+
 const articleBox = document.getElementById("articleBox");
 const feedPanel = document.getElementById("feedPanel");
 const favPanel = document.getElementById("favPanel");
+const searchResultBox = document.getElementById("searchResultBox");
+const searchInput = document.getElementById("searchInput");
+
 const btnHome = document.getElementById("btnHome");
 const btnManage = document.getElementById("btnManage");
 const btnAdd = document.getElementById("btnAdd");
 const btnFav = document.getElementById("btnFav");
+const btnSearch = document.getElementById("btnSearch");
+
 const pageTitle = document.getElementById("pageTitle");
-const allBtns = [btnHome, btnManage, btnAdd, btnFav];
+let allBtns = [btnHome, btnManage, btnAdd, btnFav];
+allBtns.push(btnSearch);
+
 const editModal = document.getElementById("editModal");
 const imgPreviewMask = document.getElementById("imgPreviewMask");
 const previewWrap = document.getElementById("previewWrap");
@@ -616,7 +687,6 @@ function initVideoObserver(){
 function bindVideoPauseObserver(){
     if(!videoObserver) initVideoObserver();
     document.querySelectorAll(".media-video").forEach(v=>{
-        // 关键：只绑定一次，避免多次监听导致失效
         if(!v.dataset.bindFlag){
             videoObserver.observe(v);
             v.dataset.bindFlag = "1";
@@ -624,47 +694,120 @@ function bindVideoPauseObserver(){
     });
 }
 
+// 【最终修复版页面切换函数】
 function showPage(targetDom, titleText) {
-    feedPanel.innerHTML = "";
-    favPanel.innerHTML = "";
-    articleBox.innerHTML = "";
+    // 1. 如果当前页面就是目标页面，直接退出，不执行任何操作
+    if (lastPageTitle === titleText) {
+        return;
+    }
+
+    // 2. 离开主页时，保存内容与滚动位置
+    if (lastPageTitle === "本地RSS媒体阅读器") {
+        homeScrollTop = mainWrap.scrollTop;
+        homeArticleHtml = articleBox.innerHTML;
+        homeIsCached = true;
+    }
+
+    // 3. 隐藏所有页面
     pageHome.style.display = "none";
     pageManage.style.display = "none";
     pageAdd.style.display = "none";
     pageFav.style.display = "none";
+    pageSearch.style.display = "none";
+
+    feedPanel.innerHTML = "";
+    favPanel.innerHTML = "";
+    articleBox.innerHTML = "";
+
+    // 4. 打开目标页面
     targetDom.style.display = "block";
     targetDom.scrollTop = 0;
-    setTimeout(() => {
-        targetDom.scrollTop = 0;
-    }, 20);
-const textNode = Array.from(pageTitle.childNodes).find(n => n.nodeType === 3);
-if(textNode){
-    textNode.textContent = titleText;
-}
 
+    // 修改标题
+    const textNode = Array.from(pageTitle.childNodes).find(n => n.nodeType === 3);
+    if (textNode) {
+        textNode.textContent = titleText;
+    }
+
+    // 按钮激活样式
     allBtns.forEach(b => b.classList.remove("active"));
-    if(titleText === "本地RSS媒体阅读器") btnHome.classList.add("active");
-    if(titleText === "管理订阅") btnManage.classList.add("active");
-    if(titleText === "添加订阅") btnAdd.classList.add("active");
-    if(titleText === "我的收藏") btnFav.classList.add("active");
+    if (titleText === "本地RSS媒体阅读器") btnHome.classList.add("active");
+    if (titleText === "管理订阅") btnManage.classList.add("active");
+    if (titleText === "添加订阅") btnAdd.classList.add("active");
+    if (titleText === "我的收藏") btnFav.classList.add("active");
+    if (titleText === "内容搜索") btnSearch.classList.add("active");
 
-    if(titleText === "本地RSS媒体阅读器") {
+    // 5. 切回主页 + 有缓存：直接恢复HTML和滚动，不重新渲染
+    if (titleText === "本地RSS媒体阅读器" && homeIsCached) {
+        articleBox.innerHTML = homeArticleHtml;
+        setTimeout(()=>{
+            mainWrap.scrollTop = homeScrollTop;
+        },0);
+        bindAllCardEvent();
+        bindVideoPauseObserver();
+        lastPageTitle = titleText;
+        return;
+    }
+
+    // 6. 无缓存，正常重新渲染页面
+    if (titleText === "本地RSS媒体阅读器") {
         renderHomeFromCache();
         silentCheckUpdate();
-    } else if(titleText === "管理订阅") {
+        homeIsCached = false;
+    } else if (titleText === "管理订阅") {
         renderManage();
-    } else if(titleText === "我的收藏") {
+    } else if (titleText === "我的收藏") {
         renderFav();
+    } else if (titleText === "内容搜索") {
+        searchInput.value = "";
+        searchResultBox.innerHTML = "";
     }
+
+    lastPageTitle = titleText;
 }
 
+// 主页按钮点击
 btnHome.onclick = async () => {
     filterSourceUrl = "";
+    // 已经在主页，只执行更新检测，不切换页面
+    if(lastPageTitle === "本地RSS媒体阅读器"){
+        let oldTip = articleBox.querySelector(".update-tip-bar,.no-update-tip");
+        if(oldTip) oldTip.remove();
+
+        const newAll = await loadAllRSS();
+        const oldLinkSet = new Set(localCacheArticles.map(i=>i.link));
+        let newCount = 0;
+        newAll.forEach(item=>{
+            if(!oldLinkSet.has(item.link)) newCount++;
+        });
+
+        const bar = document.createElement("div");
+        bar.className = "update-tip-bar";
+        if(newCount>0){
+            bar.innerText = `更新${newCount}条内容，点击查看`;
+            bar.onclick = async ()=>{
+                allArticles = newAll;
+                localCacheArticles = [...newAll];
+                renderHomeFromCache();
+                mainWrap.scrollTop = 0;
+                bar.remove();
+                homeIsCached = false; // 刷新后清空缓存
+            };
+        }else{
+            bar.className = "no-update-tip";
+            bar.innerText = "暂无更新，继续浏览";
+        }
+        articleBox.prepend(bar);
+        setTimeout(()=>bar.remove(),5000);
+        return;
+    }
+    // 不在主页，执行页面跳转
     showPage(pageHome, "本地RSS媒体阅读器");
 };
 btnManage.onclick = () => showPage(pageManage, "管理订阅");
 btnAdd.onclick = () => showPage(pageAdd, "添加订阅");
 btnFav.onclick = () => showPage(pageFav, "我的收藏");
+btnSearch.onclick = () => showPage(pageSearch, "内容搜索");
 
 function renderHomeFromCache() {
     if(scrollObserver) scrollObserver.disconnect();
@@ -676,6 +819,15 @@ function renderHomeFromCache() {
     }
     let filterArticles = localCacheArticles;
     if(filterSourceUrl) filterArticles = localCacheArticles.filter(item => item.sourceUrl === filterSourceUrl);
+
+    // 断点接续逻辑 方案A
+    if(lastReadLink){
+        const idx = filterArticles.findIndex(x=>x.link === lastReadLink);
+        if(idx !== -1){
+            filterArticles = filterArticles.slice(idx+1);
+        }
+    }
+
     currentArticles = [...filterArticles];
     renderPageNum = 1;
     renderPagedList();
@@ -692,26 +844,6 @@ async function silentCheckUpdate() {
         })
         hasNewUpdate = newCount > 0;
         newArticleCount = newCount;
-        articleBox.querySelectorAll(".update-tip-bar,.no-update-tip").forEach(el=>el.remove());
-        if(hasNewUpdate) {
-            const tipBar = document.createElement("div");
-            tipBar.className = "update-tip-bar";
-            tipBar.innerText = `检测到${newArticleCount}条新内容，点击刷新`;
-            tipBar.onclick = async ()=>{
-                allArticles = newAll;
-                localCacheArticles = [...newAll];
-                renderHomeFromCache();
-                tipBar.remove();
-                hasNewUpdate = false;
-            };
-            articleBox.prepend(tipBar);
-        } else {
-            const tipBar = document.createElement("div");
-            tipBar.className = "no-update-tip";
-            tipBar.innerText = "当前没有最新内容";
-            articleBox.prepend(tipBar);
-            setTimeout(()=>tipBar.remove(), 2500);
-        }
     } catch(err) {
         console.warn("静默检测更新失败：", err);
     }
@@ -780,11 +912,8 @@ function renderCardList(list){
 function buildCard(item, isFav = false){
     let mediaHtml = "";
 
-    // 如果本条RSS自带iframe播放器（m3u8视频），优先渲染iframe
     if(item.iframe){
-        // 自动固定iframe尺寸，避免卡片变形
         let iframeStr = item.iframe;
-        // 强制统一播放器宽高，和video卡片尺寸对齐
         iframeStr = iframeStr.replace(/width=".*?"/gi, 'width="100%"');
         iframeStr = iframeStr.replace(/height=".*?"/gi, 'height="260px"');
         iframeStr = iframeStr.replace('frameborder="0"','frameborder="0" allowfullscreen');
@@ -793,7 +922,6 @@ function buildCard(item, isFav = false){
             ${iframeStr}
         </div>`;
     }else{
-        // 无iframe：保留原有图片 + MP4视频逻辑，完全不变
         const imgs = [...new Set(item.media.imgs || [])];
         const videos = item.media.videos || [];
         if(videos.length > 0){
@@ -1001,6 +1129,24 @@ function bindAllCardEvent(){
             showToast("已取消收藏");
         }
     })
+
+    // 仅记录阅读断点
+    if (!readObserver) {
+        readObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (!entry.isIntersecting) {
+                    const card = entry.target;
+                    const link = card.dataset.link;
+                    if(!link) return;
+                    lastReadLink = link;
+                    localStorage.setItem("last_read_article_link", link);
+                }
+            });
+        }, { rootMargin: "-90% 0px 0px 0px" });
+    }
+    document.querySelectorAll(".tweet-card").forEach(card => {
+        readObserver.observe(card);
+    });
 }
 
 function renderPreviewSlider(imgs, startIndex = 0){
@@ -1051,7 +1197,6 @@ async function loadAllRSS(){
     return res;
 }
 
-// 重点修复：同时捕获src/data-src里带引号的mp4/m3u8链接
 function parseRSS(xml, sourceName, sourceUrl, cat){
     let list = [];
     const itemReg = /<(item|entry)>([\s\S]*?)<\/(item|entry)>/gi;
@@ -1075,14 +1220,12 @@ function parseRSS(xml, sourceName, sourceUrl, cat){
         if(!desc) desc = (txt.match(/<summary>([\s\S]*?)<\/summary>/) || [])[1] || "";
         desc = fullDecodeXml(desc);
 
-        // 提取description内的iframe播放器代码
         let iframeCode = "";
         const iframeMatch = desc.match(/<iframe[\s\S]*?<\/iframe>/i);
         if(iframeMatch){
             iframeCode = iframeMatch[0];
         }
 
-        // 仅抓取MP4视频，不再抓取m3u8链接
         const videoAttrReg = /(?:src|data-src)=["']([^"']+\.mp4)["']/gi;
         let videos = [];
         let vMatch;
@@ -1096,7 +1239,6 @@ function parseRSS(xml, sourceName, sourceUrl, cat){
         }
         videos = [...new Set(videos)];
 
-        // 图片抓取逻辑保持原样
         const imgAttrReg = /src=["']([^"']+\.(jpg|jpeg|png|gif|webp))["']/gi;
         let imgsRaw = [];
         let imgMatch;
@@ -1105,7 +1247,7 @@ function parseRSS(xml, sourceName, sourceUrl, cat){
         }
         const imgRawReg = /https?:\/\/[^\s<>]+\.(jpg|jpeg|png|gif|webp)/gi;
         while((imgMatch = imgRawReg.exec(txt + desc)) !== null){
-            imgsRaw.push(imgMatch[0]);
+            imgsRaw.push(fullDecodeXml(imgMatch[0]));
         }
         const imgs = [...new Set(imgsRaw)];
 
@@ -1120,6 +1262,49 @@ function parseRSS(xml, sourceName, sourceUrl, cat){
     }
     return list;
 }
+
+// 搜索功能
+function escapeReg(str){
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+function getPureText(str){
+    if(!str) return "无标题";
+    let div = document.createElement("div");
+    div.innerHTML = str;
+    let text = div.textContent || div.innerText;
+    return text.trim() || "无标题";
+}
+function renderSearchResult(keyword){
+    searchResultBox.innerHTML = "";
+    if(!keyword.trim()) return;
+    const kw = keyword.trim();
+    const list = localCacheArticles.filter(item=>{
+        const titleRaw = getPureText(item.title);
+        return titleRaw.includes(kw);
+    }).sort((a,b)=>new Date(b.date)-new Date(a.date));
+
+    if(list.length===0){
+        searchResultBox.innerHTML = `<div class="empty-tip">没有匹配结果</div>`;
+        return;
+    }
+
+    let html = "";
+    list.forEach(item=>{
+        let titleRaw = getPureText(item.title);
+        const reg = new RegExp(`(${escapeReg(kw)})`,"g");
+        titleRaw = titleRaw.replace(reg,`<mark style="background:#34c759;color:#fff;padding:0 2px;">$1</mark>`);
+
+        let cardHtml = buildCard(item,false);
+        cardHtml = cardHtml.replace(/<div class="card-title">[\s\S]*?<\/div>/,`<div class="card-title">${titleRaw}</div>`);
+        html += cardHtml;
+    });
+    searchResultBox.innerHTML = html;
+    bindAllCardEvent();
+    bindVideoPauseObserver();
+}
+searchInput.oninput = function(){
+    renderSearchResult(this.value);
+};
 
 document.getElementById("importFeed").onclick = function(){
     document.getElementById("importFileInput").click();
@@ -1154,18 +1339,6 @@ document.getElementById("delAllFeed").onclick = function(){
     }
 }
 
-document.getElementById("confirmAdd").onclick = function(){
-    const name = document.getElementById("feedName").value.trim();
-    const cat = document.getElementById("feedCat").value;
-    const url = document.getElementById("feedUrl").value.trim();
-    if(!url){alert("请输入RSS订阅链接");return;}
-    if(feedList.some(f=>f.url === url)){alert("该订阅已存在");return;}
-    feedList.push({name,category:cat,url});
-    localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
-    document.getElementById("feedName").value = "";
-    document.getElementById("feedUrl").value = "";
-    alert("添加成功，点击主页加载内容");
-}
 document.getElementById("saveEdit").onclick = function(){
     const idx = Number(document.getElementById("editIndex").value);
     const name = document.getElementById("editName").value.trim();
