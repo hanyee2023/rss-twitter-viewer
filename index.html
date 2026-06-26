@@ -517,8 +517,8 @@ function getProxyUrl(rawUrl, isFav = false) {
     const proxyHosts = ["twimg.com"];
     const needProxy = proxyHosts.some(host => rawUrl.includes(host));
     if (needProxy) {
-        // 拼接代理地址
-        let url = CF_WORKER_PROXY + encodeURIComponent(rawUrl);
+        // 去掉 encodeURIComponent，不再前端编码
+        let url = CF_WORKER_PROXY + rawUrl;
         if (isFav) url += "&cache=long";
         return url;
     }
@@ -570,7 +570,8 @@ async function fetchRSSFeed(rssUrl) {
     let realFetchUrl = rssUrl;
     const needProxyRSS = /xcancel\.com|twitter|x\.com/.test(rssUrl);
     if (needProxyRSS) {
-        realFetchUrl = CF_WORKER_PROXY + encodeURIComponent(rssUrl);
+        // 和视频代理保持一致：前端不做URL编码，交给后端处理
+        realFetchUrl = CF_WORKER_PROXY + rssUrl;
     }
 
     const controller = new AbortController();
@@ -694,9 +695,10 @@ function initHlsVideo(){
 function bindVideoPauseObserver(){
     if(!videoObserver) initVideoObserver();
     document.querySelectorAll(".media-video").forEach(v=>{
-        if(!v.dataset.bindFlag){
+        // 用DOM属性判断，杜绝重复绑定
+        if(!v.dataset.observeBind){
             videoObserver.observe(v);
-            v.dataset.bindFlag = "1";
+            v.dataset.observeBind = "1";
         }
     });
 }
