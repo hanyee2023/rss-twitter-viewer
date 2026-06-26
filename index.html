@@ -1170,12 +1170,14 @@ function bindAllCardEvent(){
 
 function renderPreviewSlider(imgs, startIndex = 0){
     previewWrap.innerHTML = "";
-    imgs.forEach(src=>{
-        const slide = document.createElement("div");
-        slide.className = "preview-slide";
-        slide.innerHTML = `<img class="preview-img" src="${getProxyUrl(src)}" loading="lazy">`;
-        previewWrap.appendChild(slide);
-    })
+imgs.forEach(src=>{
+    const slide = document.createElement("div");
+    slide.className = "preview-slide";
+    // 图片自动走代理判断
+    const imgUrl = getProxyUrl(src);
+    slide.innerHTML = `<img class="preview-img" src="${imgUrl}" loading="lazy">`;
+    previewWrap.appendChild(slide);
+})
     previewTip.innerText = "";
     setTimeout(()=>{
         previewWrap.scrollLeft = previewWrap.clientWidth * startIndex;
