@@ -571,10 +571,9 @@ let readObserver = null;
 
 async function fetchRSSFeed(rssUrl) {
     let realFetchUrl = rssUrl;
-    // 仅推特、xcancel订阅启用代理，国内RSS直连
     const needProxyRSS = /xcancel\.com|twitter|x\.com/.test(rssUrl);
     if (needProxyRSS) {
-        realFetchUrl = CF_WORKER_PROXY + encodeURIComponent(rssUrl);
+        realFetchUrl = CF_WORKER_PROXY + rssUrl;
     }
 
     const controller = new AbortController();
@@ -924,7 +923,7 @@ function getPureText(str){
 function buildCard(item, isFav = false){
     let mediaHtml = "";
 
-   if (item.isM3u8Video === true) {
+      if (item.isM3u8Video === true) {
     const imgs = [...new Set(item.media.imgs || [])];
     const posterImg = imgs.length > 0 ? imgs[0] : "";
     const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
@@ -932,7 +931,7 @@ function buildCard(item, isFav = false){
     const videoProxy = getProxyUrl(item.videoUrl, isFav);
 
     mediaHtml = `<div class="video-single-wrap">
-        <video class="media-video" data-m3u8="1" crossorigin="anonymous" preload="none" playsinline controls ${posterAttr} data-src="${videoProxy}">
+        <video class="media-video" data-m3u8="1" playsinline controls ${posterAttr} data-src="${videoProxy}">
         </video></div>`;
 }else if(item.iframe){
     let iframeStr = item.iframe;
