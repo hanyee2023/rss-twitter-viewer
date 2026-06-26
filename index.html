@@ -694,8 +694,23 @@ function initHlsVideo(){
 
 function bindVideoPauseObserver(){
     if(!videoObserver) initVideoObserver();
+
+    // 清除旧绑定，防止重复监听
+    document.querySelectorAll(".media-video, .media-video-mp4").forEach(v=>{
+        videoObserver.unobserve(v);
+        delete v.dataset.observeBind;
+    });
+
+    // 监听M3U8视频
     document.querySelectorAll(".media-video").forEach(v=>{
-        // 用DOM属性判断，杜绝重复绑定
+        if(!v.dataset.observeBind){
+            videoObserver.observe(v);
+            v.dataset.observeBind = "1";
+        }
+    });
+
+    // 额外监听MP4视频，滑出屏幕自动暂停
+    document.querySelectorAll(".media-video-mp4").forEach(v=>{
         if(!v.dataset.observeBind){
             videoObserver.observe(v);
             v.dataset.observeBind = "1";
@@ -922,16 +937,27 @@ function getPureText(str){
 function buildCard(item, isFav = false){
     let mediaHtml = "";
 
-      if (item.isM3u8Video === true) {
+            if (item.isM3u8Video === true) {
+    // M3U8视频，保留原有标记，仅给HLS调用
     const imgs = [...new Set(item.media.imgs || [])];
     const posterImg = imgs.length > 0 ? imgs[0] : "";
     const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
     let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
     const videoProxy = getProxyUrl(item.videoUrl, isFav);
 
-    // 已删除crossorigin跨域属性
     mediaHtml = `<div class="video-single-wrap">
         <video class="media-video" data-m3u8="1" playsinline controls ${posterAttr} data-src="${videoProxy}">
+</video></div>`;
+}else if(item.videoUrl){
+    // MP4视频：单独class media-video-mp4，完全脱离HLS逻辑
+    const imgs = [...new Set(item.media.imgs || [])];
+    const posterImg = imgs.length > 0 ? imgs[0] : "";
+    const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
+    let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
+    const videoProxy = getProxyUrl(item.videoUrl, isFav);
+    
+    mediaHtml = `<div class="video-single-wrap">
+        <video class="media-video-mp4" preload="metadata" playsinline controls ${posterAttr} src="${videoProxy}">
 </video></div>`;
 }else if(item.iframe){
     let iframeStr = item.iframe;
@@ -945,19 +971,7 @@ function buildCard(item, isFav = false){
     </div>`;
 }else{
     const imgs = [...new Set(item.media.imgs || [])];
-    const videoUrl = item.videoUrl || "";
-
-    if(videoUrl){
-        const posterImg = imgs.length > 0 ? imgs[0] : "";
-        const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
-        let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
-        const videoProxy = getProxyUrl(videoUrl, isFav);
-        
-        // 彻底删除crossorigin跨域属性
-        mediaHtml = `<div class="video-single-wrap">
-        <video class="media-video" preload="metadata" playsinline controls ${posterAttr} src="${videoProxy}">
-</video></div>`;
-    }else if(imgs.length > 0){
+    if(imgs.length > 0){
         const total = imgs.length;
         const gridClass = total === 1 ? "grid-single" : "grid-multi";
         mediaHtml = `<div class="img-grid-wrap"><div class="img-grid ${gridClass}">`;
