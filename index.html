@@ -77,6 +77,8 @@ body{
     border-radius:10px;
     overflow:hidden;
     margin:6px 0;
+    background:#000;
+    height: auto;
 }
 
 /* 底部悬浮导航栏 磨砂玻璃 */
@@ -300,11 +302,12 @@ body{
     justify-content:center;
     font-size:14px;
 }
-.media-video{
-    width:100%;
-    display:block;
+.media-video, .media-video-mp4{
+    width: 100%;
+    height: 100%;
+    display: block;
     background:#000;
-    object-fit:contain;
+    object-fit: cover;
 }
 .bottom-tip{text-align:center;padding:18px 0;color:#999;font-size:12px;}
 
@@ -510,19 +513,22 @@ body{
 
 <script>
 // 全局代理配置
-const CF_WORKER_PROXY = "https://rss-twitter-viewer.pages.dev/proxy?url=";
+const CF_WORKER_PROXY = "https://rss-twitter-viewer.pages.dev/proxy";
 
 function getProxyUrl(rawUrl, isFav = false) {
-    if (typeof rawUrl !== "string") return rawUrl || "";
-    const proxyHosts = ["twimg.com", "video.twimg.com"];
-    const needProxy = proxyHosts.some(host => rawUrl.includes(host));
-    if (needProxy) {
-        // 恢复URL编码，和旧版可播放代码保持一致
-        let url = CF_WORKER_PROXY + encodeURIComponent(rawUrl);
-        if (isFav) url += "&cache=long";
-        return url;
-    }
+  if (typeof rawUrl !== "string") return rawUrl || "";
+  // 仅推特域名启用代理，国内普通视频直接放行
+  const proxyHosts = ["twimg.com", "video.twimg.com"];
+  const needProxy = proxyHosts.some(host => rawUrl.includes(host));
+  // 国内普通mp4，直接返回原链接，不经过代理
+  if (!needProxy) {
     return rawUrl;
+  }
+
+  // 仅推特视频才走cloud代理，只做一次URL编码
+  let url = `${CF_WORKER_PROXY}?url=${encodeURIComponent(rawUrl)}`;
+  if (isFav) url += "&cache=long";
+  return url;
 }
 
 function escapeHtml(str) {
@@ -684,11 +690,17 @@ function initHlsVideo(){
             lowLatencyMode: true,
             maxBufferLength: 30,
             capLevelToPlayerSize: true,
-            storage: null
+            storage: null,
+            autoStartLoad: false // 禁止自动加载
         });
         video.hlsInstance = hls;
         hls.attachMedia(video);
-        hls.loadSource(streamUrl);
+
+        // 点击播放才开始拉流
+        video.onplay = ()=>{
+            hls.loadSource(streamUrl);
+            hls.startLoad();
+        }
     })
 }
 
@@ -957,7 +969,7 @@ function buildCard(item, isFav = false){
     const videoProxy = getProxyUrl(item.videoUrl, isFav);
     
     mediaHtml = `<div class="video-single-wrap">
-        <video class="media-video-mp4" preload="metadata" playsinline controls ${posterAttr} src="${videoProxy}">
+        <video class="media-video-mp4" preload="none" playsinline controls ${posterAttr} src="${videoProxy}">
 </video></div>`;
 }else if(item.iframe){
     let iframeStr = item.iframe;
