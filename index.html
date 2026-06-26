@@ -510,20 +510,22 @@ body{
 
 <script>
 // 全局代理配置
-const PROXY_DOMAINS = ["video.twimg.com", "pbs.twimg.com", "video.shturl."];
 const CF_WORKER_PROXY = "https://rss-twitter-viewer.pages.dev/proxy?url=";
 
 function getProxyUrl(rawUrl, isFav = false) {
     if (typeof rawUrl !== "string") return rawUrl || "";
-    for (const d of PROXY_DOMAINS) {
-        if (rawUrl.includes(d)) {
-            // 强制使用CF Worker中转URL，不再使用本地代理
-            let encoded = encodeURIComponent(rawUrl);
-            let url = CF_WORKER_PROXY + encoded;
-            if(isFav) url += "&cache=long";
-            return url;
-        }
+
+    // 仅境外域名启用代理，国内资源直接放行
+    const PROXY_DOMAINS = ["video.twimg.com", "pbs.twimg.com", "video.3go.fun"];
+    let needProxy = PROXY_DOMAINS.some(domain => rawUrl.includes(domain));
+
+    if (needProxy) {
+        let encoded = encodeURIComponent(rawUrl);
+        let url = CF_WORKER_PROXY + encoded;
+        if (isFav) url += "&cache=long";
+        return url;
     }
+    // 国内资源，直接原地址返回，不走代理
     return rawUrl;
 }
 
@@ -924,56 +926,62 @@ function getPureText(str){
 function buildCard(item, isFav = false){
     let mediaHtml = "";
 
-    if (item.isM3u8Video === true) {
-        const imgs = [...new Set(item.media.imgs || [])];
+   if (item.isM3u8Video === true) {
+    const imgs = [...new Set(item.media.imgs || [])];
+    const posterImg = imgs.length > 0 ? imgs[0] : "";
+    const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
+    let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
+    const videoProxy = getProxyUrl(item.videoUrl, isFav);
+
+    mediaHtml = `<div class="video-single-wrap">
+        <video class="media-video" data-m3u8="1" crossorigin="anonymous" preload="none" playsinline controls ${posterAttr} data-src="${videoProxy}">
+        </video></div>`;
+}else if(item.iframe){
+    let iframeStr = item.iframe;
+    iframeStr = iframeStr.replace(/"+/g, '"');
+    iframeStr = iframeStr.replace(/width=".*?"/gi, 'width="100%"');
+    iframeStr = iframeStr.replace(/height=".*?"/gi, 'height="260px"');
+    iframeStr = iframeStr.replace('frameborder="0"','frameborder="0" allowfullscreen');
+
+    mediaHtml = `<div class="video-single-wrap" style="background:#000;overflow:hidden;border-radius:10px;">
+        ${iframeStr}
+    </div>`;
+}else{
+    const imgs = [...new Set(item.media.imgs || [])];
+    const videoUrl = item.videoUrl || "";
+
+    if(videoUrl){
         const posterImg = imgs.length > 0 ? imgs[0] : "";
         const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
         let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
-        const videoProxy = getProxyUrl(item.videoUrl, isFav);
+        const videoProxy = getProxyUrl(videoUrl, isFav);
+        
+        // 动态判断：只有境外域名才添加跨域属性，国内MP4不加
+        let crossAttr = "";
+        if (videoUrl.includes("twimg.com") || videoUrl.includes("3go")) {
+            crossAttr = 'crossorigin="anonymous"';
+        }
 
         mediaHtml = `<div class="video-single-wrap">
-            <video class="media-video" data-m3u8="1" preload="none" playsinline controls ${posterAttr} data-src="${videoProxy}">
-            </video></div>`;
-    }else if(item.iframe){
-        let iframeStr = item.iframe;
-        iframeStr = iframeStr.replace(/"+/g, '"');
-        iframeStr = iframeStr.replace(/width=".*?"/gi, 'width="100%"');
-        iframeStr = iframeStr.replace(/height=".*?"/gi, 'height="260px"');
-        iframeStr = iframeStr.replace('frameborder="0"','frameborder="0" allowfullscreen');
-
-        mediaHtml = `<div class="video-single-wrap" style="background:#000;overflow:hidden;border-radius:10px;">
-            ${iframeStr}
-        </div>`;
-    }else{
-        const imgs = [...new Set(item.media.imgs || [])];
-        const videoUrl = item.videoUrl || "";
-
-        if(videoUrl){
-            const posterImg = imgs.length > 0 ? imgs[0] : "";
-            const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
-            let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
-            const videoProxy = getProxyUrl(videoUrl, isFav);
-
-            mediaHtml = `<div class="video-single-wrap">
-            <video class="media-video" preload="none" playsinline controls ${posterAttr} src="${videoProxy}">
-            </video></div>`;
-        }else if(imgs.length > 0){
-            const total = imgs.length;
-            const gridClass = total === 1 ? "grid-single" : "grid-multi";
-            mediaHtml = `<div class="img-grid-wrap"><div class="img-grid ${gridClass}">`;
-            const show = imgs.slice(0,4);
-            show.forEach((src,i)=>{
-                let overlay = "";
-                if(i === 3 && total > 4){
-                    const rest = total - 4;
-                    overlay = `<div class="img-overlay-more">+${rest}张</div>`;
-                }
-                const imgProxy = getProxyUrl(src, isFav);
-                mediaHtml += `<div class="grid-img-box"><img class="grid-img" data-imggroup='${JSON.stringify(imgs)}' src="${imgProxy}" loading="lazy">${overlay}</div>`;
-            })
-            mediaHtml += `</div></div>`;
-        }
+        <video class="media-video" ${crossAttr} preload="none" playsinline controls ${posterAttr} src="${videoProxy}">
+        </video></div>`;
+    }else if(imgs.length > 0){
+        const total = imgs.length;
+        const gridClass = total === 1 ? "grid-single" : "grid-multi";
+        mediaHtml = `<div class="img-grid-wrap"><div class="img-grid ${gridClass}">`;
+        const show = imgs.slice(0,4);
+        show.forEach((src,i)=>{
+            let overlay = "";
+            if(i === 3 && total > 4){
+                const rest = total - 4;
+                overlay = `<div class="img-overlay-more">+${rest}张</div>`;
+            }
+            const imgProxy = getProxyUrl(src, isFav);
+            mediaHtml += `<div class="grid-img-box"><img class="grid-img" data-imggroup='${JSON.stringify(imgs)}' src="${imgProxy}" loading="lazy">${overlay}</div>`;
+        })
+        mediaHtml += `</div></div>`;
     }
+}
 
     const titleRaw = getPureText(item.title);
     const isCollected = favList.some(f=>f.link === item.link);
