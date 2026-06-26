@@ -517,7 +517,8 @@ function getProxyUrl(rawUrl, isFav = false) {
     const proxyHosts = ["twimg.com"];
     const needProxy = proxyHosts.some(host => rawUrl.includes(host));
     if (needProxy) {
-        let url = rawUrl;
+        // 拼接代理地址
+        let url = CF_WORKER_PROXY + encodeURIComponent(rawUrl);
         if (isFav) url += "&cache=long";
         return url;
     }
