@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>本地RSS媒体阅读器</title>
-<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
+<script src="https://unpkg.com/hls.js@1.5.7/dist/hls.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto;}
 html {
@@ -109,18 +109,7 @@ body{
 .bottom-nav-bar button.active svg{
     stroke:#28a745 !important;
 }
-/* 底部蓝色横线，保留不动 */
-.bottom-nav-bar button.active::after{
-    content:"";
-    position:absolute;
-    left:15%;
-    right:15%;
-    bottom:0;
-    height:4px;
-    background:#0066dd;
-    border-radius:4px;
-}
-/*底部蓝色横条，只保留这一段，不要再重复写*/
+/* 底部蓝色横线 */
 .bottom-nav-bar button.active::after{
     content:"";
     position:absolute;
@@ -280,9 +269,10 @@ body{
     -webkit-line-clamp:2;
     overflow:hidden;
     line-height:1.45;
+    word-break:break-all;
 }
 .card-title.expand{
-    -webkit-line-clamp:99;
+    -webkit-line-clamp:999;
 }
 .title-toggle-btn{
     font-size:13px;
@@ -290,6 +280,7 @@ body{
     border:none;
     background:transparent;
     white-space:nowrap;
+    display:none;
 }
 .img-grid{display:grid;gap:2px;}
 .grid-single{grid-template-columns:1fr;}
@@ -359,8 +350,7 @@ body{
     scroll-snap-stop:always;
     scrollbar-width:none;
     -ms-overflow-style:none;
-    /* 新增锁定滑动速率 */
-    -webkit-overflow-scrolling: auto;
+    -webkit-overflow-scrolling: touch;
 }
 .preview-wrap::-webkit-scrollbar{display:none;}
 .preview-slide{
@@ -450,7 +440,6 @@ body{
         </div>
     </div>
     <div class="page-fav" id="pageFav"><div id="favPanel"></div></div>
-    <!-- 新增搜索页面 -->
     <div class="page-search" id="pageSearch">
         <div style="padding:12px;">
             <input id="searchInput" placeholder="输入关键词精确匹配标题" style="width:100%;padding:12px;border-radius:8px;border:1px solid #ddd;font-size:16px;">
@@ -520,23 +509,21 @@ body{
 <div class="tip-toast" id="slideTip"></div>
 
 <script>
-const PROXY_DOMAINS = ["video.twimg.com", "pbs.twimg.com", "video.3go.fun"];
+// 全局代理配置
+const PROXY_DOMAINS = ["video.twimg.com", "pbs.twimg.com", "video.shturl."];
 const CF_WORKER_PROXY = "https://rss-twitter-viewer.pages.dev/proxy?url=";
-const origin = window.location.origin;
 
-// 代理URL 只编码一次，杜绝双重编码
 function getProxyUrl(rawUrl, isFav = false) {
     if (typeof rawUrl !== "string") return rawUrl || "";
-    const PROXY_DOMAINS = ["video.twimg.com", "pbs.twimg.com", "video.shturl."];
-    const origin = window.location.origin;
     for (const d of PROXY_DOMAINS) {
         if (rawUrl.includes(d)) {
-            let url = `${origin}/media-proxy?url=${encodeURIComponent(rawUrl)}`;
+            // 强制使用CF Worker中转URL，不再使用本地代理
+            let encoded = encodeURIComponent(rawUrl);
+            let url = CF_WORKER_PROXY + encoded;
             if(isFav) url += "&cache=long";
             return url;
         }
     }
-    // 不在代理域名列表，原样返回，保证不会返回空
     return rawUrl;
 }
 
@@ -549,7 +536,6 @@ function escapeHtml(str) {
                .replace(/'/g,"&#039;");
 }
 
-// XML转义字符解码
 function fullDecodeXml(str){
     if(!str) return str;
     return str.replace(/&amp;/g,"&")
@@ -576,18 +562,11 @@ let filterSourceUrl = "";
 let localCacheArticles = [];
 let hasNewUpdate = false;
 let newArticleCount = 0;
-
-// 页面切换记录
 let lastPageTitle = "";
-// 阅读断点 方案A
-let lastReadLink = localStorage.getItem("last_read_article_link") || "";
-
-// 已读监听对象
-let readObserver = null;
-// 缓存主页DOM与滚动位置
 let homeScrollTop = 0;
 let homeArticleHtml = "";
 let homeIsCached = false;
+let readObserver = null;
 
 async function fetchRSSFeed(rssUrl) {
     let realFetchUrl = rssUrl;
@@ -661,8 +640,7 @@ const btnFav = document.getElementById("btnFav");
 const btnSearch = document.getElementById("btnSearch");
 
 const pageTitle = document.getElementById("pageTitle");
-let allBtns = [btnHome, btnManage, btnAdd, btnFav];
-allBtns.push(btnSearch);
+let allBtns = [btnHome, btnManage, btnAdd, btnFav, btnSearch];
 
 const editModal = document.getElementById("editModal");
 const imgPreviewMask = document.getElementById("imgPreviewMask");
@@ -685,26 +663,37 @@ function initVideoObserver(){
             const video = item.target;
             if(!item.isIntersecting){
                 video.pause();
+                if(video.hlsInstance){
+                    video.hlsInstance.destroy();
+                    video.hlsInstance = null;
+                }
             }
         })
     }, {threshold:0.01});
 }
-// 只初始化m3u8视频，mp4完全跳过
+
 function initHlsVideo(){
     if (!window.Hls) return;
     document.querySelectorAll(".media-video[data-m3u8]").forEach(video=>{
         if (video.dataset.hlsInit) return;
         const streamUrl = video.dataset.src;
-        if(!streamUrl) return; // 空地址直接终止
+        if(!streamUrl) return;
         video.dataset.hlsInit = "1";
-        const hls = new Hls();
-        hls.loadSource(streamUrl);
+
+        const hls = new Hls({
+            enableWorker: true,
+            lowLatencyMode: true,
+            maxBufferLength: 30,
+            capLevelToPlayerSize: true,
+            storage: null
+        });
+        video.hlsInstance = hls;
+        // 【关键修复】先绑定媒体，再加载资源
         hls.attachMedia(video);
-        video.addEventListener("pause", ()=>{
-            if (hls) hls.destroy();
-        })
+        hls.loadSource(streamUrl);
     })
 }
+
 function bindVideoPauseObserver(){
     if(!videoObserver) initVideoObserver();
     document.querySelectorAll(".media-video").forEach(v=>{
@@ -715,21 +704,17 @@ function bindVideoPauseObserver(){
     });
 }
 
-// 【最终修复版页面切换函数】
 function showPage(targetDom, titleText) {
-    // 1. 如果当前页面就是目标页面，直接退出，不执行任何操作
     if (lastPageTitle === titleText) {
         return;
     }
 
-    // 2. 离开主页时，保存内容与滚动位置
     if (lastPageTitle === "本地RSS媒体阅读器") {
         homeScrollTop = mainWrap.scrollTop;
         homeArticleHtml = articleBox.innerHTML;
         homeIsCached = true;
     }
 
-    // 3. 隐藏所有页面
     pageHome.style.display = "none";
     pageManage.style.display = "none";
     pageAdd.style.display = "none";
@@ -740,17 +725,14 @@ function showPage(targetDom, titleText) {
     favPanel.innerHTML = "";
     articleBox.innerHTML = "";
 
-    // 4. 打开目标页面
     targetDom.style.display = "block";
     targetDom.scrollTop = 0;
 
-    // 修改标题
     const textNode = Array.from(pageTitle.childNodes).find(n => n.nodeType === 3);
     if (textNode) {
         textNode.textContent = titleText;
     }
 
-    // 按钮激活样式
     allBtns.forEach(b => b.classList.remove("active"));
     if (titleText === "本地RSS媒体阅读器") btnHome.classList.add("active");
     if (titleText === "管理订阅") btnManage.classList.add("active");
@@ -758,8 +740,6 @@ function showPage(targetDom, titleText) {
     if (titleText === "我的收藏") btnFav.classList.add("active");
     if (titleText === "内容搜索") btnSearch.classList.add("active");
 
-    // 5. 切回主页 + 有缓存：直接恢复HTML和滚动，不重新渲染
-       // 只有无筛选条件时才使用缓存；点击【查看】开启筛选后，强制禁用缓存重新渲染
     if (titleText === "本地RSS媒体阅读器" && homeIsCached && filterSourceUrl === "") {
         articleBox.innerHTML = homeArticleHtml;
         setTimeout(()=>{
@@ -767,20 +747,15 @@ function showPage(targetDom, titleText) {
         },0);
         bindAllCardEvent();
         bindVideoPauseObserver();
+        initHlsVideo();
         lastPageTitle = titleText;
         return;
     }
-    // ============ 新增这一段兜底代码 ============
-    // 只要刚退出筛选模式，一律禁用缓存
+
     if(filterSourceUrl === ""){
-        homeIsCached = false;
-}
-    // 存在订阅筛选条件，清空缓存，强制重新渲染列表
-    if(filterSourceUrl){
         homeIsCached = false;
     }
 
-    // 6. 无缓存，正常重新渲染页面
     if (titleText === "本地RSS媒体阅读器") {
         renderHomeFromCache();
         silentCheckUpdate();
@@ -797,13 +772,10 @@ function showPage(targetDom, titleText) {
     lastPageTitle = titleText;
 }
 
-// 主页按钮点击
 btnHome.onclick = async () => {
-    // 强制清空筛选条件 + 强制清空页面缓存，彻底解决残留筛选
     filterSourceUrl = "";
     homeIsCached = false;
 
-    // 已经在主页，重新加载完整列表，不再读取旧缓存
     if(lastPageTitle === "本地RSS媒体阅读器"){
         renderHomeFromCache();
         mainWrap.scrollTo(0,0);
@@ -838,7 +810,6 @@ btnHome.onclick = async () => {
         setTimeout(()=>bar.remove(),5000);
         return;
     }
-    // 不在主页，执行页面跳转
     showPage(pageHome, "本地RSS媒体阅读器");
 };
 btnManage.onclick = () => showPage(pageManage, "管理订阅");
@@ -856,15 +827,7 @@ function renderHomeFromCache() {
     }
     let filterArticles = localCacheArticles;
     if(filterSourceUrl) {
-    filterArticles = localCacheArticles.filter(item => item.sourceUrl.trim() === filterSourceUrl.trim());
-}
-
-    // 断点接续逻辑 方案A
-    if(lastReadLink){
-        const idx = filterArticles.findIndex(x=>x.link === lastReadLink);
-        if(idx !== -1){
-            filterArticles = filterArticles.slice(idx+1);
-        }
+        filterArticles = localCacheArticles.filter(item => item.sourceUrl.trim() === filterSourceUrl.trim());
     }
 
     currentArticles = [...filterArticles];
@@ -897,7 +860,6 @@ window.mergeNewData = async function(){
     currentArticles = [...filterArticles];
     renderPageNum = 1;
     renderPagedList();
-    bindScrollLoadMore();
 }
 
 async function initLoadAllCache() {
@@ -922,7 +884,7 @@ function renderPagedList(){
     }
     articleBox.innerHTML = html;
     bindAllCardEvent();
-        bindVideoPauseObserver();
+    bindVideoPauseObserver();
     initHlsVideo();
 }
 
@@ -949,11 +911,32 @@ function renderCardList(list){
     return html;
 }
 
+// 只保留唯一的buildCard，删除重复函数
+function getPureText(str){
+    if(!str) return "无标题";
+    let div = document.createElement("div");
+    div.innerHTML = str;
+    let text = div.textContent || div.innerText;
+    text = text.replace(/<[^>]+>/g, "").trim();
+    return text || "无标题";
+}
+
 function buildCard(item, isFav = false){
     let mediaHtml = "";
 
-    if(item.iframe){
+    if (item.isM3u8Video === true) {
+        const imgs = [...new Set(item.media.imgs || [])];
+        const posterImg = imgs.length > 0 ? imgs[0] : "";
+        const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
+        let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
+        const videoProxy = getProxyUrl(item.videoUrl, isFav);
+
+        mediaHtml = `<div class="video-single-wrap">
+            <video class="media-video" data-m3u8="1" preload="none" playsinline controls ${posterAttr} data-src="${videoProxy}">
+            </video></div>`;
+    }else if(item.iframe){
         let iframeStr = item.iframe;
+        iframeStr = iframeStr.replace(/"+/g, '"');
         iframeStr = iframeStr.replace(/width=".*?"/gi, 'width="100%"');
         iframeStr = iframeStr.replace(/height=".*?"/gi, 'height="260px"');
         iframeStr = iframeStr.replace('frameborder="0"','frameborder="0" allowfullscreen');
@@ -963,29 +946,18 @@ function buildCard(item, isFav = false){
         </div>`;
     }else{
         const imgs = [...new Set(item.media.imgs || [])];
-if(item.media.videos.length > 0){
-const posterImg = imgs.length > 0 ? imgs[0] : "";
-const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
-let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
+        const videoUrl = item.videoUrl || "";
 
-// 强制初始化为空数组，杜绝undefined
-let videoArr = Array.isArray(item.media.videos) ? item.media.videos : [];
-let rawVideo = videoArr.length > 0 ? videoArr[0] : "";
-// 强制把undefined转为空字符串
-if (rawVideo === undefined) rawVideo = "";
+        if(videoUrl){
+            const posterImg = imgs.length > 0 ? imgs[0] : "";
+            const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
+            let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
+            const videoProxy = getProxyUrl(videoUrl, isFav);
 
-console.log("原始视频链接rawVideo：", JSON.stringify(rawVideo));
-const videoProxy = rawVideo ? getProxyUrl(rawVideo, isFav) : "";
-const videoUrl = videoProxy || "";
-
-// 使用解析阶段预先标记好的视频类型，彻底避开URL后缀丢失问题
-if (item.isM3u8Video) {
-    const safeUrl = videoUrl || "";
-    mediaHtml = `<div class="video-single-wrap"><video class="media-video" data-m3u8="1" preload="none" playsinline controls ${posterAttr} data-src="${safeUrl}" src=""></video></div>`;
-} else {
-    mediaHtml = `<div class="video-single-wrap"><video class="media-video" preload="none" playsinline controls ${posterAttr} src="${videoUrl || ''}"></video></div>`;
-}
-}else if(imgs.length > 0){
+            mediaHtml = `<div class="video-single-wrap">
+            <video class="media-video" preload="none" playsinline controls ${posterAttr} src="${videoProxy}">
+            </video></div>`;
+        }else if(imgs.length > 0){
             const total = imgs.length;
             const gridClass = total === 1 ? "grid-single" : "grid-multi";
             mediaHtml = `<div class="img-grid-wrap"><div class="img-grid ${gridClass}">`;
@@ -1003,16 +975,7 @@ if (item.isM3u8Video) {
         }
     }
 
-    function getPureText(str){
-        if(!str) return "无标题";
-        let div = document.createElement("div");
-        div.innerHTML = str;
-        let text = div.textContent || div.innerText;
-        text = text.replace(/<[^>]+>/g, "").trim();
-        return text || "无标题";
-    }
     const titleRaw = getPureText(item.title);
-
     const isCollected = favList.some(f=>f.link === item.link);
     const favTxt = isCollected ? "已收藏" : "收藏";
     const favCls = isCollected ? "btn-fav collected" : "btn-fav";
@@ -1027,7 +990,7 @@ if (item.isM3u8Video) {
             </div>
             <div class="card-title-wrap">
                 <div class="card-title">${titleRaw}</div>
-                <button class="title-toggle-btn" style="display:none;">展开</button>
+                <button class="title-toggle-btn">展开</button>
             </div>
             ${mediaHtml}
             <div class="fav-card-bottom">
@@ -1044,7 +1007,7 @@ if (item.isM3u8Video) {
             </div>
             <div class="card-title-wrap">
                 <div class="card-title">${titleRaw}</div>
-                <button class="title-toggle-btn" style="display:none;">展开</button>
+                <button class="title-toggle-btn">展开</button>
             </div>
             ${mediaHtml}
             <div class="card-bottom">
@@ -1078,7 +1041,7 @@ function renderFav(){
     }
     favPanel.innerHTML = html;
     bindAllCardEvent();
-        bindVideoPauseObserver();
+    bindVideoPauseObserver();
     initHlsVideo();
     const favLoad = document.getElementById("favLoadMore");
     if(favLoad){
@@ -1095,6 +1058,7 @@ function renderFav(){
                 favPanel.innerHTML = favHtml;
                 bindAllCardEvent();
                 bindVideoPauseObserver();
+                initHlsVideo();
                 favObserver.disconnect();
                 setTimeout(()=>{
                     const newFavLoad = document.getElementById("favLoadMore");
@@ -1119,12 +1083,14 @@ function bindAllCardEvent(){
             imgPreviewMask.style.display = "flex";
         }
     })
+
     document.querySelectorAll(".card-title-wrap").forEach(wrap=>{
         const titleEl = wrap.querySelector(".card-title");
         const toggleBtn = wrap.querySelector(".title-toggle-btn");
         setTimeout(()=>{
             if(titleEl.scrollHeight > titleEl.clientHeight){
                 toggleBtn.style.display = "block";
+                toggleBtn.innerText = "展开";
             }else{
                 toggleBtn.style.display = "none";
             }
@@ -1139,6 +1105,7 @@ function bindAllCardEvent(){
             }
         }
     })
+
     document.querySelectorAll(".btn-share").forEach(btn=>{
         btn.onclick = async function(e){
             e.stopPropagation();
@@ -1183,7 +1150,6 @@ function bindAllCardEvent(){
         }
     })
 
-    // 仅记录阅读断点
     if (!readObserver) {
         readObserver = new IntersectionObserver((entries) => {
             entries.forEach(entry => {
@@ -1191,8 +1157,6 @@ function bindAllCardEvent(){
                     const card = entry.target;
                     const link = card.dataset.link;
                     if(!link) return;
-                    lastReadLink = link;
-                    localStorage.setItem("last_read_article_link", link);
                 }
             });
         }, { rootMargin: "-90% 0px 0px 0px" });
@@ -1211,24 +1175,9 @@ function renderPreviewSlider(imgs, startIndex = 0){
         previewWrap.appendChild(slide);
     })
     previewTip.innerText = "";
-    bindPreviewScroll();
     setTimeout(()=>{
         previewWrap.scrollLeft = previewWrap.clientWidth * startIndex;
     }, 10);
-}
-function bindPreviewScroll(){
-    previewWrap.onscroll = function(){
-        const scrollX = this.scrollLeft;
-        const width = this.clientWidth;
-        const totalW = this.scrollWidth;
-        if(scrollX <= 10){
-            previewTip.innerText = "这是第一张";
-        }else if(scrollX + width >= totalW - 10){
-            previewTip.innerText = "这是最后一张啦";
-        }else{
-            previewTip.innerText = "";
-        }
-    }
 }
 previewClose.onclick = ()=> imgPreviewMask.style.display = "none";
 
@@ -1277,58 +1226,50 @@ function parseRSS(xml, sourceName, sourceUrl, cat){
         const iframeMatch = desc.match(/<iframe[\s\S]*?<\/iframe>/i);
         if(iframeMatch){
             iframeCode = iframeMatch[0];
+            // 清理双层引号，修复iframe格式错误
+            iframeCode = iframeCode.replace(/""/g, '"');
         }
 
-                // 清理播放器前缀，提取真实视频地址
-        function extractRawVideoUrl(urlStr) {
-            if (!urlStr) return urlStr;
-            const playerPrefix = "https://m3u8player.org/player.html?url=";
-            if (urlStr.includes(playerPrefix)) {
-                urlStr = decodeURIComponent(urlStr.split(playerPrefix)[1]);
-            }
-            return urlStr;
+        let mp4List = [];
+        let m3u8List = [];
+        const fullText = txt + desc;
+
+        // 只保留精准正则，只捕获url=后面的m3u8地址，不再抓取整条网页链接
+        const playerUrlReg = /url=(https?:\/\/[^&"\s<>]+\.m3u8)/gi;
+        let regMatch;
+        while ((regMatch = playerUrlReg.exec(fullText)) !== null) {
+            m3u8List.push(regMatch[1]);
         }
 
-        // 【MP4 原有逻辑完全保留，不改动】
-        let videos = [];
-let m3u8List = [];
-const fullText = txt + desc;
+        // 抓取MP4地址
+        const videoAttrReg = /(?:src|data-src)=["']([^"']+\.mp4)["']/gi;
+        while((regMatch = videoAttrReg.exec(fullText)) !== null){
+            let url = fullDecodeXml(regMatch[1]);
+            mp4List.push(url);
+        }
+        const videoRawReg = /https?:\/\/[^<>]+\.mp4/gi;
+        while((regMatch = videoRawReg.exec(fullText)) !== null){
+            mp4List.push(regMatch[0]);
+        }
 
-// ========== 核心改动：直接抓取 ?url= 后的真实m3u8，无视引号BUG ==========
-// 匹配 player.html?url=xxx.m3u8
-const playerUrlReg = /url=(https?:\/\/[^&"\s<>]+\.m3u8)/gi;
-let regMatch;
-while ((regMatch = playerUrlReg.exec(fullText)) !== null) {
-    const realUrl = decodeURIComponent(regMatch[1]);
-    m3u8List.push(realUrl);
-}
+        // 数组去重
+        mp4List = [...new Set(mp4List)];
+        m3u8List = [...new Set(m3u8List)];
 
-// 同时匹配页面里裸写的m3u8直链
-const rawM3u8Reg = /https?:\/\/[^\s<>]+\.m3u8/gi;
-while ((regMatch = rawM3u8Reg.exec(fullText)) !== null) {
-    m3u8List.push(regMatch[0]);
-}
+        let finalVideoUrl = "";
+        let isM3u8Video = false;
 
-if (m3u8List.length > 0) {
-    videos = [m3u8List[0]];
-    iframeCode = "";
-} else {
-    // MP4视频逻辑完全保留不动
-    const videoAttrReg = /(?:src|data-src)=["']([^"']+\.mp4)["']/gi;
-    while((regMatch = videoAttrReg.exec(fullText)) !== null){
-        let url = fullDecodeXml(regMatch[1]);
-        videos.push(url);
-    }
-    const videoRawReg = /https?:\/\/[^\s<>]+\.mp4/gi;
-    while((regMatch = videoRawReg.exec(fullText)) !== null){
-        videos.push(regMatch[0]);
-    }
-}
+        // 强制优先级：有m3u8就必然切换为video，清空iframe，二选一不再冲突
+        if(m3u8List.length > 0){
+            finalVideoUrl = m3u8List[0];
+            isM3u8Video = true;
+            iframeCode = ""; // 直接清空iframe，DOM里不会再出现iframe
+        }else if(mp4List.length > 0){
+            finalVideoUrl = mp4List[0];
+            isM3u8Video = false;
+        }
 
-// 去重兜底
-videos = [...new Set(videos)];
-let isM3u8 = m3u8List.length > 0;
-
+        // 提取图片链接
         const imgAttrReg = /src=["']([^"']+\.(jpg|jpeg|png|gif|webp))["']/gi;
         let imgsRaw = [];
         let imgMatch;
@@ -1337,22 +1278,24 @@ let isM3u8 = m3u8List.length > 0;
         }
         const imgRawReg = /https?:\/\/[^\s<>]+\.(jpg|jpeg|png|gif|webp)/gi;
         while((imgMatch = imgRawReg.exec(txt + desc)) !== null){
-            imgsRaw.push(fullDecodeXml(imgMatch[0]));
+            imgsRaw.push(imgMatch[0]);
         }
         const imgs = [...new Set(imgsRaw)];
 
         list.push({
-    title: titleRaw,
-    link: link,
-    date: date,
-    media:{
-    imgs,
-    videos: Array.isArray(videos) ? videos : []
-},
-    iframe: iframeCode,
-    sourceName,sourceUrl,
-    isM3u8Video: isM3u8  // 新增字段
-})
+            title: titleRaw,
+            link: link,
+            date: date,
+            media:{
+                imgs: imgs,
+                videos: []
+            },
+            videoUrl: finalVideoUrl,
+            iframe: iframeCode,
+            sourceName,
+            sourceUrl,
+            isM3u8Video: isM3u8Video
+        });
     }
     return list;
 }
@@ -1360,13 +1303,6 @@ let isM3u8 = m3u8List.length > 0;
 // 搜索功能
 function escapeReg(str){
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-function getPureText(str){
-    if(!str) return "无标题";
-    let div = document.createElement("div");
-    div.innerHTML = str;
-    let text = div.textContent || div.innerText;
-    return text.trim() || "无标题";
 }
 function renderSearchResult(keyword){
     searchResultBox.innerHTML = "";
@@ -1478,11 +1414,13 @@ function renderManage(){
     feedPanel.onclick = function(e){
         const t = e.target;
         const idx = Number(t.dataset.idx);
-        if(t.classList.contains("view-feed")){
-            filterSourceUrl = t.dataset.source;
-            showPage(pageHome, "本地RSS媒体阅读器");
-            return;
-        }
+       if(t.classList.contains("view-feed")){
+    filterSourceUrl = t.dataset.source;
+    homeIsCached = false;
+    mergeNewData();
+    showPage(pageHome, "本地RSS媒体阅读器");
+    return;
+}
         if(t.classList.contains("del")){
             feedList.splice(idx,1);
             localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
@@ -1499,7 +1437,6 @@ function renderManage(){
     }
 }
 
-// 新增订阅确认按钮事件
 document.getElementById("confirmAdd").onclick = function(){
     const feedName = document.getElementById("feedName").value.trim();
     const feedCat = document.getElementById("feedCat").value;
@@ -1509,7 +1446,6 @@ document.getElementById("confirmAdd").onclick = function(){
         showToast("请填写RSS订阅链接");
         return;
     }
-    // 去重判断
     if (feedList.some(item => item.url === feedUrl)) {
         showToast("该订阅源已存在");
         return;
@@ -1522,11 +1458,10 @@ document.getElementById("confirmAdd").onclick = function(){
     });
     localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
 
-    // 清空输入框
     document.getElementById("feedName").value = "";
     document.getElementById("feedUrl").value = "";
     showToast("订阅添加成功");
-    // 自动跳转到管理页面
+    initLoadAllCache();
     showPage(pageManage, "管理订阅");
 }
 
