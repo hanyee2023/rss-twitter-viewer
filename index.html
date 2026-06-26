@@ -4,8 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>本地RSS媒体阅读器</title>
-<script src="https://cdn.bootcdn.net/ajax/libs/hls.js/1.5.7/hls.min.js">
-</script>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto;}
 html {
@@ -360,6 +359,8 @@ body{
     scroll-snap-stop:always;
     scrollbar-width:none;
     -ms-overflow-style:none;
+    /* 新增锁定滑动速率 */
+    -webkit-overflow-scrolling: auto;
 }
 .preview-wrap::-webkit-scrollbar{display:none;}
 .preview-slide{
@@ -525,7 +526,9 @@ const origin = window.location.origin;
 
 // 代理URL 只编码一次，杜绝双重编码
 function getProxyUrl(rawUrl, isFav = false) {
-    if (typeof rawUrl !== "string") return rawUrl;
+    if (typeof rawUrl !== "string") return rawUrl || "";
+    const PROXY_DOMAINS = ["video.twimg.com", "pbs.twimg.com", "video.shturl."];
+    const origin = window.location.origin;
     for (const d of PROXY_DOMAINS) {
         if (rawUrl.includes(d)) {
             let url = `${origin}/media-proxy?url=${encodeURIComponent(rawUrl)}`;
@@ -533,6 +536,7 @@ function getProxyUrl(rawUrl, isFav = false) {
             return url;
         }
     }
+    // 不在代理域名列表，原样返回，保证不会返回空
     return rawUrl;
 }
 
@@ -690,8 +694,9 @@ function initHlsVideo(){
     if (!window.Hls) return;
     document.querySelectorAll(".media-video[data-m3u8]").forEach(video=>{
         if (video.dataset.hlsInit) return;
-        video.dataset.hlsInit = "1";
         const streamUrl = video.dataset.src;
+        if(!streamUrl) return; // 空地址直接终止
+        video.dataset.hlsInit = "1";
         const hls = new Hls();
         hls.loadSource(streamUrl);
         hls.attachMedia(video);
@@ -765,6 +770,11 @@ function showPage(targetDom, titleText) {
         lastPageTitle = titleText;
         return;
     }
+    // ============ 新增这一段兜底代码 ============
+    // 只要刚退出筛选模式，一律禁用缓存
+    if(filterSourceUrl === ""){
+        homeIsCached = false;
+}
     // 存在订阅筛选条件，清空缓存，强制重新渲染列表
     if(filterSourceUrl){
         homeIsCached = false;
@@ -789,9 +799,15 @@ function showPage(targetDom, titleText) {
 
 // 主页按钮点击
 btnHome.onclick = async () => {
+    // 强制清空筛选条件 + 强制清空页面缓存，彻底解决残留筛选
     filterSourceUrl = "";
-    // 已经在主页，只执行更新检测，不切换页面
+    homeIsCached = false;
+
+    // 已经在主页，重新加载完整列表，不再读取旧缓存
     if(lastPageTitle === "本地RSS媒体阅读器"){
+        renderHomeFromCache();
+        mainWrap.scrollTo(0,0);
+
         let oldTip = articleBox.querySelector(".update-tip-bar,.no-update-tip");
         if(oldTip) oldTip.remove();
 
@@ -812,7 +828,7 @@ btnHome.onclick = async () => {
                 renderHomeFromCache();
                 mainWrap.scrollTop = 0;
                 bar.remove();
-                homeIsCached = false; // 刷新后清空缓存
+                homeIsCached = false;
             };
         }else{
             bar.className = "no-update-tip";
@@ -839,7 +855,9 @@ function renderHomeFromCache() {
         return;
     }
     let filterArticles = localCacheArticles;
-    if(filterSourceUrl) filterArticles = localCacheArticles.filter(item => item.sourceUrl === filterSourceUrl);
+    if(filterSourceUrl) {
+    filterArticles = localCacheArticles.filter(item => item.sourceUrl.trim() === filterSourceUrl.trim());
+}
 
     // 断点接续逻辑 方案A
     if(lastReadLink){
@@ -945,26 +963,29 @@ function buildCard(item, isFav = false){
         </div>`;
     }else{
         const imgs = [...new Set(item.media.imgs || [])];
-        const videos = item.media.videos || [];
-        if(videos.length > 0){
-            const posterImg = imgs.length > 0 ? imgs[0] : "";
-            const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
-            const videoProxy = getProxyUrl(videos[0], isFav);
-            let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
+if(item.media.videos.length > 0){
+const posterImg = imgs.length > 0 ? imgs[0] : "";
+const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
+let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
 
-                        const videoUrl = videoProxy;
-            if (videoUrl.endsWith(".m3u8")) {
-                // m3u8只走HLS，不影响mp4
-                mediaHtml = `<div class="video-single-wrap">
-                    <video class="media-video" data-m3u8="1" controls preload="none" playsinline ${posterAttr} data-src="${videoUrl}"></video>
-                </div>`;
-            } else {
-                // mp4保持原样，完全不受影响
-                mediaHtml = `<div class="video-single-wrap">
-<video class="media-video" controls preload="none" playsinline ${posterAttr} src="${videoUrl}"></video>
-</div>`;
-            }
-        }else if(imgs.length > 0){
+// 强制初始化为空数组，杜绝undefined
+let videoArr = Array.isArray(item.media.videos) ? item.media.videos : [];
+let rawVideo = videoArr.length > 0 ? videoArr[0] : "";
+// 强制把undefined转为空字符串
+if (rawVideo === undefined) rawVideo = "";
+
+console.log("原始视频链接rawVideo：", JSON.stringify(rawVideo));
+const videoProxy = rawVideo ? getProxyUrl(rawVideo, isFav) : "";
+const videoUrl = videoProxy || "";
+
+// 使用解析阶段预先标记好的视频类型，彻底避开URL后缀丢失问题
+if (item.isM3u8Video) {
+    const safeUrl = videoUrl || "";
+    mediaHtml = `<div class="video-single-wrap"><video class="media-video" data-m3u8="1" preload="none" playsinline controls ${posterAttr} data-src="${safeUrl}" src=""></video></div>`;
+} else {
+    mediaHtml = `<div class="video-single-wrap"><video class="media-video" preload="none" playsinline controls ${posterAttr} src="${videoUrl || ''}"></video></div>`;
+}
+}else if(imgs.length > 0){
             const total = imgs.length;
             const gridClass = total === 1 ? "grid-single" : "grid-multi";
             mediaHtml = `<div class="img-grid-wrap"><div class="img-grid ${gridClass}">`;
@@ -1107,7 +1128,7 @@ function bindAllCardEvent(){
             }else{
                 toggleBtn.style.display = "none";
             }
-        }, 20);
+        }, 80);
         toggleBtn.onclick = function(){
             if(titleEl.classList.contains("expand")){
                 titleEl.classList.remove("expand");
@@ -1269,38 +1290,44 @@ function parseRSS(xml, sourceName, sourceUrl, cat){
         }
 
         // 【MP4 原有逻辑完全保留，不改动】
-        const videoAttrReg = /(?:src|data-src)=["']([^"']+\.mp4)["']/gi;
         let videos = [];
-        let vMatch;
-        while((vMatch = videoAttrReg.exec(txt + desc)) !== null){
-            let url = fullDecodeXml(vMatch[1]);
-            videos.push(url);
-        }
-        const videoRawReg = /https?:\/\/[^\s<>]+\.mp4/gi;
-        while((vMatch = videoRawReg.exec(txt + desc)) !== null){
-            videos.push(vMatch[0]);
-        }
+let m3u8List = [];
+const fullText = txt + desc;
 
-        // 【单独提取m3u8，优先读取iframe中的视频链接】
-        let m3u8List = [];
-        const iframeSrcReg = /src=["']([^"']+\.m3u8[^"']*)["']/gi;
-        while ((vMatch = iframeSrcReg.exec(txt + desc)) !== null) {
-            let rawUrl = extractRawVideoUrl(fullDecodeXml(vMatch[1]));
-            m3u8List.push(rawUrl);
-        }
-        const m3u8RawReg = /https?:\/\/[^\s<>]+\.m3u8/gi;
-        while ((vMatch = m3u8RawReg.exec(txt + desc)) !== null) {
-            let rawUrl = extractRawVideoUrl(fullDecodeXml(vMatch[1]));
-            m3u8List.push(rawUrl);
-        }
+// ========== 核心改动：直接抓取 ?url= 后的真实m3u8，无视引号BUG ==========
+// 匹配 player.html?url=xxx.m3u8
+const playerUrlReg = /url=(https?:\/\/[^&"\s<>]+\.m3u8)/gi;
+let regMatch;
+while ((regMatch = playerUrlReg.exec(fullText)) !== null) {
+    const realUrl = decodeURIComponent(regMatch[1]);
+    m3u8List.push(realUrl);
+}
 
-        // 如果抓到m3u8，优先使用m3u8，并清空iframe，避免嵌套网页
-        if (m3u8List.length > 0) {
-            videos = [m3u8List[0]];
-            iframeCode = "";
-        }
+// 同时匹配页面里裸写的m3u8直链
+const rawM3u8Reg = /https?:\/\/[^\s<>]+\.m3u8/gi;
+while ((regMatch = rawM3u8Reg.exec(fullText)) !== null) {
+    m3u8List.push(regMatch[0]);
+}
 
-        videos = [...new Set(videos)];
+if (m3u8List.length > 0) {
+    videos = [m3u8List[0]];
+    iframeCode = "";
+} else {
+    // MP4视频逻辑完全保留不动
+    const videoAttrReg = /(?:src|data-src)=["']([^"']+\.mp4)["']/gi;
+    while((regMatch = videoAttrReg.exec(fullText)) !== null){
+        let url = fullDecodeXml(regMatch[1]);
+        videos.push(url);
+    }
+    const videoRawReg = /https?:\/\/[^\s<>]+\.mp4/gi;
+    while((regMatch = videoRawReg.exec(fullText)) !== null){
+        videos.push(regMatch[0]);
+    }
+}
+
+// 去重兜底
+videos = [...new Set(videos)];
+let isM3u8 = m3u8List.length > 0;
 
         const imgAttrReg = /src=["']([^"']+\.(jpg|jpeg|png|gif|webp))["']/gi;
         let imgsRaw = [];
@@ -1315,13 +1342,17 @@ function parseRSS(xml, sourceName, sourceUrl, cat){
         const imgs = [...new Set(imgsRaw)];
 
         list.push({
-            title: titleRaw,
-            link: link,
-            date: date,
-            media:{imgs,videos},
-            iframe: iframeCode,
-            sourceName,sourceUrl
-        })
+    title: titleRaw,
+    link: link,
+    date: date,
+    media:{
+    imgs,
+    videos: Array.isArray(videos) ? videos : []
+},
+    iframe: iframeCode,
+    sourceName,sourceUrl,
+    isM3u8Video: isM3u8  // 新增字段
+})
     }
     return list;
 }
