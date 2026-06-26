@@ -571,8 +571,9 @@ let readObserver = null;
 
 async function fetchRSSFeed(rssUrl) {
     let realFetchUrl = rssUrl;
-    const needProxy = /xcancel\.com|twitter|x\.com/.test(rssUrl);
-    if (needProxy) {
+    // 仅推特、xcancel订阅启用代理，国内RSS直连
+    const needProxyRSS = /xcancel\.com|twitter|x\.com/.test(rssUrl);
+    if (needProxyRSS) {
         realFetchUrl = CF_WORKER_PROXY + encodeURIComponent(rssUrl);
     }
 
