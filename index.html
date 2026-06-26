@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>本地RSS媒体阅读器</title>
-<script src="https://cdn.bootcdn.net/ajax/libs/hls.js/1.5.7/hls.min.js"></script>
+<script src="https://cdn.bootcdn.net/ajax/libs/hls.js/1.5.7/hls.min.js">
+</script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto;}
 html {
@@ -684,6 +685,21 @@ function initVideoObserver(){
         })
     }, {threshold:0.01});
 }
+// 只初始化m3u8视频，mp4完全跳过
+function initHlsVideo(){
+    if (!window.Hls) return;
+    document.querySelectorAll(".media-video[data-m3u8]").forEach(video=>{
+        if (video.dataset.hlsInit) return;
+        video.dataset.hlsInit = "1";
+        const streamUrl = video.dataset.src;
+        const hls = new Hls();
+        hls.loadSource(streamUrl);
+        hls.attachMedia(video);
+        video.addEventListener("pause", ()=>{
+            if (hls) hls.destroy();
+        })
+    })
+}
 function bindVideoPauseObserver(){
     if(!videoObserver) initVideoObserver();
     document.querySelectorAll(".media-video").forEach(v=>{
@@ -738,7 +754,8 @@ function showPage(targetDom, titleText) {
     if (titleText === "内容搜索") btnSearch.classList.add("active");
 
     // 5. 切回主页 + 有缓存：直接恢复HTML和滚动，不重新渲染
-    if (titleText === "本地RSS媒体阅读器" && homeIsCached) {
+       // 只有无筛选条件时才使用缓存；点击【查看】开启筛选后，强制禁用缓存重新渲染
+    if (titleText === "本地RSS媒体阅读器" && homeIsCached && filterSourceUrl === "") {
         articleBox.innerHTML = homeArticleHtml;
         setTimeout(()=>{
             mainWrap.scrollTop = homeScrollTop;
@@ -747,6 +764,10 @@ function showPage(targetDom, titleText) {
         bindVideoPauseObserver();
         lastPageTitle = titleText;
         return;
+    }
+    // 存在订阅筛选条件，清空缓存，强制重新渲染列表
+    if(filterSourceUrl){
+        homeIsCached = false;
     }
 
     // 6. 无缓存，正常重新渲染页面
@@ -883,7 +904,8 @@ function renderPagedList(){
     }
     articleBox.innerHTML = html;
     bindAllCardEvent();
-    bindVideoPauseObserver();
+        bindVideoPauseObserver();
+    initHlsVideo();
 }
 
 function bindScrollLoadMore(){
@@ -930,9 +952,18 @@ function buildCard(item, isFav = false){
             const videoProxy = getProxyUrl(videos[0], isFav);
             let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
 
-            mediaHtml = `<div class="video-single-wrap">
-<video class="media-video" controls preload="none" playsinline ${posterAttr} src="${videoProxy}"></video>
+                        const videoUrl = videoProxy;
+            if (videoUrl.endsWith(".m3u8")) {
+                // m3u8只走HLS，不影响mp4
+                mediaHtml = `<div class="video-single-wrap">
+                    <video class="media-video" data-m3u8="1" controls preload="none" playsinline ${posterAttr} data-src="${videoUrl}"></video>
+                </div>`;
+            } else {
+                // mp4保持原样，完全不受影响
+                mediaHtml = `<div class="video-single-wrap">
+<video class="media-video" controls preload="none" playsinline ${posterAttr} src="${videoUrl}"></video>
 </div>`;
+            }
         }else if(imgs.length > 0){
             const total = imgs.length;
             const gridClass = total === 1 ? "grid-single" : "grid-multi";
@@ -1026,7 +1057,8 @@ function renderFav(){
     }
     favPanel.innerHTML = html;
     bindAllCardEvent();
-    bindVideoPauseObserver();
+        bindVideoPauseObserver();
+    initHlsVideo();
     const favLoad = document.getElementById("favLoadMore");
     if(favLoad){
         const favObserver = new IntersectionObserver(async (e)=>{
@@ -1226,6 +1258,17 @@ function parseRSS(xml, sourceName, sourceUrl, cat){
             iframeCode = iframeMatch[0];
         }
 
+                // 清理播放器前缀，提取真实视频地址
+        function extractRawVideoUrl(urlStr) {
+            if (!urlStr) return urlStr;
+            const playerPrefix = "https://m3u8player.org/player.html?url=";
+            if (urlStr.includes(playerPrefix)) {
+                urlStr = decodeURIComponent(urlStr.split(playerPrefix)[1]);
+            }
+            return urlStr;
+        }
+
+        // 【MP4 原有逻辑完全保留，不改动】
         const videoAttrReg = /(?:src|data-src)=["']([^"']+\.mp4)["']/gi;
         let videos = [];
         let vMatch;
@@ -1237,6 +1280,26 @@ function parseRSS(xml, sourceName, sourceUrl, cat){
         while((vMatch = videoRawReg.exec(txt + desc)) !== null){
             videos.push(vMatch[0]);
         }
+
+        // 【单独提取m3u8，优先读取iframe中的视频链接】
+        let m3u8List = [];
+        const iframeSrcReg = /src=["']([^"']+\.m3u8[^"']*)["']/gi;
+        while ((vMatch = iframeSrcReg.exec(txt + desc)) !== null) {
+            let rawUrl = extractRawVideoUrl(fullDecodeXml(vMatch[1]));
+            m3u8List.push(rawUrl);
+        }
+        const m3u8RawReg = /https?:\/\/[^\s<>]+\.m3u8/gi;
+        while ((vMatch = m3u8RawReg.exec(txt + desc)) !== null) {
+            let rawUrl = extractRawVideoUrl(fullDecodeXml(vMatch[1]));
+            m3u8List.push(rawUrl);
+        }
+
+        // 如果抓到m3u8，优先使用m3u8，并清空iframe，避免嵌套网页
+        if (m3u8List.length > 0) {
+            videos = [m3u8List[0]];
+            iframeCode = "";
+        }
+
         videos = [...new Set(videos)];
 
         const imgAttrReg = /src=["']([^"']+\.(jpg|jpeg|png|gif|webp))["']/gi;
@@ -1403,6 +1466,37 @@ function renderManage(){
             editModal.style.display = "flex";
         }
     }
+}
+
+// 新增订阅确认按钮事件
+document.getElementById("confirmAdd").onclick = function(){
+    const feedName = document.getElementById("feedName").value.trim();
+    const feedCat = document.getElementById("feedCat").value;
+    const feedUrl = document.getElementById("feedUrl").value.trim();
+
+    if (!feedUrl) {
+        showToast("请填写RSS订阅链接");
+        return;
+    }
+    // 去重判断
+    if (feedList.some(item => item.url === feedUrl)) {
+        showToast("该订阅源已存在");
+        return;
+    }
+
+    feedList.push({
+        name: feedName || "未命名订阅",
+        category: feedCat,
+        url: feedUrl
+    });
+    localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
+
+    // 清空输入框
+    document.getElementById("feedName").value = "";
+    document.getElementById("feedUrl").value = "";
+    showToast("订阅添加成功");
+    // 自动跳转到管理页面
+    showPage(pageManage, "管理订阅");
 }
 
 window.onload = async function(){
