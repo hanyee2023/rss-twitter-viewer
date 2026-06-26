@@ -517,8 +517,6 @@ let scrollObserver = null;
 let loadLock = false;
 let currentPreviewImgs = [];
 let videoObserver = null;
-let lastScrollPos = 0; // 记录主页滚动位置
-let jumpFromOtherPage = false;
 let filterSourceUrl = "";
 let localCacheArticles = [];
 let hasNewUpdate = false;
@@ -598,11 +596,6 @@ const previewClose = document.getElementById("previewClose");
 const toastDom = document.getElementById("slideTip");
 const mainWrap = document.querySelector(".main-wrap");
 
-// 在外层容器记录滚动位置
-mainWrap.addEventListener('scroll', ()=>{
-  lastScrollPos = mainWrap.scrollTop;
-});
-
 function showToast(msg){
     toastDom.innerText = msg;
     toastDom.style.display = "block";
@@ -632,20 +625,22 @@ function bindVideoPauseObserver(){
 }
 
 function showPage(targetDom, titleText) {
-    // 只清空其他页面内容，【主页articleBox不再清空】
     feedPanel.innerHTML = "";
     favPanel.innerHTML = "";
-    
+    articleBox.innerHTML = "";
     pageHome.style.display = "none";
     pageManage.style.display = "none";
     pageAdd.style.display = "none";
     pageFav.style.display = "none";
     targetDom.style.display = "block";
-
-    const textNode = Array.from(pageTitle.childNodes).find(n => n.nodeType === 3);
-    if(textNode){
-        textNode.textContent = titleText;
-    }
+    targetDom.scrollTop = 0;
+    setTimeout(() => {
+        targetDom.scrollTop = 0;
+    }, 20);
+const textNode = Array.from(pageTitle.childNodes).find(n => n.nodeType === 3);
+if(textNode){
+    textNode.textContent = titleText;
+}
 
     allBtns.forEach(b => b.classList.remove("active"));
     if(titleText === "本地RSS媒体阅读器") btnHome.classList.add("active");
@@ -654,14 +649,9 @@ function showPage(targetDom, titleText) {
     if(titleText === "我的收藏") btnFav.classList.add("active");
 
     if(titleText === "本地RSS媒体阅读器") {
-    renderHomeFromCache();
-    if(jumpFromOtherPage){
-        setTimeout(()=>{
-            mainWrap.scrollTop = lastScrollPos;
-        },120);
-    }
-    silentCheckUpdate();
-} else if(titleText === "管理订阅") {
+        renderHomeFromCache();
+        silentCheckUpdate();
+    } else if(titleText === "管理订阅") {
         renderManage();
     } else if(titleText === "我的收藏") {
         renderFav();
@@ -670,15 +660,7 @@ function showPage(targetDom, titleText) {
 
 btnHome.onclick = async () => {
     filterSourceUrl = "";
-    if(pageHome.style.display === "block"){
-        // 重置外层滚动到顶部
-        mainWrap.scrollTop = 0;
-        silentCheckUpdate();
-        jumpFromOtherPage = false;
-    }else{
-        jumpFromOtherPage = true;
-        showPage(pageHome, "本地RSS媒体阅读器");
-    }
+    showPage(pageHome, "本地RSS媒体阅读器");
 };
 btnManage.onclick = () => showPage(pageManage, "管理订阅");
 btnAdd.onclick = () => showPage(pageAdd, "添加订阅");
@@ -688,17 +670,12 @@ function renderHomeFromCache() {
     if(scrollObserver) scrollObserver.disconnect();
     renderPageNum = 0;
     loadLock = false;
-
     if(localCacheArticles.length === 0) {
         articleBox.innerHTML = `<div class="empty-tip">暂无文章内容</div>`;
         return;
     }
-
-    // 每次进入主页，无条件重新执行筛选，不再判断DOM是否存在
     let filterArticles = localCacheArticles;
-    if(filterSourceUrl) {
-        filterArticles = localCacheArticles.filter(item => item.sourceUrl === filterSourceUrl);
-    }
+    if(filterSourceUrl) filterArticles = localCacheArticles.filter(item => item.sourceUrl === filterSourceUrl);
     currentArticles = [...filterArticles];
     renderPageNum = 1;
     renderPagedList();
@@ -869,9 +846,9 @@ function buildCard(item, isFav = false){
                 <div class="source-name-text">${item.sourceName}</div>
             </div>
             <div class="card-title-wrap">
-    <div class="card-title">${titleRaw}</div>
-    <button class="title-toggle-btn">展开</button>
-</div>
+                <div class="card-title">${titleRaw}</div>
+                <button class="title-toggle-btn" style="display:none;">展开</button>
+            </div>
             ${mediaHtml}
             <div class="fav-card-bottom">
                 <div class="card-bottom-left">${item.date || "未知时间"}</div>
@@ -961,26 +938,26 @@ function bindAllCardEvent(){
             imgPreviewMask.style.display = "flex";
         }
     })
-   document.querySelectorAll(".card-title-wrap").forEach(wrap=>{
-    const titleEl = wrap.querySelector(".card-title");
-    const toggleBtn = wrap.querySelector(".title-toggle-btn");
-    setTimeout(()=>{
-        if(titleEl.scrollHeight > titleEl.clientHeight){
-            toggleBtn.style.display = "block";
-        }else{
-            toggleBtn.style.display = "none";
+    document.querySelectorAll(".card-title-wrap").forEach(wrap=>{
+        const titleEl = wrap.querySelector(".card-title");
+        const toggleBtn = wrap.querySelector(".title-toggle-btn");
+        setTimeout(()=>{
+            if(titleEl.scrollHeight > titleEl.clientHeight){
+                toggleBtn.style.display = "block";
+            }else{
+                toggleBtn.style.display = "none";
+            }
+        }, 20);
+        toggleBtn.onclick = function(){
+            if(titleEl.classList.contains("expand")){
+                titleEl.classList.remove("expand");
+                this.innerText = "展开";
+            }else{
+                titleEl.classList.add("expand");
+                this.innerText = "收起";
+            }
         }
-    }, 20);
-    toggleBtn.onclick = function(){
-        if(titleEl.classList.contains("expand")){
-            titleEl.classList.remove("expand");
-            this.innerText = "展开";
-        }else{
-            titleEl.classList.add("expand");
-            this.innerText = "收起";
-        }
-    }
-})
+    })
     document.querySelectorAll(".btn-share").forEach(btn=>{
         btn.onclick = async function(e){
             e.stopPropagation();
