@@ -285,13 +285,16 @@ body{
     font-weight:normal;
     color:#000;
     display:-webkit-box;
+    -webkit-box-orient:vertical;
     -webkit-line-clamp:2;
+    max-height:2.9em;
     overflow:hidden;
     line-height:1.45;
     word-break:break-all;
 }
 .card-title.expand{
     -webkit-line-clamp:999;
+    max-height:none;
 }
 .title-toggle-btn{
     font-size:13px;
@@ -479,12 +482,15 @@ body{
     color:#444;
     font-size:13px;
     border-radius:999px;
-    padding:5px 10px;
+    width:30px;
+    height:30px;
+    padding:0;
     display:flex;
     align-items:center;
+    justify-content:center;
     gap:4px;
 }
-.card-bottom-right button svg{width:15px;height:15px;stroke:currentColor;}
+.card-bottom-right button svg{width:16px;height:16px;stroke:currentColor;}
 .btn-share{color:#555;}
 .btn-fav{color:#555;}
 .btn-fav.collected{color:#ff9500;background:#fff4e5;}
@@ -501,7 +507,10 @@ body{
     transform:translateX(-50%);
     z-index:10000;
     max-width:calc(100% - 24px);
-    background:#1677ff;
+    background:rgba(64, 190, 255, .45);
+    backdrop-filter:blur(18px);
+    -webkit-backdrop-filter:blur(18px);
+    border:1px solid rgba(255,255,255,.45);
     color:#fff;
     padding:9px 16px;
     border-radius:999px;
@@ -633,7 +642,7 @@ const FORCE_PROXY_HOSTS = [
     "abs.twimg.com",
     "xcancel.com",
     "nitter.net",
-    "video.3go.fun"
+    "video.shturl."
 ];
 
 function normalizeUrl(rawUrl) {
@@ -767,6 +776,7 @@ let lastPageTitle = "";
 let homeScrollTop = 0;
 let homeArticleHtml = "";
 let homeIsCached = false;
+let homeCachedFilterSourceUrl = "";
 let readObserver = null;
 let updateFloatTimer = null;
 let lastRefreshTime = Number(localStorage.getItem(LAST_REFRESH_KEY)) || 0;
@@ -862,6 +872,16 @@ const previewTip = document.getElementById("previewTip");
 const previewClose = document.getElementById("previewClose");
 const toastDom = document.getElementById("slideTip");
 const mainWrap = document.querySelector(".main-wrap");
+let readScrollTimer = null;
+
+mainWrap.addEventListener("scroll", ()=>{
+    if(readScrollTimer) return;
+    readScrollTimer = setTimeout(()=>{
+        readScrollTimer = null;
+        markReadByScroll();
+    }, 120);
+});
+window.addEventListener("beforeunload", markReadByScroll);
 
 function showToast(msg){
     toastDom.innerText = msg;
@@ -879,7 +899,7 @@ function showUpdateFloat(message, onClick){
     bar.innerText = message;
     if(onClick) bar.onclick = onClick;
     document.body.appendChild(bar);
-    updateFloatTimer = setTimeout(()=>bar.remove(), 5000);
+    updateFloatTimer = setTimeout(()=>bar.remove(), 10000);
 }
 
 function saveReadLinks(){
@@ -891,6 +911,21 @@ function markCardRead(card){
     if(!link || readLinkSet.has(link)) return;
     readLinkSet.add(link);
     saveReadLinks();
+}
+
+function markReadByScroll(){
+    if(lastPageTitle !== "RSS媒体阅读器") return;
+    const lineY = mainWrap.getBoundingClientRect().top + 56;
+    let changed = false;
+    articleBox.querySelectorAll(".tweet-card").forEach(card=>{
+        const link = card.dataset.link;
+        if(!link || readLinkSet.has(link)) return;
+        if(card.getBoundingClientRect().bottom < lineY){
+            readLinkSet.add(link);
+            changed = true;
+        }
+    });
+    if(changed) saveReadLinks();
 }
 
 function loadArticleCacheFromStorage(){
@@ -1218,11 +1253,14 @@ function showPage(targetDom, titleText) {
     if (lastPageTitle === titleText) {
         return;
     }
+    const willRestoreHome = titleText === "RSS媒体阅读器" && homeIsCached && homeCachedFilterSourceUrl === filterSourceUrl;
 
     if (lastPageTitle === "RSS媒体阅读器") {
+        markReadByScroll();
         homeScrollTop = mainWrap.scrollTop;
         homeArticleHtml = articleBox.innerHTML;
         homeIsCached = true;
+        homeCachedFilterSourceUrl = filterSourceUrl;
     }
 
     pageHome.style.display = "none";
@@ -1233,8 +1271,13 @@ function showPage(targetDom, titleText) {
 
     feedPanel.innerHTML = "";
     favPanel.innerHTML = "";
-    articleBox.innerHTML = "";
+    if (targetDom === pageHome && !willRestoreHome) {
+        articleBox.innerHTML = "";
+    }
 
+    if (willRestoreHome && !articleBox.innerHTML) {
+        articleBox.innerHTML = homeArticleHtml;
+    }
     targetDom.style.display = "block";
     targetDom.scrollTop = 0;
 
@@ -1250,20 +1293,19 @@ function showPage(targetDom, titleText) {
     if (titleText === "我的收藏") btnFav.classList.add("active");
     if (titleText === "内容搜索") btnSearch.classList.add("active");
 
-    if (titleText === "RSS媒体阅读器" && homeIsCached && filterSourceUrl === "") {
-        articleBox.innerHTML = homeArticleHtml;
-        setTimeout(()=>{
+    if (willRestoreHome) {
+        const restoreHomeScroll = ()=>{
             mainWrap.scrollTop = homeScrollTop;
-        },0);
+            requestAnimationFrame(()=>{ mainWrap.scrollTop = homeScrollTop; });
+        };
+        setTimeout(restoreHomeScroll, 0);
+        setTimeout(restoreHomeScroll, 80);
+        setTimeout(restoreHomeScroll, 250);
         bindAllCardEvent();
         bindVideoPauseObserver();
         initHlsVideo();
         lastPageTitle = titleText;
         return;
-    }
-
-    if(filterSourceUrl === ""){
-        homeIsCached = false;
     }
 
     if (titleText === "RSS媒体阅读器") {
@@ -1282,9 +1324,16 @@ function showPage(targetDom, titleText) {
 }
 
 btnHome.onclick = async () => {
+    const wasFiltered = !!filterSourceUrl;
     filterSourceUrl = "";
 
     if(lastPageTitle === "RSS媒体阅读器"){
+        if(wasFiltered){
+            homeIsCached = false;
+            renderHomeFromCache();
+            mainWrap.scrollTop = 0;
+            return;
+        }
         await checkAndPromptUpdate(true);
         return;
     }
@@ -1340,11 +1389,20 @@ async function checkAndPromptUpdate(isManual = false){
     });
     if(newCount > 0){
         showUpdateFloat(`更新${newCount}条内容，点击查看`, ()=>{
+            filterSourceUrl = "";
+            homeIsCached = false;
+            homeArticleHtml = "";
+            renderedArticleCount = 0;
             renderHomeFromCache();
-            mainWrap.scrollTop = 0;
+            const scrollTopNow = ()=>{
+                mainWrap.scrollTop = 0;
+                requestAnimationFrame(()=>{ mainWrap.scrollTop = 0; });
+            };
+            scrollTopNow();
+            setTimeout(scrollTopNow, 80);
+            setTimeout(scrollTopNow, 250);
             const bar = document.getElementById("updateFloatBar");
             if(bar) bar.remove();
-            homeIsCached = false;
         });
     }else if(isManual){
         showUpdateFloat("暂无更新内容");
@@ -1467,6 +1525,19 @@ function sanitizeIframeHtml(iframeHtml) {
     return `<iframe src="${escapeAttr(src)}" width="100%" height="260px" frameborder="0" allowfullscreen loading="lazy" referrerpolicy="no-referrer"></iframe>`;
 }
 
+function formatCardDate(dateStr){
+    if(!dateStr || dateStr === "未知时间") return "未知时间";
+    const date = new Date(dateStr);
+    if(Number.isNaN(date.getTime())) return escapeHtml(dateStr);
+    const year = date.getFullYear();
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    const hour = String(date.getHours()).padStart(2, "0");
+    const minute = String(date.getMinutes()).padStart(2, "0");
+    const second = String(date.getSeconds()).padStart(2, "0");
+    return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+}
+
 function buildCard(item, isFav = false){
     let mediaHtml = "";
 
@@ -1531,7 +1602,7 @@ function buildCard(item, isFav = false){
     const sourceUrlAttr = escapeAttr(item.sourceUrl || "");
     const sourceNameText = escapeHtml(item.sourceName || "未知来源");
     const sourceAvatar = escapeHtml((item.sourceName || "?").slice(0,1));
-    const dateText = escapeHtml(item.date || "未知时间");
+    const dateText = formatCardDate(item.date);
 
     if(isFav){
         return `
@@ -1565,8 +1636,8 @@ function buildCard(item, isFav = false){
             <div class="card-bottom">
                 <div class="card-bottom-left">${dateText}</div>
                 <div class="card-bottom-right">
-                    <button class="btn-share" type="button">${shareIconSvg()}<span>分享</span></button>
-                    <button class="${favCls}" type="button" data-link="${itemLinkAttr}">${favIconSvg(isCollected)}<span>${favTxt}</span></button>
+                    <button class="btn-share" type="button" aria-label="分享" title="分享">${shareIconSvg()}</button>
+                    <button class="${favCls}" type="button" data-link="${itemLinkAttr}" aria-label="${favTxt}" title="${favTxt}">${favIconSvg(isCollected)}</button>
                 </div>
             </div>
         </div>`;
@@ -1640,7 +1711,9 @@ function bindAllCardEvent(){
         const titleEl = wrap.querySelector(".card-title");
         const toggleBtn = wrap.querySelector(".title-toggle-btn");
         setTimeout(()=>{
-            if(titleEl.scrollHeight > titleEl.clientHeight){
+            const lineHeight = parseFloat(getComputedStyle(titleEl).lineHeight) || 22;
+            const needToggle = titleEl.scrollHeight > lineHeight * 2 + 2;
+            if(needToggle){
                 toggleBtn.style.display = "block";
                 toggleBtn.innerText = "展开";
             }else{
@@ -1685,7 +1758,9 @@ function bindAllCardEvent(){
             if(target && !favList.some(f=>f.link === link)){
                 favList.push(target);
                 localStorage.setItem(FAV_KEY, JSON.stringify(favList));
-                this.innerHTML = `${favIconSvg(true)}<span>已收藏</span>`;
+                this.innerHTML = favIconSvg(true);
+                this.setAttribute("aria-label", "已收藏");
+                this.setAttribute("title", "已收藏");
                 this.classList.add("collected");
                 showToast("已添加到收藏");
             }
@@ -2001,13 +2076,15 @@ function renderManage(){
         </div>`;
     })
     feedPanel.innerHTML = html;
-    feedPanel.onclick = function(e){
+    feedPanel.onclick = async function(e){
         const t = e.target;
         const idx = Number(t.dataset.idx);
        if(t.classList.contains("view-feed")){
     filterSourceUrl = t.dataset.source;
     homeIsCached = false;
-    mergeNewData();
+    if(localCacheArticles.length === 0){
+        await mergeNewData();
+    }
     showPage(pageHome, "RSS媒体阅读器");
     return;
 }
