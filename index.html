@@ -74,6 +74,7 @@ body{
 }
 .video-single-wrap{
     width:100%;
+    position:relative;
     border-radius:10px;
     overflow:hidden;
     margin:6px 0;
@@ -290,7 +291,6 @@ body{
 .grid-img-box{position:relative;aspect-ratio:1/1;overflow:hidden;}
 .grid-img{
     width:100%;height:100%;object-fit:cover;display:block;
-    loading:"lazy";
 }
 .img-overlay-more{
     position:absolute;
@@ -365,7 +365,7 @@ body{
     scroll-snap-align:center;
     padding:10px;
 }
-.preview-img{max-width:92vw;max-height:92vh;object-fit:contain;loading:"lazy";}
+.preview-img{max-width:92vw;max-height:92vh;object-fit:contain;}
 .preview-close{
     position:absolute;
     bottom:30px;
@@ -396,16 +396,40 @@ body{
 .card-bottom-left{font-size:12px;color:#666;}
 .card-bottom-right{display:flex;gap:8px;}
 .card-bottom-right button{
-    border:none;background:transparent;font-size:13px;
+    border:none;
+    background:#f2f3f5;
+    color:#444;
+    font-size:13px;
+    border-radius:999px;
+    padding:5px 10px;
+    display:flex;
+    align-items:center;
+    gap:4px;
 }
-.btn-share{color:#666;}
-.btn-fav{color:#666;}
-.btn-fav.collected{color:#ff9500;}
+.card-bottom-right button svg{width:15px;height:15px;stroke:currentColor;}
+.btn-share{color:#555;}
+.btn-fav{color:#555;}
+.btn-fav.collected{color:#ff9500;background:#fff4e5;}
 .fav-card-bottom{
     display:flex;
     justify-content:space-between;
     align-items:center;
     margin-top:8px;
+}
+.update-float-bar{
+    position:fixed;
+    top:56px;
+    left:50%;
+    transform:translateX(-50%);
+    z-index:10000;
+    max-width:calc(100% - 24px);
+    background:#1677ff;
+    color:#fff;
+    padding:9px 16px;
+    border-radius:999px;
+    font-size:14px;
+    box-shadow:0 6px 20px rgba(0,0,0,.18);
+    cursor:pointer;
 }
 </style>
 
@@ -512,32 +536,119 @@ body{
 <div class="tip-toast" id="slideTip"></div>
 
 <script>
-// 全局代理配置
-const CF_WORKER_PROXY = "https://rss-twitter-viewer.pages.dev/proxy";
+// 全局代理配置：RSS 拉取和媒体资源分开，避免两套逻辑互相影响。
+// 如果你在 Cloudflare 上的路由不是 /rss-proxy 和 /media-proxy，只需要改这里。
+const RSS_PROXY_ENDPOINTS = [
+    "https://rss-twitter-viewer.pages.dev/rss-proxy",
+    "https://rss-twitter-viewer.pages.dev/proxy"
+];
+const MEDIA_PROXY_ENDPOINT = "https://rss-twitter-viewer.pages.dev/media-proxy";
+
+// 这些域名的 RSS 或媒体资源默认走代理。需要新增国外或特殊域名时，加到这里即可。
+const FORCE_PROXY_HOSTS = [
+    "twitter.com",
+    "x.com",
+    "t.co",
+    "twimg.com",
+    "video.twimg.com",
+    "pbs.twimg.com",
+    "abs.twimg.com",
+    "xcancel.com",
+    "nitter.net",
+    "video.shturl."
+];
+
+function normalizeUrl(rawUrl) {
+    return String(rawUrl || "").trim();
+}
+
+function cleanMediaUrl(rawUrl) {
+    let url = fullDecodeXml(String(rawUrl || ""))
+        .trim()
+        .replace(/^<!\[CDATA\[/, "")
+        .replace(/\]\]>$/, "")
+        .replace(/^["'“”‘’]+|["'“”‘’，。,;；)）\]>]+$/g, "");
+    url = url.replace(/\s+/g, " ");
+    url = url.replace(/ /g, "%20");
+    return url;
+}
+
+function getUrlCandidates(text, ext) {
+    const source = fullDecodeXml(String(text || ""));
+    const escapedExt = ext.replace(".", "\\.");
+    const reg = new RegExp(`https?:\\/\\/[\\s\\S]{0,1200}?${escapedExt}(?:\\?[^<>"']*)?`, "gi");
+    const list = [];
+    let m;
+    while((m = reg.exec(source)) !== null){
+        let url = m[0];
+        const httpIndex = url.lastIndexOf("http");
+        if(httpIndex > 0) url = url.slice(httpIndex);
+        url = url.replace(/<[^>]*$/g, "");
+        url = url.replace(/\\s+(?=[a-zA-Z]+=|class=|style=|poster=|src=|href=|data-)/g, "");
+        list.push(cleanMediaUrl(url));
+    }
+    return list.filter(Boolean);
+}
+
+function getUrlHost(rawUrl) {
+    try {
+        return new URL(normalizeUrl(rawUrl)).hostname.toLowerCase();
+    } catch (e) {
+        return "";
+    }
+}
+
+function hostMatched(rawUrl, hostList = FORCE_PROXY_HOSTS) {
+    const url = normalizeUrl(rawUrl).toLowerCase();
+    const host = getUrlHost(url);
+    return hostList.some(rule => {
+        const key = String(rule).toLowerCase();
+        return host === key || host.endsWith("." + key) || url.includes(key);
+    });
+}
+
+function isHttpUrl(rawUrl) {
+    return /^https?:\/\//i.test(normalizeUrl(rawUrl));
+}
+
+function buildProxyUrl(endpoint, rawUrl, extraParams = {}) {
+    const u = new URL(endpoint);
+    u.searchParams.set("url", normalizeUrl(rawUrl));
+    Object.keys(extraParams).forEach(key => {
+        if (extraParams[key] !== undefined && extraParams[key] !== null) {
+            u.searchParams.set(key, extraParams[key]);
+        }
+    });
+    return u.toString();
+}
+
+function getRSSProxyCandidates(rssUrl) {
+    return RSS_PROXY_ENDPOINTS.map(endpoint => buildProxyUrl(endpoint, rssUrl));
+}
 
 function getProxyUrl(rawUrl, isFav = false) {
-  if (typeof rawUrl !== "string") return rawUrl || "";
-  // 仅推特域名启用代理，国内普通视频直接放行
-  const proxyHosts = ["twimg.com", "video.twimg.com"];
-  const needProxy = proxyHosts.some(host => rawUrl.includes(host));
-  // 国内普通mp4，直接返回原链接，不经过代理
-  if (!needProxy) {
-    return rawUrl;
-  }
+    const url = cleanMediaUrl(rawUrl);
+    if (!isHttpUrl(url)) return url;
 
-  // 仅推特视频才走cloud代理，只做一次URL编码
-  let url = `${CF_WORKER_PROXY}?url=${encodeURIComponent(rawUrl)}`;
-  if (isFav) url += "&cache=long";
-  return url;
+    // 国内普通图片、MP4、M3U8 不动；推特/X 等指定域名才交给 media-proxy。
+    if (!hostMatched(url)) return url;
+
+    const params = { raw: "1" };
+    if (isFav) params.cache = "long";
+    return buildProxyUrl(MEDIA_PROXY_ENDPOINT, url, params);
 }
 
 function escapeHtml(str) {
     if (!str) return "";
-    return str.replace(/&/g,"&amp;")
+    return String(str).replace(/&/g,"&amp;")
                .replace(/</g,"&lt;")
                .replace(/>/g,"&gt;")
                .replace(/"/g,"&quot;")
                .replace(/'/g,"&#039;");
+}
+
+function escapeAttr(str) {
+    return escapeHtml(str);
 }
 
 function fullDecodeXml(str){
@@ -551,10 +662,13 @@ function fullDecodeXml(str){
 
 const FEED_KEY = "local_rss_feeds";
 const FAV_KEY = "rss_fav_list";
+const READ_KEY = "rss_read_links";
 const PAGE_SIZE = 30;
 const FETCH_TIMEOUT = 10000;
 let feedList = JSON.parse(localStorage.getItem(FEED_KEY)) || [];
 let favList = JSON.parse(localStorage.getItem(FAV_KEY)) || [];
+let readLinkSet = new Set(JSON.parse(localStorage.getItem(READ_KEY)) || []);
+let sessionStartReadSet = new Set(readLinkSet);
 let currentArticles = [];
 let renderPageNum = 0;
 let allArticles = [];
@@ -571,34 +685,42 @@ let homeScrollTop = 0;
 let homeArticleHtml = "";
 let homeIsCached = false;
 let readObserver = null;
+let updateFloatTimer = null;
 
-async function fetchRSSFeed(rssUrl) {
-    let realFetchUrl = rssUrl;
-    const needProxyRSS = /xcancel\.com|twitter|x\.com/.test(rssUrl);
-    if (needProxyRSS) {
-        // 和视频代理保持一致：前端不做URL编码，交给后端处理
-        realFetchUrl = CF_WORKER_PROXY + encodeURIComponent(rssUrl);
-    }
-
+async function fetchTextWithTimeout(fetchUrl) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
-
     try {
-        const res = await fetch(realFetchUrl, {
-            headers: {
-                "User-Agent": "RSSReader Client"
-            },
-            signal: controller.signal
-        });
+        const res = await fetch(fetchUrl, { signal: controller.signal, cache: "no-store" });
         clearTimeout(timer);
-        if (!res.ok) throw new Error("请求失败");
+        if (!res.ok) throw new Error(`请求失败(${res.status})`);
         let text = await res.text();
-        text = fullDecodeXml(text);
-        return text;
+        return fullDecodeXml(text);
     } catch (err) {
         clearTimeout(timer);
         throw err;
     }
+}
+
+async function fetchRSSFeed(rssUrl) {
+    const url = normalizeUrl(rssUrl);
+    if (!isHttpUrl(url)) throw new Error("RSS 链接格式不正确");
+
+    const proxyCandidates = getRSSProxyCandidates(url);
+    const candidates = hostMatched(url)
+        ? [...proxyCandidates, url]
+        : [url, ...proxyCandidates];
+
+    let lastErr = null;
+    for (const candidate of candidates) {
+        try {
+            return await fetchTextWithTimeout(candidate);
+        } catch (err) {
+            lastErr = err;
+            console.warn("RSS 拉取失败，尝试下一个地址：", candidate, err.message);
+        }
+    }
+    throw lastErr || new Error("RSS 拉取失败");
 }
 
 function exportJsonFile(jsonData, fileName = "rss订阅备份.json") {
@@ -661,6 +783,47 @@ function showToast(msg){
     setTimeout(()=>toastDom.style.display = "none",1500);
 }
 
+function showUpdateFloat(message, onClick){
+    const old = document.getElementById("updateFloatBar");
+    if(old) old.remove();
+    if(updateFloatTimer) clearTimeout(updateFloatTimer);
+    const bar = document.createElement("div");
+    bar.id = "updateFloatBar";
+    bar.className = "update-float-bar";
+    bar.innerText = message;
+    if(onClick) bar.onclick = onClick;
+    document.body.appendChild(bar);
+    updateFloatTimer = setTimeout(()=>bar.remove(), 5000);
+}
+
+function saveReadLinks(){
+    localStorage.setItem(READ_KEY, JSON.stringify([...readLinkSet]));
+}
+
+function markCardRead(card){
+    const link = card && card.dataset ? card.dataset.link : "";
+    if(!link || readLinkSet.has(link)) return;
+    readLinkSet.add(link);
+    saveReadLinks();
+}
+
+function getVisibleHomeArticles(list){
+    if(filterSourceUrl) return list;
+    return list.filter(item => !sessionStartReadSet.has(item.link));
+}
+
+function shareIconSvg(){
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="M8.59 13.51 15.42 17.49"></path><path d="M15.41 6.51 8.59 10.49"></path></svg>`;
+}
+
+function favIconSvg(filled = false){
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="${filled ? "currentColor" : "none"}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>`;
+}
+
+function playIconSvg(){
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"></path></svg>`;
+}
+
 function initVideoObserver(){
     if(videoObserver) return;
     videoObserver = new IntersectionObserver((entries)=>{
@@ -669,39 +832,113 @@ function initVideoObserver(){
             if(!item.isIntersecting){
                 video.pause();
                 if(video.hlsInstance){
-                    video.hlsInstance.destroy();
-                    video.hlsInstance = null;
+                    video.hlsInstance.stopLoad();
                 }
             }
         })
     }, {threshold:0.01});
 }
 
-function initHlsVideo(){
-    if (!window.Hls) return;
-    document.querySelectorAll(".media-video[data-m3u8]").forEach(video=>{
-        if (video.dataset.hlsInit) return;
-        const streamUrl = video.dataset.src;
-        if(!streamUrl) return;
-        video.dataset.hlsInit = "1";
+function isVideoControlAreaClick(video, e){
+    const rect = video.getBoundingClientRect();
+    return e.clientY >= rect.bottom - 42;
+}
 
+function toggleVideoPlay(video){
+    if(video.classList.contains("media-video") && !video.dataset.hlsLoaded){
+        startHlsVideo(video);
+        return;
+    }
+    if(video.paused){
+        video.play().catch(err => {
+            console.warn("视频播放失败：", err);
+            showToast("视频播放失败");
+        });
+    }else{
+        video.pause();
+        if(video.hlsInstance) video.hlsInstance.stopLoad();
+    }
+}
+
+function startHlsVideo(video){
+    const streamUrl = video.dataset.src;
+    if(!streamUrl) return;
+
+    const playNow = () => {
+        video.play().catch(err => {
+            console.warn("m3u8播放失败：", err);
+            showToast("视频播放失败");
+        });
+    };
+
+    if (video.dataset.hlsLoaded) {
+        if(video.hlsInstance) video.hlsInstance.startLoad();
+        playNow();
+        return;
+    }
+
+    if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        video.src = streamUrl;
+        video.dataset.hlsLoaded = "1";
+        playNow();
+    } else if (window.Hls && Hls.isSupported()) {
         const hls = new Hls({
             enableWorker: true,
             lowLatencyMode: true,
             maxBufferLength: 30,
             capLevelToPlayerSize: true,
             storage: null,
-            autoStartLoad: false // 禁止自动加载
+            autoStartLoad: false
         });
         video.hlsInstance = hls;
         hls.attachMedia(video);
-
-        // 点击播放才开始拉流
-        video.onplay = ()=>{
+        hls.on(Hls.Events.MEDIA_ATTACHED, () => {
             hls.loadSource(streamUrl);
+        });
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
             hls.startLoad();
-        }
+            video.dataset.hlsLoaded = "1";
+            playNow();
+        });
+        hls.on(Hls.Events.ERROR, (event, data) => {
+            if(data && data.fatal){
+                console.warn("HLS致命错误：", data);
+                showToast("m3u8加载失败");
+            }
+        });
+    } else {
+        showToast("当前浏览器不支持m3u8播放");
+    }
+}
+
+function initHlsVideo(){
+    document.querySelectorAll(".media-video[data-m3u8]").forEach(video=>{
+        if (video.dataset.hlsBind) return;
+        video.dataset.hlsBind = "1";
+        video.addEventListener("click", (e)=>{
+            if(isVideoControlAreaClick(video, e)) return;
+            e.preventDefault();
+            toggleVideoPlay(video);
+        });
+        video.addEventListener("play", ()=>{
+            if(!video.dataset.hlsLoaded) {
+                video.pause();
+                startHlsVideo(video);
+            } else if(video.hlsInstance) {
+                video.hlsInstance.startLoad();
+            }
+        });
     })
+
+    document.querySelectorAll(".media-video-mp4").forEach(video=>{
+        if (video.dataset.clickBind) return;
+        video.dataset.clickBind = "1";
+        video.addEventListener("click", (e)=>{
+            if(isVideoControlAreaClick(video, e)) return;
+            e.preventDefault();
+            toggleVideoPlay(video);
+        });
+    });
 }
 
 function bindVideoPauseObserver(){
@@ -784,7 +1021,6 @@ function showPage(targetDom, titleText) {
 
     if (titleText === "本地RSS媒体阅读器") {
         renderHomeFromCache();
-        silentCheckUpdate();
         homeIsCached = false;
     } else if (titleText === "管理订阅") {
         renderManage();
@@ -800,40 +1036,35 @@ function showPage(targetDom, titleText) {
 
 btnHome.onclick = async () => {
     filterSourceUrl = "";
-    homeIsCached = false;
 
     if(lastPageTitle === "本地RSS媒体阅读器"){
-        renderHomeFromCache();
-        mainWrap.scrollTo(0,0);
-
-        let oldTip = articleBox.querySelector(".update-tip-bar,.no-update-tip");
-        if(oldTip) oldTip.remove();
-
-        const newAll = await loadAllRSS();
+        let newAll = [];
+        try{
+            newAll = await loadAllRSS();
+        }catch(err){
+            console.warn("手动检查更新失败：", err);
+            showUpdateFloat("检查更新失败，请稍后重试");
+            return;
+        }
         const oldLinkSet = new Set(localCacheArticles.map(i=>i.link));
         let newCount = 0;
         newAll.forEach(item=>{
             if(!oldLinkSet.has(item.link)) newCount++;
         });
 
-        const bar = document.createElement("div");
-        bar.className = "update-tip-bar";
         if(newCount>0){
-            bar.innerText = `更新${newCount}条内容，点击查看`;
-            bar.onclick = async ()=>{
+            showUpdateFloat(`更新${newCount}条内容，点击查看`, ()=>{
                 allArticles = newAll;
                 localCacheArticles = [...newAll];
                 renderHomeFromCache();
                 mainWrap.scrollTop = 0;
-                bar.remove();
+                const bar = document.getElementById("updateFloatBar");
+                if(bar) bar.remove();
                 homeIsCached = false;
-            };
+            });
         }else{
-            bar.className = "no-update-tip";
-            bar.innerText = "暂无更新，继续浏览";
+            showUpdateFloat("暂无更新内容");
         }
-        articleBox.prepend(bar);
-        setTimeout(()=>bar.remove(),5000);
         return;
     }
     showPage(pageHome, "本地RSS媒体阅读器");
@@ -851,7 +1082,7 @@ function renderHomeFromCache() {
         articleBox.innerHTML = `<div class="empty-tip">暂无文章内容</div>`;
         return;
     }
-    let filterArticles = localCacheArticles;
+    let filterArticles = getVisibleHomeArticles(localCacheArticles);
     if(filterSourceUrl) {
         filterArticles = localCacheArticles.filter(item => item.sourceUrl.trim() === filterSourceUrl.trim());
     }
@@ -946,6 +1177,16 @@ function getPureText(str){
     return text || "无标题";
 }
 
+function sanitizeIframeHtml(iframeHtml) {
+    const box = document.createElement("template");
+    box.innerHTML = iframeHtml || "";
+    const iframe = box.content.querySelector("iframe");
+    if (!iframe) return "";
+    const src = iframe.getAttribute("src") || "";
+    if (!isHttpUrl(src)) return "";
+    return `<iframe src="${escapeAttr(src)}" width="100%" height="260px" frameborder="0" allowfullscreen loading="lazy" referrerpolicy="no-referrer"></iframe>`;
+}
+
 function buildCard(item, isFav = false){
     let mediaHtml = "";
 
@@ -954,33 +1195,31 @@ function buildCard(item, isFav = false){
     const imgs = [...new Set(item.media.imgs || [])];
     const posterImg = imgs.length > 0 ? imgs[0] : "";
     const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
-    let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
+    let posterAttr = posterProxy ? `poster="${escapeAttr(posterProxy)}"` : "";
     const videoProxy = getProxyUrl(item.videoUrl, isFav);
 
     mediaHtml = `<div class="video-single-wrap">
-        <video class="media-video" data-m3u8="1" playsinline controls ${posterAttr} data-src="${videoProxy}">
+        <video class="media-video" data-m3u8="1" preload="none" playsinline controls ${posterAttr} data-src="${escapeAttr(videoProxy)}">
 </video></div>`;
 }else if(item.videoUrl){
     // MP4视频：单独class media-video-mp4，完全脱离HLS逻辑
     const imgs = [...new Set(item.media.imgs || [])];
     const posterImg = imgs.length > 0 ? imgs[0] : "";
     const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
-    let posterAttr = posterProxy ? `poster="${posterProxy}"` : "";
+    let posterAttr = posterProxy ? `poster="${escapeAttr(posterProxy)}"` : "";
     const videoProxy = getProxyUrl(item.videoUrl, isFav);
     
     mediaHtml = `<div class="video-single-wrap">
-        <video class="media-video-mp4" preload="none" playsinline controls ${posterAttr} src="${videoProxy}">
+        <video ${hostMatched(item.videoUrl) ? 'crossorigin="anonymous"' : ""} class="media-video-mp4" preload="none" playsinline controls ${posterAttr} src="${escapeAttr(videoProxy)}">
 </video></div>`;
 }else if(item.iframe){
-    let iframeStr = item.iframe;
-    iframeStr = iframeStr.replace(/"+/g, '"');
-    iframeStr = iframeStr.replace(/width=".*?"/gi, 'width="100%"');
-    iframeStr = iframeStr.replace(/height=".*?"/gi, 'height="260px"');
-    iframeStr = iframeStr.replace('frameborder="0"','frameborder="0" allowfullscreen');
+    let iframeStr = sanitizeIframeHtml(item.iframe);
 
-    mediaHtml = `<div class="video-single-wrap" style="background:#000;overflow:hidden;border-radius:10px;">
+    if (iframeStr) {
+        mediaHtml = `<div class="video-single-wrap" style="background:#000;overflow:hidden;border-radius:10px;">
         ${iframeStr}
     </div>`;
+    }
 }else{
     const imgs = [...new Set(item.media.imgs || [])];
     if(imgs.length > 0){
@@ -996,25 +1235,30 @@ function buildCard(item, isFav = false){
             }
             const imgProxy = getProxyUrl(src, isFav);
             mediaHtml += `<div class="grid-img-box">
-                <img class="grid-img" data-imggroup='${JSON.stringify(imgs)}' src="${imgProxy}" loading="lazy">${overlay}
+                <img class="grid-img" ${hostMatched(src) ? 'crossorigin="anonymous"' : ""} data-imggroup='${escapeAttr(JSON.stringify(imgs))}' src="${escapeAttr(imgProxy)}" loading="lazy">${overlay}
             </div>`;
         })
         mediaHtml += `</div></div>`;
     }
 }
 
-    const titleRaw = getPureText(item.title);
+    const titleRaw = escapeHtml(getPureText(item.title));
     const isCollected = favList.some(f=>f.link === item.link);
     const favTxt = isCollected ? "已收藏" : "收藏";
     const favCls = isCollected ? "btn-fav collected" : "btn-fav";
-    const itemLink = item.link;
+    const itemLink = item.link || "";
+    const itemLinkAttr = escapeAttr(itemLink);
+    const sourceUrlAttr = escapeAttr(item.sourceUrl || "");
+    const sourceNameText = escapeHtml(item.sourceName || "未知来源");
+    const sourceAvatar = escapeHtml((item.sourceName || "?").slice(0,1));
+    const dateText = escapeHtml(item.date || "未知时间");
 
     if(isFav){
         return `
-        <div class="tweet-card" data-link="${itemLink}" data-source-url="${item.sourceUrl}">
+        <div class="tweet-card" data-link="${itemLinkAttr}" data-source-url="${sourceUrlAttr}">
             <div class="card-top">
-                <div class="card-avatar">${item.sourceName.slice(0,1)}</div>
-                <div class="source-name-text">${item.sourceName}</div>
+                <div class="card-avatar">${sourceAvatar}</div>
+                <div class="source-name-text">${sourceNameText}</div>
             </div>
             <div class="card-title-wrap">
                 <div class="card-title">${titleRaw}</div>
@@ -1022,16 +1266,16 @@ function buildCard(item, isFav = false){
             </div>
             ${mediaHtml}
             <div class="fav-card-bottom">
-                <div class="card-bottom-left">${item.date || "未知时间"}</div>
-                <button class="del-fav" data-link="${itemLink}" style="border:none;background:transparent;font-size:13px;color:#666;">取消收藏</button>
+                <div class="card-bottom-left">${dateText}</div>
+                <button class="del-fav" data-link="${itemLinkAttr}" style="border:none;background:transparent;font-size:13px;color:#666;">取消收藏</button>
             </div>
         </div>`;
     }else{
         return `
-        <div class="tweet-card" data-link="${itemLink}" data-source-url="${item.sourceUrl}">
+        <div class="tweet-card" data-link="${itemLinkAttr}" data-source-url="${sourceUrlAttr}">
             <div class="card-top">
-                <div class="card-avatar">${item.sourceName.slice(0,1)}</div>
-                <div class="source-name-text">${item.sourceName}</div>
+                <div class="card-avatar">${sourceAvatar}</div>
+                <div class="source-name-text">${sourceNameText}</div>
             </div>
             <div class="card-title-wrap">
                 <div class="card-title">${titleRaw}</div>
@@ -1039,10 +1283,10 @@ function buildCard(item, isFav = false){
             </div>
             ${mediaHtml}
             <div class="card-bottom">
-                <div class="card-bottom-left">${item.date || "未知时间"}</div>
+                <div class="card-bottom-left">${dateText}</div>
                 <div class="card-bottom-right">
-                    <button class="btn-share">分享</button>
-                    <button class="${favCls}" data-link="${itemLink}">${favTxt}</button>
+                    <button class="btn-share" type="button">${shareIconSvg()}<span>分享</span></button>
+                    <button class="${favCls}" type="button" data-link="${itemLinkAttr}">${favIconSvg(isCollected)}<span>${favTxt}</span></button>
                 </div>
             </div>
         </div>`;
@@ -1051,7 +1295,7 @@ function buildCard(item, isFav = false){
 
 function renderFav(){
     if(scrollObserver) scrollObserver.disconnect();
-    renderPageNum = 0;
+    renderPageNum = 1;
     loadLock = false;
     if(favList.length === 0) {
         favPanel.innerHTML = `<div class="empty-tip" style="min-height:70vh;display:flex;align-items:center;justify-content:center;flex-direction:column;">暂无收藏内容<br>浏览主页卡片点击收藏按钮添加</div>`;
@@ -1161,7 +1405,7 @@ function bindAllCardEvent(){
             if(target && !favList.some(f=>f.link === link)){
                 favList.push(target);
                 localStorage.setItem(FAV_KEY, JSON.stringify(favList));
-                this.innerText = "已收藏";
+                this.innerHTML = `${favIconSvg(true)}<span>已收藏</span>`;
                 this.classList.add("collected");
                 showToast("已添加到收藏");
             }
@@ -1183,8 +1427,11 @@ function bindAllCardEvent(){
             entries.forEach(entry => {
                 if (!entry.isIntersecting) {
                     const card = entry.target;
+                    if(lastPageTitle !== "本地RSS媒体阅读器" || !articleBox.contains(card)) return;
+                    if(card.getBoundingClientRect().bottom > 90) return;
                     const link = card.dataset.link;
                     if(!link) return;
+                    markCardRead(card);
                 }
             });
         }, { rootMargin: "-90% 0px 0px 0px" });
@@ -1201,7 +1448,7 @@ imgs.forEach(src=>{
     slide.className = "preview-slide";
     // 图片自动走代理判断
     const imgUrl = getProxyUrl(src);
-    slide.innerHTML = `<img class="preview-img" src="${imgUrl}" loading="lazy">`;
+    slide.innerHTML = `<img class="preview-img" src="${escapeAttr(imgUrl)}" loading="lazy">`;
     previewWrap.appendChild(slide);
 })
     previewTip.innerText = "";
@@ -1241,6 +1488,7 @@ function parseRSS(xml, sourceName, sourceUrl, cat){
         let link = "";
         const linkHref = txt.match(/<link[^>]*href="([^"]+)"/);
         if(linkHref) link = linkHref[1];
+        if(!link) link = (txt.match(/<link>([\s\S]*?)<\/link>/) || [])[1] || "";
         if(!link) link = (txt.match(/<guid>([\s\S]*?)<\/guid>/) || [])[1] || "#";
         link = fullDecodeXml(link);
 
@@ -1262,22 +1510,43 @@ function parseRSS(xml, sourceName, sourceUrl, cat){
         let mp4List = [];
         let m3u8List = [];
         const fullText = txt + desc;
+        const addMp4 = url => {
+            const cleaned = cleanMediaUrl(url);
+            if(cleaned) mp4List.push(cleaned);
+        };
+        const addM3u8 = url => {
+            const cleaned = cleanMediaUrl(url);
+            if(cleaned) m3u8List.push(cleaned);
+        };
+        const addImg = (arr, url) => {
+            const cleaned = cleanMediaUrl(url);
+            if(cleaned) arr.push(cleaned);
+        };
 
-        const playerUrlReg = /url=(https?:\/\/[^&"\s<>]+\.m3u8)/gi;
+        const playerUrlReg = /url=(https?:\/\/[^&"<>]+\.m3u8(?:\?[^&"<>]*)?)/gi;
         let regMatch;
         while ((regMatch = playerUrlReg.exec(fullText)) !== null) {
-            m3u8List.push(regMatch[1]);
+            addM3u8(regMatch[1]);
         }
+        const m3u8AttrReg = /(?:src|data-src|href)=["']([^"']+\.m3u8(?:\?[^"']*)?)["']/gi;
+        while((regMatch = m3u8AttrReg.exec(fullText)) !== null){
+            addM3u8(regMatch[1]);
+        }
+        const m3u8RawReg = /https?:\/\/[^<>"'\s]+\.m3u8(?:\?[^<>"'\s]*)?/gi;
+        while((regMatch = m3u8RawReg.exec(fullText)) !== null){
+            addM3u8(regMatch[0]);
+        }
+        getUrlCandidates(fullText, ".m3u8").forEach(addM3u8);
 
-        const videoAttrReg = /(?:src|data-src)=["']([^"']+\.mp4)["']/gi;
+        const videoAttrReg = /(?:src|data-src|href)=["']([^"']+\.mp4(?:\?[^"']*)?)["']/gi;
         while((regMatch = videoAttrReg.exec(fullText)) !== null){
-            let url = fullDecodeXml(regMatch[1]);
-            mp4List.push(url);
+            addMp4(regMatch[1]);
         }
-        const videoRawReg = /https?:\/\/[^<>]+\.mp4/gi;
+        const videoRawReg = /https?:\/\/[^<>"'\s]+\.mp4(?:\?[^<>"'\s]*)?/gi;
         while((regMatch = videoRawReg.exec(fullText)) !== null){
-            mp4List.push(regMatch[0]);
+            addMp4(regMatch[0]);
         }
+        getUrlCandidates(fullText, ".mp4").forEach(addMp4);
 
         mp4List = [...new Set(mp4List)];
         m3u8List = [...new Set(m3u8List)];
@@ -1294,15 +1563,15 @@ function parseRSS(xml, sourceName, sourceUrl, cat){
             isM3u8Video = false;
         }
 
-        const imgAttrReg = /src=["']([^"']+\.(jpg|jpeg|png|gif|webp))["']/gi;
+        const imgAttrReg = /(?:src|data-src|href)=["']([^"']+\.(jpg|jpeg|png|gif|webp)(?:\?[^"']*)?)["']/gi;
         let imgsRaw = [];
         let imgMatch;
         while((imgMatch = imgAttrReg.exec(txt + desc)) !== null){
-            imgsRaw.push(fullDecodeXml(imgMatch[1]));
+            addImg(imgsRaw, imgMatch[1]);
         }
-        const imgRawReg = /https?:\/\/[^\s<>]+\.(jpg|jpeg|png|gif|webp)/gi;
+        const imgRawReg = /https?:\/\/[^<>"'\s]+\.(jpg|jpeg|png|gif|webp)(?:\?[^<>"'\s]*)?/gi;
         while((imgMatch = imgRawReg.exec(txt + desc)) !== null){
-            imgsRaw.push(imgMatch[0]);
+            addImg(imgsRaw, imgMatch[0]);
         }
         const imgs = [...new Set(imgsRaw)];
 
