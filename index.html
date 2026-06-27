@@ -770,6 +770,14 @@ function getProxyUrl(rawUrl, isFav = false) {
     return buildProxyUrl(MEDIA_PROXY_ENDPOINT, url, params);
 }
 
+function getForceMediaProxyUrl(rawUrl, isFav = false) {
+    const url = cleanMediaUrl(rawUrl);
+    if (!isHttpUrl(url)) return url;
+    const params = { raw: "1" };
+    if (isFav) params.cache = "long";
+    return buildProxyUrl(MEDIA_PROXY_ENDPOINT, url, params);
+}
+
 function escapeHtml(str) {
     if (!str) return "";
     return String(str).replace(/&/g,"&amp;")
@@ -1254,13 +1262,27 @@ function bindCustomMediaControls(video){
 }
 
 function startHlsVideo(video){
-    const streamUrl = video.dataset.src;
+    const sources = [video.dataset.src, video.dataset.altSrc].filter(Boolean);
+    const uniqueSources = [...new Set(sources)];
+    let sourceIndex = Number(video.dataset.hlsAttempt || 0);
+    const streamUrl = uniqueSources[sourceIndex] || uniqueSources[0];
     if(!streamUrl) return;
 
-    const playNow = () => {
+    const playNow = (retry = true) => {
         video.play().catch(err => {
             console.warn("m3u8播放失败：", err);
-            showToast("视频播放失败");
+            if(retry && err && err.name !== "NotAllowedError"){
+                const retryPlay = ()=>{
+                    video.removeEventListener("canplay", retryPlay);
+                    video.removeEventListener("loadeddata", retryPlay);
+                    playNow(false);
+                };
+                video.addEventListener("canplay", retryPlay, {once:true});
+                video.addEventListener("loadeddata", retryPlay, {once:true});
+                setTimeout(()=>playNow(false), 450);
+            }else{
+                showToast(err && err.name === "NotAllowedError" ? "请再点一次播放" : "视频播放失败");
+            }
         });
     };
 
@@ -1275,6 +1297,10 @@ function startHlsVideo(video){
         video.dataset.hlsLoaded = "1";
         playNow();
     } else if (window.Hls && Hls.isSupported()) {
+        if(video.hlsInstance){
+            try{ video.hlsInstance.destroy(); }catch(e){}
+            video.hlsInstance = null;
+        }
         const hls = new Hls({
             enableWorker: true,
             lowLatencyMode: true,
@@ -1296,7 +1322,16 @@ function startHlsVideo(video){
         hls.on(Hls.Events.ERROR, (event, data) => {
             if(data && data.fatal){
                 console.warn("HLS致命错误：", data);
-                showToast("m3u8加载失败");
+                const nextIndex = sourceIndex + 1;
+                if(nextIndex < uniqueSources.length){
+                    video.dataset.hlsAttempt = String(nextIndex);
+                    delete video.dataset.hlsLoaded;
+                    try{ hls.destroy(); }catch(e){}
+                    video.hlsInstance = null;
+                    startHlsVideo(video);
+                }else{
+                    showToast("m3u8加载失败");
+                }
             }
         });
     } else {
@@ -1313,25 +1348,6 @@ function preheatProxyVideo(video){
         video.load();
         return;
     }
-    if(video.classList.contains("media-video") && window.Hls && Hls.isSupported()){
-        const streamUrl = video.dataset.src;
-        if(!streamUrl) return;
-        const hls = new Hls({
-            enableWorker: true,
-            lowLatencyMode: true,
-            maxBufferLength: 8,
-            capLevelToPlayerSize: true,
-            storage: null,
-            autoStartLoad: false
-        });
-        video.hlsInstance = hls;
-        hls.attachMedia(video);
-        hls.on(Hls.Events.MEDIA_ATTACHED, () => hls.loadSource(streamUrl));
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            video.dataset.hlsLoaded = "1";
-            hls.stopLoad();
-        });
-    }
 }
 
 function initProxyVideoPreheat(){
@@ -1345,7 +1361,7 @@ function initProxyVideoPreheat(){
             });
         }, {rootMargin:"420px 0px", threshold:0.01});
     }
-    document.querySelectorAll(".media-video[data-proxy-video='1'], .media-video-mp4[data-proxy-video='1']").forEach(video=>{
+    document.querySelectorAll(".media-video-mp4[data-proxy-video='1']").forEach(video=>{
         if(video.dataset.preheatObserve) return;
         video.dataset.preheatObserve = "1";
         mediaPreheatObserver.observe(video);
@@ -1606,6 +1622,41 @@ function renderHomeFromCache() {
     bindScrollLoadMore();
 }
 
+async function renderSingleFeedFromSource(sourceUrl){
+    if(scrollObserver) scrollObserver.disconnect();
+    const feed = feedList.find(f => String(f.url).trim() === String(sourceUrl).trim());
+    const fallbackList = localCacheArticles.filter(item => item.sourceUrl.trim() === String(sourceUrl).trim());
+    articleBox.innerHTML = `<div class="empty-tip">正在加载该订阅内容...</div>`;
+    try{
+        const xmlText = await fetchRSSFeed(sourceUrl);
+        const list = parseRSS(xmlText, feed ? feed.name : "未命名订阅", sourceUrl, feed ? feed.category : "img")
+            .sort((a,b)=>new Date(b.date).getTime() - new Date(a.date).getTime());
+        if(list.length === 0){
+            currentArticles = fallbackList;
+            articleBox.innerHTML = fallbackList.length ? "" : `<div class="empty-tip">该订阅暂未解析到内容</div>`;
+        }else{
+            currentArticles = list;
+            const merged = [...list, ...localCacheArticles.filter(item => item.sourceUrl.trim() !== String(sourceUrl).trim())]
+                .sort((a,b)=>new Date(b.date).getTime() - new Date(a.date).getTime())
+                .slice(0, ARTICLE_CACHE_LIMIT);
+            localCacheArticles = merged;
+            allArticles = [...merged];
+            saveArticleCacheToStorage(merged);
+        }
+    }catch(err){
+        console.warn("单订阅加载失败：", err);
+        currentArticles = fallbackList;
+        articleBox.innerHTML = fallbackList.length ? "" : `<div class="empty-tip">该订阅加载失败，且本地没有缓存内容</div>`;
+    }
+    if(currentArticles.length > 0){
+        renderPageNum = 1;
+        renderedArticleCount = 0;
+        loadLock = false;
+        renderPagedList(true);
+        bindScrollLoadMore();
+    }
+}
+
 window.mergeNewData = async function(){
     if(scrollObserver) scrollObserver.disconnect();
     allArticles = await loadAllRSS();
@@ -1706,11 +1757,15 @@ function buildCard(item, isFav = false){
     const posterImg = imgs.length > 0 ? imgs[0] : "";
     const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
     let posterAttr = posterProxy ? `poster="${escapeAttr(posterProxy)}"` : "";
-    const videoProxy = getProxyUrl(item.videoUrl, isFav);
-    const proxyVideoAttr = hostMatched(item.videoUrl) ? 'data-proxy-video="1"' : "";
+    const videoDirect = cleanMediaUrl(item.videoUrl);
+    const videoProxy = getForceMediaProxyUrl(item.videoUrl, isFav);
+    const preferProxy = hostMatched(item.videoUrl);
+    const firstSrc = preferProxy ? videoProxy : videoDirect;
+    const altSrc = preferProxy ? videoDirect : videoProxy;
+    const proxyVideoAttr = preferProxy ? 'data-proxy-video="1"' : "";
 
     mediaHtml = `<div class="video-single-wrap">
-        <video class="media-video" data-m3u8="1" ${proxyVideoAttr} preload="none" playsinline ${posterAttr} data-src="${escapeAttr(videoProxy)}">
+        <video class="media-video" data-m3u8="1" ${proxyVideoAttr} preload="none" playsinline ${posterAttr} data-src="${escapeAttr(firstSrc)}" data-alt-src="${escapeAttr(altSrc)}">
 </video>${mediaControlsHtml()}</div>`;
 }else if(item.videoUrl){
     // MP4视频：单独class media-video-mp4，完全脱离HLS逻辑
@@ -2247,10 +2302,8 @@ function renderManage(){
        if(t.classList.contains("view-feed")){
     filterSourceUrl = t.dataset.source;
     homeIsCached = false;
-    if(localCacheArticles.length === 0){
-        await mergeNewData();
-    }
     showPage(pageHome, "RSS媒体阅读器");
+    await renderSingleFeedFromSource(filterSourceUrl);
     return;
 }
         if(t.classList.contains("del")){
