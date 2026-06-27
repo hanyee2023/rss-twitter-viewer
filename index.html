@@ -51,7 +51,7 @@ body{
   white-space:nowrap;
 }
 #pageTitle{
-    font-size:20px;
+    font-size:19px;
     font-weight:600;
     white-space:nowrap;
 }
@@ -80,6 +80,22 @@ body{
     margin:6px 0;
     background:#000;
     height: auto;
+}
+.video-single-wrap:fullscreen{
+    width:100vw;
+    height:100vh;
+    border-radius:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+}
+.video-single-wrap:-webkit-full-screen{
+    width:100vw;
+    height:100vh;
+    border-radius:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
 }
 
 /* 底部悬浮导航栏 磨砂玻璃 */
@@ -308,6 +324,68 @@ body{
     display: block;
     background:#000;
     object-fit: cover;
+    cursor:pointer;
+}
+.media-video::-webkit-media-controls-start-playback-button,
+.media-video-mp4::-webkit-media-controls-start-playback-button{
+    display:none !important;
+    -webkit-appearance:none;
+}
+.custom-media-controls{
+    position:absolute;
+    left:0;
+    right:0;
+    bottom:0;
+    height:38px;
+    padding:0 8px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+    background:linear-gradient(to top, rgba(0,0,0,.72), rgba(0,0,0,.08));
+    color:#fff;
+    z-index:3;
+}
+.media-control-btn{
+    width:30px;
+    height:30px;
+    border:none;
+    background:transparent;
+    color:#fff;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:0;
+}
+.media-control-btn svg{
+    width:20px;
+    height:20px;
+    stroke:currentColor;
+    fill:none;
+}
+.media-control-btn .fill-icon{
+    fill:currentColor;
+    stroke:none;
+}
+.media-progress{
+    flex:1;
+    min-width:0;
+    height:4px;
+    accent-color:#28a745;
+}
+.media-time{
+    width:44px;
+    text-align:right;
+    font-size:12px;
+    color:#fff;
+    font-variant-numeric:tabular-nums;
+    visibility:hidden;
+}
+.media-time.show{
+    visibility:visible;
+}
+.media-video.is-playing + .custom-media-controls,
+.media-video-mp4.is-playing + .custom-media-controls{
+    opacity:.82;
 }
 .bottom-tip{text-align:center;padding:18px 0;color:#999;font-size:12px;}
 
@@ -437,8 +515,8 @@ body{
 <body>
 <header id="mainHeader">
 <div class="title-wrap">
-  <h1 id="pageTitle">本地RSS媒体阅读器</h1>
-  <span class="beta-tag">Beta3.6</span>
+  <h1 id="pageTitle">RSS媒体阅读器</h1>
+  <span class="beta-tag">Beta4.0</span>
 </div>
 </header>
 
@@ -821,7 +899,33 @@ function favIconSvg(filled = false){
 }
 
 function playIconSvg(){
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"></path></svg>`;
+    return `<svg class="fill-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"></path></svg>`;
+}
+
+function pauseIconSvg(){
+    return `<svg class="fill-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M7 5h4v14H7z"></path><path d="M13 5h4v14h-4z"></path></svg>`;
+}
+
+function volumeIconSvg(){
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4z"></path><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>`;
+}
+
+function muteIconSvg(){
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4z"></path><path d="m23 9-6 6"></path><path d="m17 9 6 6"></path></svg>`;
+}
+
+function fullscreenIconSvg(){
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"></path><path d="M21 8V5a2 2 0 0 0-2-2h-3"></path><path d="M3 16v3a2 2 0 0 0 2 2h3"></path><path d="M16 21h3a2 2 0 0 0 2-2v-3"></path></svg>`;
+}
+
+function mediaControlsHtml(){
+    return `<div class="custom-media-controls">
+        <button class="media-control-btn media-play-btn" type="button" aria-label="播放">${playIconSvg()}</button>
+        <input class="media-progress" type="range" min="0" max="1000" value="0" step="1" aria-label="播放进度">
+        <span class="media-time">00:00</span>
+        <button class="media-control-btn media-mute-btn" type="button" aria-label="静音">${volumeIconSvg()}</button>
+        <button class="media-control-btn media-fullscreen-btn" type="button" aria-label="全屏">${fullscreenIconSvg()}</button>
+    </div>`;
 }
 
 function initVideoObserver(){
@@ -839,11 +943,6 @@ function initVideoObserver(){
     }, {threshold:0.01});
 }
 
-function isVideoControlAreaClick(video, e){
-    const rect = video.getBoundingClientRect();
-    return e.clientY >= rect.bottom - 42;
-}
-
 function toggleVideoPlay(video){
     if(video.classList.contains("media-video") && !video.dataset.hlsLoaded){
         startHlsVideo(video);
@@ -858,6 +957,126 @@ function toggleVideoPlay(video){
         video.pause();
         if(video.hlsInstance) video.hlsInstance.stopLoad();
     }
+}
+
+function formatMediaTime(seconds){
+    if(!Number.isFinite(seconds) || seconds < 0) return "00:00";
+    const total = Math.ceil(seconds);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    const mm = String(m).padStart(2, "0");
+    const ss = String(s).padStart(2, "0");
+    if(h > 0) return `${String(h).padStart(2, "0")}:${mm}:${ss}`;
+    return `${mm}:${ss}`;
+}
+
+function updateMediaControls(video){
+    const wrap = video.closest(".video-single-wrap");
+    if(!wrap) return;
+    const playBtn = wrap.querySelector(".media-play-btn");
+    const muteBtn = wrap.querySelector(".media-mute-btn");
+    const progress = wrap.querySelector(".media-progress");
+    const timeText = wrap.querySelector(".media-time");
+    if(playBtn){
+        playBtn.innerHTML = video.paused ? playIconSvg() : pauseIconSvg();
+        playBtn.setAttribute("aria-label", video.paused ? "播放" : "暂停");
+    }
+    if(muteBtn){
+        const muted = video.muted || video.volume === 0;
+        muteBtn.innerHTML = muted ? muteIconSvg() : volumeIconSvg();
+        muteBtn.setAttribute("aria-label", muted ? "取消静音" : "静音");
+    }
+    if(progress){
+        const canSeek = Number.isFinite(video.duration) && video.duration > 0;
+        progress.disabled = !canSeek;
+        if(canSeek && !progress.dataset.dragging){
+            progress.value = Math.round((video.currentTime / video.duration) * 1000) || 0;
+        }
+    }
+    if(timeText){
+        const canShowTime = !video.paused && Number.isFinite(video.duration) && video.duration > 0;
+        if(canShowTime){
+            const remain = Math.max(video.duration - video.currentTime, 0);
+            timeText.textContent = formatMediaTime(remain);
+            timeText.classList.add("show");
+        }else{
+            timeText.textContent = "00:00";
+            timeText.classList.remove("show");
+        }
+    }
+    video.classList.toggle("is-playing", !video.paused);
+}
+
+function requestMediaFullscreen(wrap, video){
+    const target = wrap || video;
+    if(target.requestFullscreen) {
+        target.requestFullscreen().catch(()=>{});
+    } else if(target.webkitRequestFullscreen) {
+        target.webkitRequestFullscreen();
+    } else if(video.webkitEnterFullscreen) {
+        video.webkitEnterFullscreen();
+    } else {
+        showToast("当前浏览器不支持全屏");
+    }
+}
+
+function bindCustomMediaControls(video){
+    const wrap = video.closest(".video-single-wrap");
+    if(!wrap || video.dataset.controlBind) return;
+    video.dataset.controlBind = "1";
+    const controls = wrap.querySelector(".custom-media-controls");
+    if(!controls) return;
+    const playBtn = controls.querySelector(".media-play-btn");
+    const progress = controls.querySelector(".media-progress");
+    const muteBtn = controls.querySelector(".media-mute-btn");
+    const fullscreenBtn = controls.querySelector(".media-fullscreen-btn");
+
+    controls.addEventListener("click", e => e.stopPropagation());
+    if(playBtn){
+        playBtn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleVideoPlay(video);
+        };
+    }
+    if(muteBtn){
+        muteBtn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            video.muted = !video.muted;
+            updateMediaControls(video);
+        };
+    }
+    if(fullscreenBtn){
+        fullscreenBtn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            requestMediaFullscreen(wrap, video);
+        };
+    }
+    if(progress){
+        progress.addEventListener("pointerdown", e => {
+            e.stopPropagation();
+            progress.dataset.dragging = "1";
+        });
+        progress.addEventListener("input", e => {
+            e.stopPropagation();
+            if(Number.isFinite(video.duration) && video.duration > 0){
+                video.currentTime = (Number(progress.value) / 1000) * video.duration;
+            }
+        });
+        progress.addEventListener("pointerup", e => {
+            e.stopPropagation();
+            delete progress.dataset.dragging;
+            updateMediaControls(video);
+        });
+    }
+
+    ["play","pause","timeupdate","durationchange","loadedmetadata","volumechange","ended"].forEach(evt=>{
+        video.addEventListener(evt, ()=>updateMediaControls(video));
+    });
+    updateMediaControls(video);
 }
 
 function startHlsVideo(video){
@@ -912,15 +1131,20 @@ function startHlsVideo(video){
 }
 
 function initHlsVideo(){
-    document.querySelectorAll(".media-video[data-m3u8]").forEach(video=>{
-        if (video.dataset.hlsBind) return;
-        video.dataset.hlsBind = "1";
-        video.addEventListener("click", (e)=>{
-            if(isVideoControlAreaClick(video, e)) return;
-            e.preventDefault();
-            toggleVideoPlay(video);
-        });
-        video.addEventListener("play", ()=>{
+    document.querySelectorAll(".media-video[data-m3u8], .media-video-mp4").forEach(video=>{
+        if (video.dataset.playerBind) return;
+        video.dataset.playerBind = "1";
+        const wrap = video.closest(".video-single-wrap") || video;
+        if(!wrap.dataset.mediaClickBind){
+            wrap.dataset.mediaClickBind = "1";
+            wrap.addEventListener("click", (e)=>{
+                e.preventDefault();
+                e.stopPropagation();
+                toggleVideoPlay(video);
+            });
+        }
+        if(video.classList.contains("media-video")){
+            video.addEventListener("play", ()=>{
             if(!video.dataset.hlsLoaded) {
                 video.pause();
                 startHlsVideo(video);
@@ -928,16 +1152,8 @@ function initHlsVideo(){
                 video.hlsInstance.startLoad();
             }
         });
-    })
-
-    document.querySelectorAll(".media-video-mp4").forEach(video=>{
-        if (video.dataset.clickBind) return;
-        video.dataset.clickBind = "1";
-        video.addEventListener("click", (e)=>{
-            if(isVideoControlAreaClick(video, e)) return;
-            e.preventDefault();
-            toggleVideoPlay(video);
-        });
+        }
+        bindCustomMediaControls(video);
     });
 }
 
@@ -1199,8 +1415,8 @@ function buildCard(item, isFav = false){
     const videoProxy = getProxyUrl(item.videoUrl, isFav);
 
     mediaHtml = `<div class="video-single-wrap">
-        <video class="media-video" data-m3u8="1" preload="none" playsinline controls ${posterAttr} data-src="${escapeAttr(videoProxy)}">
-</video></div>`;
+        <video class="media-video" data-m3u8="1" preload="none" playsinline ${posterAttr} data-src="${escapeAttr(videoProxy)}">
+</video>${mediaControlsHtml()}</div>`;
 }else if(item.videoUrl){
     // MP4视频：单独class media-video-mp4，完全脱离HLS逻辑
     const imgs = [...new Set(item.media.imgs || [])];
@@ -1210,8 +1426,8 @@ function buildCard(item, isFav = false){
     const videoProxy = getProxyUrl(item.videoUrl, isFav);
     
     mediaHtml = `<div class="video-single-wrap">
-        <video ${hostMatched(item.videoUrl) ? 'crossorigin="anonymous"' : ""} class="media-video-mp4" preload="none" playsinline controls ${posterAttr} src="${escapeAttr(videoProxy)}">
-</video></div>`;
+        <video ${hostMatched(item.videoUrl) ? 'crossorigin="anonymous"' : ""} class="media-video-mp4" preload="none" playsinline ${posterAttr} src="${escapeAttr(videoProxy)}">
+</video>${mediaControlsHtml()}</div>`;
 }else if(item.iframe){
     let iframeStr = sanitizeIframeHtml(item.iframe);
 
