@@ -264,14 +264,22 @@ body{
     width:36px;
     height:36px;
     border-radius:50%;
-    background:#45B7D1;
     color:#fff;
     display:flex;
     align-items:center;
     justify-content:center;
-    font-weight:bold;
-    font-size:16px;
     flex-shrink:0;
+    overflow:hidden;
+    box-shadow:0 2px 8px rgba(0,0,0,.12);
+}
+.card-avatar svg{
+    width:20px;
+    height:20px;
+    stroke:currentColor;
+    fill:none;
+    stroke-width:2;
+    stroke-linecap:round;
+    stroke-linejoin:round;
 }
 .source-name-text{
     font-size:16px;
@@ -344,7 +352,7 @@ body{
     display:flex;
     align-items:center;
     gap:8px;
-    background:linear-gradient(to top, rgba(0,0,0,.72), rgba(0,0,0,.08));
+    background:transparent;
     color:#fff;
     z-index:3;
 }
@@ -790,6 +798,7 @@ const READ_KEY = "rss_read_links";
 const ARTICLE_CACHE_KEY = "rss_article_cache";
 const LAST_REFRESH_KEY = "rss_last_refresh_time";
 const PAGE_SIZE = 30;
+const ARTICLE_CACHE_LIMIT = 600;
 const FETCH_TIMEOUT = 10000;
 const RSS_CONCURRENCY = 5;
 const AUTO_REFRESH_INTERVAL = 5 * 60 * 1000;
@@ -819,6 +828,7 @@ let updateFloatTimer = null;
 let lastRefreshTime = Number(localStorage.getItem(LAST_REFRESH_KEY)) || 0;
 let rssRefreshPromise = null;
 let renderedArticleCount = 0;
+let mediaPreheatObserver = null;
 
 async function fetchTextWithTimeout(fetchUrl) {
     const controller = new AbortController();
@@ -981,7 +991,7 @@ function loadArticleCacheFromStorage(){
 
 function saveArticleCacheToStorage(list){
     try{
-        const slimList = (list || []).slice(0, 600);
+        const slimList = (list || []).slice(0, ARTICLE_CACHE_LIMIT);
         localStorage.setItem(ARTICLE_CACHE_KEY, JSON.stringify(slimList));
     }catch(e){
         console.warn("保存本地文章缓存失败，可能是容量不足：", e);
@@ -1029,6 +1039,44 @@ function mediaControlsHtml(){
         <button class="media-control-btn media-mute-btn" type="button" aria-label="静音">${volumeIconSvg()}</button>
         <button class="media-control-btn media-fullscreen-btn" type="button" aria-label="全屏">${fullscreenIconSvg()}</button>
     </div>`;
+}
+
+function hashText(str){
+    let hash = 0;
+    const text = String(str || "");
+    for(let i = 0; i < text.length; i++){
+        hash = ((hash << 5) - hash) + text.charCodeAt(i);
+        hash |= 0;
+    }
+    return Math.abs(hash);
+}
+
+function avatarIconSvg(index){
+    const icons = [
+        `<svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10"></path><path d="M12 2v10l7 4"></path></svg>`,
+        `<svg viewBox="0 0 24 24"><path d="M4 19V5"></path><path d="M4 19h16"></path><path d="m7 15 4-4 3 3 5-7"></path></svg>`,
+        `<svg viewBox="0 0 24 24"><path d="m13 2-2 8h7l-7 12 2-8H6z"></path></svg>`,
+        `<svg viewBox="0 0 24 24"><path d="M3 12c3-5 6-5 9 0s6 5 9 0"></path><path d="M3 18c3-5 6-5 9 0s6 5 9 0"></path></svg>`,
+        `<svg viewBox="0 0 24 24"><path d="M12 3v18"></path><path d="M3 12h18"></path><path d="m5 5 14 14"></path><path d="m19 5-14 14"></path></svg>`,
+        `<svg viewBox="0 0 24 24"><path d="M15 10 20 7v10l-5-3z"></path><rect x="4" y="6" width="11" height="12" rx="2"></rect></svg>`,
+        `<svg viewBox="0 0 24 24"><path d="M12 2 9 9l-7 1 5 5-1 7 6-3 6 3-1-7 5-5-7-1z"></path></svg>`,
+        `<svg viewBox="0 0 24 24"><path d="M4 17 10 5l4 8 2-4 4 8z"></path><path d="M4 17h16"></path></svg>`
+    ];
+    return icons[index % icons.length];
+}
+
+function getAvatarStyle(key){
+    const gradients = [
+        "linear-gradient(135deg,#667eea,#764ba2)",
+        "linear-gradient(135deg,#ff7e5f,#feb47b)",
+        "linear-gradient(135deg,#00c6ff,#0072ff)",
+        "linear-gradient(135deg,#43cea2,#185a9d)",
+        "linear-gradient(135deg,#f093fb,#f5576c)",
+        "linear-gradient(135deg,#4facfe,#00f2fe)",
+        "linear-gradient(135deg,#fa709a,#fee140)",
+        "linear-gradient(135deg,#30cfd0,#330867)"
+    ];
+    return gradients[hashText(key) % gradients.length];
 }
 
 function initVideoObserver(){
@@ -1256,6 +1304,54 @@ function startHlsVideo(video){
     }
 }
 
+function preheatProxyVideo(video){
+    if(!video || video.dataset.preheated || video.dataset.hlsLoaded) return;
+    if(video.dataset.proxyVideo !== "1") return;
+    video.dataset.preheated = "1";
+    if(video.classList.contains("media-video-mp4")){
+        video.preload = "metadata";
+        video.load();
+        return;
+    }
+    if(video.classList.contains("media-video") && window.Hls && Hls.isSupported()){
+        const streamUrl = video.dataset.src;
+        if(!streamUrl) return;
+        const hls = new Hls({
+            enableWorker: true,
+            lowLatencyMode: true,
+            maxBufferLength: 8,
+            capLevelToPlayerSize: true,
+            storage: null,
+            autoStartLoad: false
+        });
+        video.hlsInstance = hls;
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MEDIA_ATTACHED, () => hls.loadSource(streamUrl));
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            video.dataset.hlsLoaded = "1";
+            hls.stopLoad();
+        });
+    }
+}
+
+function initProxyVideoPreheat(){
+    if(!mediaPreheatObserver){
+        mediaPreheatObserver = new IntersectionObserver(entries=>{
+            entries.forEach(entry=>{
+                if(entry.isIntersecting){
+                    preheatProxyVideo(entry.target);
+                    mediaPreheatObserver.unobserve(entry.target);
+                }
+            });
+        }, {rootMargin:"420px 0px", threshold:0.01});
+    }
+    document.querySelectorAll(".media-video[data-proxy-video='1'], .media-video-mp4[data-proxy-video='1']").forEach(video=>{
+        if(video.dataset.preheatObserve) return;
+        video.dataset.preheatObserve = "1";
+        mediaPreheatObserver.observe(video);
+    });
+}
+
 function initHlsVideo(){
     document.querySelectorAll(".media-video[data-m3u8], .media-video-mp4").forEach(video=>{
         if (video.dataset.playerBind) return;
@@ -1281,6 +1377,7 @@ function initHlsVideo(){
         }
         bindCustomMediaControls(video);
     });
+    initProxyVideoPreheat();
 }
 
 function bindVideoPauseObserver(){
@@ -1408,12 +1505,13 @@ async function refreshAllRSSWithLock(){
     if(rssRefreshPromise) return rssRefreshPromise;
     rssRefreshPromise = (async ()=>{
         const data = await loadAllRSS();
-        allArticles = data;
-        localCacheArticles = [...data];
-        saveArticleCacheToStorage(data);
+        const cacheData = data.slice(0, ARTICLE_CACHE_LIMIT);
+        allArticles = cacheData;
+        localCacheArticles = [...cacheData];
+        saveArticleCacheToStorage(cacheData);
         lastRefreshTime = Date.now();
         localStorage.setItem(LAST_REFRESH_KEY, String(lastRefreshTime));
-        return data;
+        return cacheData;
     })();
     try{
         return await rssRefreshPromise;
@@ -1443,16 +1541,17 @@ async function checkAndPromptUpdate(isManual = false){
         if(isManual) showUpdateFloat("检查更新失败，请稍后重试");
         return;
     }
-    let newCount = 0;
-    newAll.forEach(item=>{
-        if(!oldLinkSet.has(item.link)) newCount++;
-    });
+    const visibleNewList = newAll.filter(item => !oldLinkSet.has(item.link) && !sessionStartReadSet.has(item.link));
+    const newCount = visibleNewList.length;
     if(newCount > 0){
         showUpdateFloat(`更新${newCount}条内容，点击查看`, ()=>{
             filterSourceUrl = "";
             homeIsCached = false;
             homeArticleHtml = "";
             renderedArticleCount = 0;
+            allArticles = [...newAll];
+            localCacheArticles = [...newAll];
+            saveArticleCacheToStorage(newAll);
             renderHomeFromCache();
             const scrollTopNow = ()=>{
                 mainWrap.scrollTop = 0;
@@ -1608,9 +1707,10 @@ function buildCard(item, isFav = false){
     const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
     let posterAttr = posterProxy ? `poster="${escapeAttr(posterProxy)}"` : "";
     const videoProxy = getProxyUrl(item.videoUrl, isFav);
+    const proxyVideoAttr = hostMatched(item.videoUrl) ? 'data-proxy-video="1"' : "";
 
     mediaHtml = `<div class="video-single-wrap">
-        <video class="media-video" data-m3u8="1" preload="none" playsinline ${posterAttr} data-src="${escapeAttr(videoProxy)}">
+        <video class="media-video" data-m3u8="1" ${proxyVideoAttr} preload="none" playsinline ${posterAttr} data-src="${escapeAttr(videoProxy)}">
 </video>${mediaControlsHtml()}</div>`;
 }else if(item.videoUrl){
     // MP4视频：单独class media-video-mp4，完全脱离HLS逻辑
@@ -1619,9 +1719,10 @@ function buildCard(item, isFav = false){
     const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
     let posterAttr = posterProxy ? `poster="${escapeAttr(posterProxy)}"` : "";
     const videoProxy = getProxyUrl(item.videoUrl, isFav);
+    const proxyVideoAttr = hostMatched(item.videoUrl) ? 'data-proxy-video="1"' : "";
     
     mediaHtml = `<div class="video-single-wrap">
-        <video ${hostMatched(item.videoUrl) ? 'crossorigin="anonymous"' : ""} class="media-video-mp4" preload="none" playsinline ${posterAttr} src="${escapeAttr(videoProxy)}">
+        <video ${hostMatched(item.videoUrl) ? 'crossorigin="anonymous"' : ""} class="media-video-mp4" ${proxyVideoAttr} preload="none" playsinline ${posterAttr} src="${escapeAttr(videoProxy)}">
 </video>${mediaControlsHtml()}</div>`;
 }else if(item.iframe){
     let iframeStr = sanitizeIframeHtml(item.iframe);
@@ -1661,14 +1762,17 @@ function buildCard(item, isFav = false){
     const itemLinkAttr = escapeAttr(itemLink);
     const sourceUrlAttr = escapeAttr(item.sourceUrl || "");
     const sourceNameText = escapeHtml(item.sourceName || "未知来源");
-    const sourceAvatar = escapeHtml((item.sourceName || "?").slice(0,1));
+    const avatarKey = item.sourceUrl || item.sourceName || item.link || "?";
+    const avatarIndex = hashText(avatarKey);
+    const avatarStyle = escapeAttr(getAvatarStyle(avatarKey));
+    const avatarSvg = avatarIconSvg(avatarIndex);
     const dateText = formatCardDate(item.date);
 
     if(isFav){
         return `
         <div class="tweet-card" data-link="${itemLinkAttr}" data-source-url="${sourceUrlAttr}">
             <div class="card-top">
-                <div class="card-avatar">${sourceAvatar}</div>
+                <div class="card-avatar" style="background:${avatarStyle}">${avatarSvg}</div>
                 <div class="source-name-text">${sourceNameText}</div>
             </div>
             <div class="card-title-wrap">
@@ -1685,7 +1789,7 @@ function buildCard(item, isFav = false){
         return `
         <div class="tweet-card" data-link="${itemLinkAttr}" data-source-url="${sourceUrlAttr}">
             <div class="card-top">
-                <div class="card-avatar">${sourceAvatar}</div>
+                <div class="card-avatar" style="background:${avatarStyle}">${avatarSvg}</div>
                 <div class="source-name-text">${sourceNameText}</div>
             </div>
             <div class="card-title-wrap">
@@ -2047,6 +2151,7 @@ function renderSearchResult(keyword){
     searchResultBox.innerHTML = html;
     bindAllCardEvent();
     bindVideoPauseObserver();
+    initHlsVideo();
 }
 searchInput.oninput = function(){
     renderSearchResult(this.value);
