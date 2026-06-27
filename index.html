@@ -373,7 +373,44 @@ body{
     flex:1;
     min-width:0;
     height:4px;
-    accent-color:#28a745;
+    appearance:none;
+    -webkit-appearance:none;
+    border-radius:999px;
+    background:linear-gradient(to right,
+        #28a745 0%,
+        #28a745 var(--played, 0%),
+        #40bfff var(--played, 0%),
+        #40bfff var(--buffered, 0%),
+        rgba(255,255,255,.35) var(--buffered, 0%),
+        rgba(255,255,255,.35) 100%);
+    outline:none;
+}
+.media-progress::-webkit-slider-runnable-track{
+    height:4px;
+    border-radius:999px;
+    background:transparent;
+}
+.media-progress::-webkit-slider-thumb{
+    -webkit-appearance:none;
+    width:12px;
+    height:12px;
+    margin-top:-4px;
+    border-radius:50%;
+    background:#fff;
+    box-shadow:0 0 4px rgba(0,0,0,.35);
+}
+.media-progress::-moz-range-track{
+    height:4px;
+    border-radius:999px;
+    background:transparent;
+}
+.media-progress::-moz-range-thumb{
+    width:12px;
+    height:12px;
+    border:none;
+    border-radius:50%;
+    background:#fff;
+    box-shadow:0 0 4px rgba(0,0,0,.35);
 }
 .media-time{
     width:44px;
@@ -1037,6 +1074,21 @@ function formatMediaTime(seconds){
     return `${mm}:${ss}`;
 }
 
+function getBufferedPercent(video){
+    if(!Number.isFinite(video.duration) || video.duration <= 0 || !video.buffered || video.buffered.length === 0){
+        return 0;
+    }
+    let end = 0;
+    for(let i = 0; i < video.buffered.length; i++){
+        if(video.currentTime >= video.buffered.start(i) && video.currentTime <= video.buffered.end(i)){
+            end = video.buffered.end(i);
+            break;
+        }
+        end = Math.max(end, video.buffered.end(i));
+    }
+    return Math.min(100, Math.max(0, (end / video.duration) * 100));
+}
+
 function updateMediaControls(video){
     const wrap = video.closest(".video-single-wrap");
     if(!wrap) return;
@@ -1056,6 +1108,14 @@ function updateMediaControls(video){
     if(progress){
         const canSeek = Number.isFinite(video.duration) && video.duration > 0;
         progress.disabled = !canSeek;
+        let playedPercent = 0;
+        let bufferedPercent = 0;
+        if(canSeek){
+            playedPercent = Math.min(100, Math.max(0, (video.currentTime / video.duration) * 100));
+            bufferedPercent = Math.max(playedPercent, getBufferedPercent(video));
+        }
+        progress.style.setProperty("--played", `${playedPercent}%`);
+        progress.style.setProperty("--buffered", `${bufferedPercent}%`);
         if(canSeek && !progress.dataset.dragging){
             progress.value = Math.round((video.currentTime / video.duration) * 1000) || 0;
         }
@@ -1139,7 +1199,7 @@ function bindCustomMediaControls(video){
         });
     }
 
-    ["play","pause","timeupdate","durationchange","loadedmetadata","volumechange","ended"].forEach(evt=>{
+    ["play","pause","timeupdate","progress","durationchange","loadedmetadata","volumechange","ended"].forEach(evt=>{
         video.addEventListener(evt, ()=>updateMediaControls(video));
     });
     updateMediaControls(video);
