@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>本地RSS媒体阅读器</title>
+<title>RSS媒体阅读器</title>
 <script src="https://unpkg.com/hls.js@1.5.7/dist/hls.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto;}
@@ -741,8 +741,13 @@ function fullDecodeXml(str){
 const FEED_KEY = "local_rss_feeds";
 const FAV_KEY = "rss_fav_list";
 const READ_KEY = "rss_read_links";
+const ARTICLE_CACHE_KEY = "rss_article_cache";
+const LAST_REFRESH_KEY = "rss_last_refresh_time";
 const PAGE_SIZE = 30;
 const FETCH_TIMEOUT = 10000;
+const RSS_CONCURRENCY = 5;
+const AUTO_REFRESH_INTERVAL = 5 * 60 * 1000;
+const MANUAL_REFRESH_INTERVAL = 60 * 1000;
 let feedList = JSON.parse(localStorage.getItem(FEED_KEY)) || [];
 let favList = JSON.parse(localStorage.getItem(FAV_KEY)) || [];
 let readLinkSet = new Set(JSON.parse(localStorage.getItem(READ_KEY)) || []);
@@ -764,6 +769,9 @@ let homeArticleHtml = "";
 let homeIsCached = false;
 let readObserver = null;
 let updateFloatTimer = null;
+let lastRefreshTime = Number(localStorage.getItem(LAST_REFRESH_KEY)) || 0;
+let rssRefreshPromise = null;
+let renderedArticleCount = 0;
 
 async function fetchTextWithTimeout(fetchUrl) {
     const controller = new AbortController();
@@ -883,6 +891,29 @@ function markCardRead(card){
     if(!link || readLinkSet.has(link)) return;
     readLinkSet.add(link);
     saveReadLinks();
+}
+
+function loadArticleCacheFromStorage(){
+    try{
+        const cache = JSON.parse(localStorage.getItem(ARTICLE_CACHE_KEY) || "[]");
+        if(Array.isArray(cache)){
+            allArticles = cache;
+            localCacheArticles = [...cache];
+            return cache.length;
+        }
+    }catch(e){
+        console.warn("读取本地文章缓存失败：", e);
+    }
+    return 0;
+}
+
+function saveArticleCacheToStorage(list){
+    try{
+        const slimList = (list || []).slice(0, 600);
+        localStorage.setItem(ARTICLE_CACHE_KEY, JSON.stringify(slimList));
+    }catch(e){
+        console.warn("保存本地文章缓存失败，可能是容量不足：", e);
+    }
 }
 
 function getVisibleHomeArticles(list){
@@ -1188,7 +1219,7 @@ function showPage(targetDom, titleText) {
         return;
     }
 
-    if (lastPageTitle === "本地RSS媒体阅读器") {
+    if (lastPageTitle === "RSS媒体阅读器") {
         homeScrollTop = mainWrap.scrollTop;
         homeArticleHtml = articleBox.innerHTML;
         homeIsCached = true;
@@ -1213,13 +1244,13 @@ function showPage(targetDom, titleText) {
     }
 
     allBtns.forEach(b => b.classList.remove("active"));
-    if (titleText === "本地RSS媒体阅读器") btnHome.classList.add("active");
+    if (titleText === "RSS媒体阅读器") btnHome.classList.add("active");
     if (titleText === "管理订阅") btnManage.classList.add("active");
     if (titleText === "添加订阅") btnAdd.classList.add("active");
     if (titleText === "我的收藏") btnFav.classList.add("active");
     if (titleText === "内容搜索") btnSearch.classList.add("active");
 
-    if (titleText === "本地RSS媒体阅读器" && homeIsCached && filterSourceUrl === "") {
+    if (titleText === "RSS媒体阅读器" && homeIsCached && filterSourceUrl === "") {
         articleBox.innerHTML = homeArticleHtml;
         setTimeout(()=>{
             mainWrap.scrollTop = homeScrollTop;
@@ -1235,7 +1266,7 @@ function showPage(targetDom, titleText) {
         homeIsCached = false;
     }
 
-    if (titleText === "本地RSS媒体阅读器") {
+    if (titleText === "RSS媒体阅读器") {
         renderHomeFromCache();
         homeIsCached = false;
     } else if (titleText === "管理订阅") {
@@ -1253,46 +1284,95 @@ function showPage(targetDom, titleText) {
 btnHome.onclick = async () => {
     filterSourceUrl = "";
 
-    if(lastPageTitle === "本地RSS媒体阅读器"){
-        let newAll = [];
-        try{
-            newAll = await loadAllRSS();
-        }catch(err){
-            console.warn("手动检查更新失败：", err);
-            showUpdateFloat("检查更新失败，请稍后重试");
-            return;
-        }
-        const oldLinkSet = new Set(localCacheArticles.map(i=>i.link));
-        let newCount = 0;
-        newAll.forEach(item=>{
-            if(!oldLinkSet.has(item.link)) newCount++;
-        });
-
-        if(newCount>0){
-            showUpdateFloat(`更新${newCount}条内容，点击查看`, ()=>{
-                allArticles = newAll;
-                localCacheArticles = [...newAll];
-                renderHomeFromCache();
-                mainWrap.scrollTop = 0;
-                const bar = document.getElementById("updateFloatBar");
-                if(bar) bar.remove();
-                homeIsCached = false;
-            });
-        }else{
-            showUpdateFloat("暂无更新内容");
-        }
+    if(lastPageTitle === "RSS媒体阅读器"){
+        await checkAndPromptUpdate(true);
         return;
     }
-    showPage(pageHome, "本地RSS媒体阅读器");
+    showPage(pageHome, "RSS媒体阅读器");
 };
 btnManage.onclick = () => showPage(pageManage, "管理订阅");
 btnAdd.onclick = () => showPage(pageAdd, "添加订阅");
 btnFav.onclick = () => showPage(pageFav, "我的收藏");
 btnSearch.onclick = () => showPage(pageSearch, "内容搜索");
 
+async function refreshAllRSSWithLock(){
+    if(rssRefreshPromise) return rssRefreshPromise;
+    rssRefreshPromise = (async ()=>{
+        const data = await loadAllRSS();
+        allArticles = data;
+        localCacheArticles = [...data];
+        saveArticleCacheToStorage(data);
+        lastRefreshTime = Date.now();
+        localStorage.setItem(LAST_REFRESH_KEY, String(lastRefreshTime));
+        return data;
+    })();
+    try{
+        return await rssRefreshPromise;
+    }finally{
+        rssRefreshPromise = null;
+    }
+}
+
+async function checkAndPromptUpdate(isManual = false){
+    if(feedList.length === 0) return;
+    if(rssRefreshPromise){
+        showUpdateFloat("正在检查更新，请稍候");
+        return;
+    }
+    const now = Date.now();
+    const minInterval = isManual ? MANUAL_REFRESH_INTERVAL : AUTO_REFRESH_INTERVAL;
+    if(lastRefreshTime && now - lastRefreshTime < minInterval){
+        if(isManual) showUpdateFloat("刚刚检查过，稍后再试");
+        return;
+    }
+    const oldLinkSet = new Set(localCacheArticles.map(i=>i.link));
+    let newAll = [];
+    try{
+        newAll = await refreshAllRSSWithLock();
+    }catch(err){
+        console.warn("检查更新失败：", err);
+        if(isManual) showUpdateFloat("检查更新失败，请稍后重试");
+        return;
+    }
+    let newCount = 0;
+    newAll.forEach(item=>{
+        if(!oldLinkSet.has(item.link)) newCount++;
+    });
+    if(newCount > 0){
+        showUpdateFloat(`更新${newCount}条内容，点击查看`, ()=>{
+            renderHomeFromCache();
+            mainWrap.scrollTop = 0;
+            const bar = document.getElementById("updateFloatBar");
+            if(bar) bar.remove();
+            homeIsCached = false;
+        });
+    }else if(isManual){
+        showUpdateFloat("暂无更新内容");
+    }
+}
+
+async function initLoadAllCache() {
+    const cacheCount = loadArticleCacheFromStorage();
+    if(cacheCount > 0){
+        renderHomeFromCache();
+    }
+    if(feedList.length === 0) return;
+    if(cacheCount === 0){
+        try{
+            await refreshAllRSSWithLock();
+            renderHomeFromCache();
+        }catch(e){
+            console.warn("初始化加载失败",e);
+        }
+    }else{
+        checkAndPromptUpdate(false);
+    }
+}
+
 function renderHomeFromCache() {
     if(scrollObserver) scrollObserver.disconnect();
     renderPageNum = 0;
+    renderedArticleCount = 0;
     loadLock = false;
     if(localCacheArticles.length === 0) {
         articleBox.innerHTML = `<div class="empty-tip">暂无文章内容</div>`;
@@ -1305,57 +1385,41 @@ function renderHomeFromCache() {
 
     currentArticles = [...filterArticles];
     renderPageNum = 1;
-    renderPagedList();
+    renderPagedList(true);
     bindScrollLoadMore();
-}
-
-async function silentCheckUpdate() {
-    try {
-        const newAll = await loadAllRSS();
-        const oldLinkSet = new Set(localCacheArticles.map(i=>i.link));
-        let newCount = 0;
-        newAll.forEach(item=>{
-            if(!oldLinkSet.has(item.link)) newCount++;
-        })
-        hasNewUpdate = newCount > 0;
-        newArticleCount = newCount;
-    } catch(err) {
-        console.warn("静默检测更新失败：", err);
-    }
 }
 
 window.mergeNewData = async function(){
     if(scrollObserver) scrollObserver.disconnect();
     allArticles = await loadAllRSS();
     localCacheArticles = [...allArticles];
+    saveArticleCacheToStorage(allArticles);
     let filterArticles = allArticles;
     if(filterSourceUrl) filterArticles = allArticles.filter(item => item.sourceUrl === filterSourceUrl);
     currentArticles = [...filterArticles];
     renderPageNum = 1;
-    renderPagedList();
+    renderedArticleCount = 0;
+    renderPagedList(true);
 }
 
-async function initLoadAllCache() {
-    if(feedList.length === 0) return;
-    try{
-        const data = await loadAllRSS();
-        allArticles = data;
-        localCacheArticles = [...data];
-    }catch(e){
-        console.warn("初始化缓存加载失败",e);
-    }
-}
-
-function renderPagedList(){
-    const slice = currentArticles.slice(0, renderPageNum * PAGE_SIZE);
-    let html = renderCardList(slice);
-    const remain = currentArticles.length - slice.length;
-    if(remain > 0){
-        html += `<div class="load-more-tip" id="loadMoreDom">滚动加载更多...</div>`;
+function renderPagedList(reset = false){
+    if(reset){
+        articleBox.innerHTML = "";
+        renderedArticleCount = 0;
     }else{
-        html += `<div class="bottom-tip">全部内容加载完毕</div>`;
+        const oldTip = articleBox.querySelector("#loadMoreDom,.bottom-tip");
+        if(oldTip) oldTip.remove();
     }
-    articleBox.innerHTML = html;
+    const nextCount = Math.min(renderPageNum * PAGE_SIZE, currentArticles.length);
+    const appendList = currentArticles.slice(renderedArticleCount, nextCount);
+    if(appendList.length > 0){
+        articleBox.insertAdjacentHTML("beforeend", renderCardList(appendList));
+        renderedArticleCount = nextCount;
+    }
+    const remain = currentArticles.length - renderedArticleCount;
+    articleBox.insertAdjacentHTML("beforeend", remain > 0
+        ? `<div class="load-more-tip" id="loadMoreDom">滚动加载更多...</div>`
+        : `<div class="bottom-tip">全部内容加载完毕</div>`);
     bindAllCardEvent();
     bindVideoPauseObserver();
     initHlsVideo();
@@ -1643,7 +1707,7 @@ function bindAllCardEvent(){
             entries.forEach(entry => {
                 if (!entry.isIntersecting) {
                     const card = entry.target;
-                    if(lastPageTitle !== "本地RSS媒体阅读器" || !articleBox.contains(card)) return;
+                    if(lastPageTitle !== "RSS媒体阅读器" || !articleBox.contains(card)) return;
                     if(card.getBoundingClientRect().bottom > 90) return;
                     const link = card.dataset.link;
                     if(!link) return;
@@ -1675,17 +1739,26 @@ imgs.forEach(src=>{
 previewClose.onclick = ()=> imgPreviewMask.style.display = "none";
 
 async function loadAllRSS(){
-    const taskList = feedList.map(async f=>{
-        try{
-            let xmlText = await fetchRSSFeed(f.url);
-            if(!xmlText) return [];
-            return parseRSS(xmlText, f.name, f.url, f.category);
-        }catch(e){
-            console.warn(`订阅【${f.name}】拉取失败：`, e.message);
-            return [];
+    const queue = [...feedList];
+    const allGroups = [];
+    async function worker(){
+        while(queue.length){
+            const f = queue.shift();
+            try{
+                let xmlText = await fetchRSSFeed(f.url);
+                if(!xmlText) {
+                    allGroups.push([]);
+                }else{
+                    allGroups.push(parseRSS(xmlText, f.name, f.url, f.category));
+                }
+            }catch(e){
+                console.warn(`订阅【${f.name}】拉取失败：`, e.message);
+                allGroups.push([]);
+            }
         }
-    })
-    const allGroups = await Promise.all(taskList);
+    }
+    const workerCount = Math.min(RSS_CONCURRENCY, queue.length);
+    await Promise.all(Array.from({length: workerCount}, worker));
     let res = [];
     allGroups.forEach(group=>res = res.concat(group));
     res.sort((a,b)=> new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -1860,6 +1933,8 @@ document.getElementById("importFileInput").onchange = function(e){
                 }
             })
             localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
+            lastRefreshTime = 0;
+            localStorage.removeItem(LAST_REFRESH_KEY);
             renderManage();
             alert(`成功导入${addNum}条订阅，切换主页加载内容`);
         }catch(err){alert("备份文件格式错误");}
@@ -1873,6 +1948,11 @@ document.getElementById("delAllFeed").onclick = function(){
     if(confirm("确定清空全部订阅？收藏不会同步删除")){
         feedList = [];
         localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
+        allArticles = [];
+        localCacheArticles = [];
+        localStorage.removeItem(ARTICLE_CACHE_KEY);
+        localStorage.removeItem(LAST_REFRESH_KEY);
+        lastRefreshTime = 0;
         renderManage();
     }
 }
@@ -1888,6 +1968,8 @@ document.getElementById("saveEdit").onclick = function(){
     feedList[idx].category = cat;
     feedList[idx].url = url;
     localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
+    lastRefreshTime = 0;
+    localStorage.removeItem(LAST_REFRESH_KEY);
     favList.forEach(item=>{if(item.sourceUrl === oldUrl) item.sourceUrl = url;})
     localStorage.setItem(FAV_KEY, JSON.stringify(favList));
     editModal.style.display = "none";
@@ -1926,7 +2008,7 @@ function renderManage(){
     filterSourceUrl = t.dataset.source;
     homeIsCached = false;
     mergeNewData();
-    showPage(pageHome, "本地RSS媒体阅读器");
+    showPage(pageHome, "RSS媒体阅读器");
     return;
 }
         if(t.classList.contains("del")){
@@ -1965,6 +2047,8 @@ document.getElementById("confirmAdd").onclick = function(){
         url: feedUrl
     });
     localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
+    lastRefreshTime = 0;
+    localStorage.removeItem(LAST_REFRESH_KEY);
 
     document.getElementById("feedName").value = "";
     document.getElementById("feedUrl").value = "";
@@ -1975,8 +2059,8 @@ document.getElementById("confirmAdd").onclick = function(){
 
 window.onload = async function(){
     initVideoObserver();
-    await initLoadAllCache();
-    showPage(pageHome, "本地RSS媒体阅读器");
+    showPage(pageHome, "RSS媒体阅读器");
+    initLoadAllCache();
 }
 </script>
 </body>
