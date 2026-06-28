@@ -225,7 +225,58 @@ body{
     border-radius:8px;
     font-size:15px;
 }
-#confirmAdd{background:#1d9bf0;color:#fff;border:none;padding:0 16px;border-radius:8px;font-size:15px;}
+#confirmAdd{background:#1d9bf0;color:#fff;border:none;padding:0 16px;border-radius:8px;font-size:15px;min-width:100px;}
+.add-feed-row-third select{flex:1;}
+.add-feed-row-third #confirmAdd{flex:0 0 auto;flex-shrink:0;}
+.add-feed-form{padding-bottom:10px;}
+.keyword-block-section{
+    border-top:2px solid #000;
+    margin:20px 12px 0;
+    padding-top:16px;
+}
+.keyword-block-title{
+    font-size:16px;
+    font-weight:600;
+    margin:0 0 8px;
+    color:#222;
+}
+.keyword-list{
+    margin:8px 12px 16px;
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+}
+.keyword-tag{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    background:#f5f5f5;
+    border:1px solid #ddd;
+    border-radius:16px;
+    padding:4px 6px 4px 12px;
+    font-size:13px;
+    color:#333;
+}
+.keyword-tag .kw-text{max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.keyword-tag button{
+    border:none;
+    background:#e0e0e0;
+    color:#555;
+    width:22px;
+    height:22px;
+    border-radius:50%;
+    font-size:14px;
+    line-height:1;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:0;
+}
+.keyword-tag button:hover{background:#ccc;color:#222;}
+.keyword-tag .kw-edit{background:#e8f4fd;color:#1d9bf0;}
+.keyword-tag .kw-edit:hover{background:#d0e9fc;}
+#addKeywordBtn{background:#1d9bf0;color:#fff;border:none;padding:0 16px;border-radius:8px;font-size:15px;min-width:70px;}
 
 .empty-tip{text-align:center;padding:100px 10px;color:#777;font-size:16px;}
 .error-tip{text-align:center;padding:30px 10px;color:#c0392b;font-size:15px;margin-bottom:10px;}
@@ -588,14 +639,28 @@ body{
         <div class="feed-list" id="feedPanel"></div>
     </div>
     <div class="page-add" id="pageAdd">
-        <div class="add-feed-row">
-            <input id="feedName" placeholder="自定义订阅名称（可选）">
-            <select id="feedCat">
-                <option value="img">图片类RSS</option>
-                <option value="video">视频类RSS</option>
-            </select>
-            <input id="feedUrl" placeholder="粘贴标准RSS订阅链接">
-            <button id="confirmAdd">确认添加</button>
+        <div class="add-feed-form">
+            <div class="add-feed-row">
+                <input id="feedUrl" placeholder="粘贴标准RSS订阅链接">
+            </div>
+            <div class="add-feed-row">
+                <input id="feedName" placeholder="自定义订阅名称（可选）">
+            </div>
+            <div class="add-feed-row add-feed-row-third">
+                <select id="feedCat">
+                    <option value="img">图片类RSS</option>
+                    <option value="video">视频类RSS</option>
+                </select>
+                <button id="confirmAdd">确认添加</button>
+            </div>
+        </div>
+        <div class="keyword-block-section">
+            <div class="keyword-block-title">关键字屏蔽</div>
+            <div class="add-feed-row">
+                <input id="blockKeywordInput" placeholder="输入要屏蔽的关键字">
+                <button id="addKeywordBtn">添加</button>
+            </div>
+            <div class="keyword-list" id="keywordList"></div>
         </div>
     </div>
     <div class="page-fav" id="pageFav"><div id="favPanel"></div></div>
@@ -804,6 +869,7 @@ const FEED_KEY = "local_rss_feeds";
 const FAV_KEY = "rss_fav_list";
 const READ_KEY = "rss_read_links";
 const ARTICLE_CACHE_KEY = "rss_article_cache";
+const BLOCK_KEYWORD_KEY = "rss_block_keywords";
 const LAST_REFRESH_KEY = "rss_last_refresh_time";
 const PAGE_SIZE = 30;
 const ARTICLE_CACHE_LIMIT = 600;
@@ -814,6 +880,7 @@ const MANUAL_REFRESH_INTERVAL = 60 * 1000;
 let feedList = JSON.parse(localStorage.getItem(FEED_KEY)) || [];
 let favList = JSON.parse(localStorage.getItem(FAV_KEY)) || [];
 let readLinkSet = new Set(JSON.parse(localStorage.getItem(READ_KEY)) || []);
+let blockKeywordList = JSON.parse(localStorage.getItem(BLOCK_KEYWORD_KEY)) || [];
 let sessionStartReadSet = new Set(readLinkSet);
 let currentArticles = [];
 let renderPageNum = 0;
@@ -1006,9 +1073,15 @@ function saveArticleCacheToStorage(list){
     }
 }
 
+function hasBlockedKeyword(title){
+    if(!blockKeywordList || blockKeywordList.length === 0) return false;
+    const titleLower = (title || "").toLowerCase();
+    return blockKeywordList.some(kw => kw && titleLower.includes(kw.toLowerCase()));
+}
+
 function getVisibleHomeArticles(list){
-    if(filterSourceUrl) return list;
-    return list.filter(item => !sessionStartReadSet.has(item.link));
+    if(filterSourceUrl) return list.filter(item => !hasBlockedKeyword(getPureText(item.title)));
+    return list.filter(item => !sessionStartReadSet.has(item.link) && !hasBlockedKeyword(getPureText(item.title)));
 }
 
 function shareIconSvg(){
@@ -1037,6 +1110,9 @@ function muteIconSvg(){
 
 function fullscreenIconSvg(){
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"></path><path d="M21 8V5a2 2 0 0 0-2-2h-3"></path><path d="M3 16v3a2 2 0 0 0 2 2h3"></path><path d="M16 21h3a2 2 0 0 0 2-2v-3"></path></svg>`;
+}
+function exitFullscreenIconSvg(){
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3"></path><path d="M21 8h-3a2 2 0 0 1-2-2V3"></path><path d="M3 16h3a2 2 0 0 1 2 2v3"></path><path d="M16 21v-3a2 2 0 0 1 2-2h3"></path></svg>`;
 }
 
 function mediaControlsHtml(){
@@ -1102,12 +1178,22 @@ function initVideoObserver(){
     }, {threshold:0.01});
 }
 
+function pauseOtherVideos(currentVideo){
+    document.querySelectorAll(".media-video, .media-video-mp4").forEach(v=>{
+        if(v !== currentVideo && !v.paused){
+            v.pause();
+            if(v.hlsInstance) v.hlsInstance.stopLoad();
+        }
+    });
+}
+
 function toggleVideoPlay(video){
     if(video.classList.contains("media-video") && !video.dataset.hlsLoaded){
         startHlsVideo(video);
         return;
     }
     if(video.paused){
+        pauseOtherVideos(video);
         video.play().catch(err => {
             console.warn("视频播放失败：", err);
             showToast("视频播放失败");
@@ -1190,8 +1276,30 @@ function updateMediaControls(video){
     video.classList.toggle("is-playing", !video.paused);
 }
 
+function isMediaFullscreen(wrap, video){
+    const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+    if(fsEl === wrap || fsEl === video) return true;
+    // iOS native video fullscreen
+    if(video.webkitDisplayingFullscreen) return true;
+    return false;
+}
+
+function exitMediaFullscreen(wrap, video){
+    if(document.exitFullscreen) {
+        document.exitFullscreen().catch(()=>{});
+    } else if(document.webkitExitFullscreen) {
+        document.webkitExitFullscreen();
+    } else if(video.webkitExitFullscreen) {
+        video.webkitExitFullscreen();
+    }
+}
+
 function requestMediaFullscreen(wrap, video){
     const target = wrap || video;
+    if(isMediaFullscreen(wrap, video)){
+        exitMediaFullscreen(wrap, video);
+        return;
+    }
     if(target.requestFullscreen) {
         target.requestFullscreen().catch(()=>{});
     } else if(target.webkitRequestFullscreen) {
@@ -1200,6 +1308,20 @@ function requestMediaFullscreen(wrap, video){
         video.webkitEnterFullscreen();
     } else {
         showToast("当前浏览器不支持全屏");
+    }
+}
+
+function updateFullscreenBtnIcon(video){
+    const wrap = video.closest(".video-single-wrap");
+    if(!wrap) return;
+    const btn = wrap.querySelector(".media-fullscreen-btn");
+    if(!btn) return;
+    if(isMediaFullscreen(wrap, video)){
+        btn.innerHTML = exitFullscreenIconSvg();
+        btn.setAttribute("aria-label", "退出全屏");
+    }else{
+        btn.innerHTML = fullscreenIconSvg();
+        btn.setAttribute("aria-label", "全屏");
     }
 }
 
@@ -1237,6 +1359,14 @@ function bindCustomMediaControls(video){
             requestMediaFullscreen(wrap, video);
         };
     }
+    // 监听全屏状态变化，更新按钮图标
+    ["fullscreenchange","webkitfullscreenchange"].forEach(evt=>{
+        document.addEventListener(evt, ()=>updateFullscreenBtnIcon(video));
+    });
+    if(video.webkitSupportsFullscreen){
+        video.addEventListener("webkitbeginfullscreen", ()=>updateFullscreenBtnIcon(video));
+        video.addEventListener("webkitendfullscreen", ()=>updateFullscreenBtnIcon(video));
+    }
     if(progress){
         progress.addEventListener("pointerdown", e => {
             e.stopPropagation();
@@ -1267,6 +1397,8 @@ function startHlsVideo(video){
     let sourceIndex = Number(video.dataset.hlsAttempt || 0);
     const streamUrl = uniqueSources[sourceIndex] || uniqueSources[0];
     if(!streamUrl) return;
+
+    pauseOtherVideos(video);
 
     const playNow = (retry = true) => {
         video.play().catch(err => {
@@ -1380,6 +1512,17 @@ function initHlsVideo(){
                 e.stopPropagation();
                 toggleVideoPlay(video);
             });
+        }
+        // 海报图加载失败回退：代理图失败时尝试直连
+        if(video.poster && video.dataset.posterDirect && !video.dataset.posterFallback){
+            video.dataset.posterFallback = "1";
+            const posterImg = new Image();
+            posterImg.onerror = function(){
+                if(video.dataset.posterDirect && video.poster !== video.dataset.posterDirect){
+                    video.poster = video.dataset.posterDirect;
+                }
+            };
+            posterImg.src = video.poster;
         }
         if(video.classList.contains("media-video")){
             video.addEventListener("play", ()=>{
@@ -1756,7 +1899,9 @@ function buildCard(item, isFav = false){
     const imgs = [...new Set(item.media.imgs || [])];
     const posterImg = imgs.length > 0 ? imgs[0] : "";
     const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
+    const posterDirect = posterImg ? cleanMediaUrl(posterImg) : "";
     let posterAttr = posterProxy ? `poster="${escapeAttr(posterProxy)}"` : "";
+    const posterDirectAttr = posterDirect ? `data-poster-direct="${escapeAttr(posterDirect)}"` : "";
     const videoDirect = cleanMediaUrl(item.videoUrl);
     const videoProxy = getForceMediaProxyUrl(item.videoUrl, isFav);
     const preferProxy = hostMatched(item.videoUrl);
@@ -1765,19 +1910,21 @@ function buildCard(item, isFav = false){
     const proxyVideoAttr = preferProxy ? 'data-proxy-video="1"' : "";
 
     mediaHtml = `<div class="video-single-wrap">
-        <video class="media-video" data-m3u8="1" ${proxyVideoAttr} preload="none" playsinline ${posterAttr} data-src="${escapeAttr(firstSrc)}" data-alt-src="${escapeAttr(altSrc)}">
+        <video class="media-video" data-m3u8="1" ${proxyVideoAttr} preload="none" playsinline ${posterAttr} ${posterDirectAttr} data-src="${escapeAttr(firstSrc)}" data-alt-src="${escapeAttr(altSrc)}">
 </video>${mediaControlsHtml()}</div>`;
 }else if(item.videoUrl){
     // MP4视频：单独class media-video-mp4，完全脱离HLS逻辑
     const imgs = [...new Set(item.media.imgs || [])];
     const posterImg = imgs.length > 0 ? imgs[0] : "";
     const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
+    const posterDirect = posterImg ? cleanMediaUrl(posterImg) : "";
     let posterAttr = posterProxy ? `poster="${escapeAttr(posterProxy)}"` : "";
+    const posterDirectAttr = posterDirect ? `data-poster-direct="${escapeAttr(posterDirect)}"` : "";
     const videoProxy = getProxyUrl(item.videoUrl, isFav);
     const proxyVideoAttr = hostMatched(item.videoUrl) ? 'data-proxy-video="1"' : "";
     
     mediaHtml = `<div class="video-single-wrap">
-        <video ${hostMatched(item.videoUrl) ? 'crossorigin="anonymous"' : ""} class="media-video-mp4" ${proxyVideoAttr} preload="none" playsinline ${posterAttr} src="${escapeAttr(videoProxy)}">
+        <video ${hostMatched(item.videoUrl) ? 'crossorigin="anonymous"' : ""} class="media-video-mp4" ${proxyVideoAttr} preload="none" playsinline ${posterAttr} ${posterDirectAttr} src="${escapeAttr(videoProxy)}">
 </video>${mediaControlsHtml()}</div>`;
 }else if(item.iframe){
     let iframeStr = sanitizeIframeHtml(item.iframe);
@@ -1801,8 +1948,9 @@ function buildCard(item, isFav = false){
                 overlay = `<div class="img-overlay-more">+${rest}张</div>`;
             }
             const imgProxy = getProxyUrl(src, isFav);
+            const imgDirect = cleanMediaUrl(src);
             mediaHtml += `<div class="grid-img-box">
-                <img class="grid-img" ${hostMatched(src) ? 'crossorigin="anonymous"' : ""} data-imggroup='${escapeAttr(JSON.stringify(imgs))}' src="${escapeAttr(imgProxy)}" loading="lazy">${overlay}
+                <img class="grid-img" ${hostMatched(src) ? 'crossorigin="anonymous"' : ""} data-imggroup='${escapeAttr(JSON.stringify(imgs))}' data-direct-src="${escapeAttr(imgDirect)}" src="${escapeAttr(imgProxy)}" loading="lazy" onerror="if(this.dataset.directSrc && this.src!==this.dataset.directSrc){this.src=this.dataset.directSrc;}">${overlay}
             </div>`;
         })
         mediaHtml += `</div></div>`;
@@ -2185,7 +2333,7 @@ function renderSearchResult(keyword){
     const kw = keyword.trim();
     const list = localCacheArticles.filter(item=>{
         const titleRaw = getPureText(item.title);
-        return titleRaw.includes(kw);
+        return titleRaw.includes(kw) && !hasBlockedKeyword(titleRaw);
     }).sort((a,b)=>new Date(b.date)-new Date(a.date));
 
     if(list.length===0){
@@ -2351,6 +2499,88 @@ document.getElementById("confirmAdd").onclick = function(){
     initLoadAllCache();
     showPage(pageManage, "管理订阅");
 }
+
+// 关键字屏蔽管理
+function saveBlockKeywords(){
+    localStorage.setItem(BLOCK_KEYWORD_KEY, JSON.stringify(blockKeywordList));
+}
+
+function renderKeywordList(){
+    const listEl = document.getElementById("keywordList");
+    if(!listEl) return;
+    if(blockKeywordList.length === 0){
+        listEl.innerHTML = `<div style="color:#999;font-size:13px;padding:8px 4px;">暂无屏蔽关键字</div>`;
+        return;
+    }
+    let html = "";
+    blockKeywordList.forEach((kw, idx)=>{
+        html += `<div class="keyword-tag">
+            <span class="kw-text">${escapeHtml(kw)}</span>
+            <button class="kw-edit" data-idx="${idx}" title="编辑">✎</button>
+            <button class="kw-del" data-idx="${idx}" title="删除">×</button>
+        </div>`;
+    });
+    listEl.innerHTML = html;
+}
+
+document.getElementById("addKeywordBtn").onclick = function(){
+    const input = document.getElementById("blockKeywordInput");
+    const kw = input.value.trim();
+    if(!kw){
+        showToast("请输入关键字");
+        return;
+    }
+    if(blockKeywordList.some(k => k.toLowerCase() === kw.toLowerCase())){
+        showToast("该关键字已存在");
+        return;
+    }
+    blockKeywordList.push(kw);
+    saveBlockKeywords();
+    input.value = "";
+    renderKeywordList();
+    showToast("屏蔽关键字添加成功");
+};
+
+document.getElementById("keywordList").addEventListener("click", function(e){
+    const t = e.target;
+    const idx = Number(t.dataset.idx);
+    if(!Number.isFinite(idx) || idx < 0) return;
+    
+    if(t.classList.contains("kw-del")){
+        const kw = blockKeywordList[idx];
+        blockKeywordList.splice(idx, 1);
+        saveBlockKeywords();
+        renderKeywordList();
+        showToast(`已删除屏蔽：${kw}`);
+    }
+    if(t.classList.contains("kw-edit")){
+        const oldKw = blockKeywordList[idx];
+        const newKw = prompt("修改屏蔽关键字：", oldKw);
+        if(newKw === null) return;
+        const trimmed = newKw.trim();
+        if(!trimmed){
+            showToast("关键字不能为空");
+            return;
+        }
+        if(blockKeywordList.some((k, i) => i !== idx && k.toLowerCase() === trimmed.toLowerCase())){
+            showToast("该关键字已存在");
+            return;
+        }
+        blockKeywordList[idx] = trimmed;
+        saveBlockKeywords();
+        renderKeywordList();
+        showToast("关键字修改成功");
+    }
+});
+
+// 在显示添加订阅页时渲染关键字列表
+const origShowPage = showPage;
+showPage = function(targetDom, titleText){
+    origShowPage(targetDom, titleText);
+    if(targetDom === pageAdd){
+        renderKeywordList();
+    }
+};
 
 window.onload = async function(){
     initVideoObserver();
