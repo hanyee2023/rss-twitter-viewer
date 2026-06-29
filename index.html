@@ -613,6 +613,9 @@ body{
     font-size:14px;
     box-shadow:0 6px 20px rgba(0,0,0,.18);
     cursor:pointer;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
 }
 </style>
 
@@ -743,16 +746,13 @@ const MEDIA_PROXY_ENDPOINT = "https://rss-twitter-viewer.pages.dev/media-proxy";
 
 // 这些域名的 RSS 或媒体资源默认走代理。需要新增国外或特殊域名时，加到这里即可。
 const FORCE_PROXY_HOSTS = [
-    "twitter.com",
     "x.com",
     "t.co",
     "twimg.com",
     "video.twimg.com",
     "pbs.twimg.com",
     "abs.twimg.com",
-    "xcancel.com",
-    "nitter.net",
-    "video.shturl."
+    "xcancel.com"
 ];
 
 function normalizeUrl(rawUrl) {
@@ -795,12 +795,54 @@ function getUrlHost(rawUrl) {
     }
 }
 
+function hostMatchesRule(host, rule) {
+    const key = String(rule || "").toLowerCase().trim();
+    if(!host || !key) return false;
+    return host === key || host.endsWith("." + key);
+}
+
+function decodeMaybeUrl(str) {
+    let value = String(str || "");
+    for(let i = 0; i < 2; i++){
+        try{
+            const decoded = decodeURIComponent(value);
+            if(decoded === value) break;
+            value = decoded;
+        }catch(e){
+            break;
+        }
+    }
+    return value;
+}
+
+function getEmbeddedHttpUrls(rawUrl) {
+    const list = [];
+    const addFromText = text => {
+        const decoded = decodeMaybeUrl(text);
+        const reg = /https?:\/\/[^<>"'\s&]+/gi;
+        let m;
+        while((m = reg.exec(decoded)) !== null){
+            const candidate = cleanMediaUrl(m[0]);
+            if(candidate && candidate !== normalizeUrl(rawUrl)) list.push(candidate);
+        }
+    };
+    try{
+        const u = new URL(normalizeUrl(rawUrl));
+        u.searchParams.forEach(value => addFromText(value));
+    }catch(e){}
+    addFromText(rawUrl);
+    return [...new Set(list)];
+}
+
 function hostMatched(rawUrl, hostList = FORCE_PROXY_HOSTS) {
-    const url = normalizeUrl(rawUrl).toLowerCase();
+    const url = normalizeUrl(rawUrl);
     const host = getUrlHost(url);
-    return hostList.some(rule => {
-        const key = String(rule).toLowerCase();
-        return host === key || host.endsWith("." + key) || url.includes(key);
+    if(hostList.some(rule => hostMatchesRule(host, rule))) return true;
+
+    // 只额外识别参数里明确嵌套的完整 http/https 链接，避免 123.com/456.com/789.mp4 这种路径误判。
+    return getEmbeddedHttpUrls(url).some(nestedUrl => {
+        const nestedHost = getUrlHost(nestedUrl);
+        return hostList.some(rule => hostMatchesRule(nestedHost, rule));
     });
 }
 
@@ -1187,6 +1229,42 @@ function pauseOtherVideos(currentVideo){
     });
 }
 
+function getVideoErrorMessage(video, fallback = "视频播放失败"){
+    const err = video && video.error;
+    if(!err) return fallback;
+    switch(err.code){
+        case 1:
+            return "视频播放已中断";
+        case 2:
+            return "视频网络加载失败，可能是链接过期、跨域或网络超时";
+        case 3:
+            return "视频解码失败，当前浏览器可能不支持该格式";
+        case 4:
+            return "视频地址不可播放，可能是链接失效或资源类型不支持";
+        default:
+            return fallback;
+    }
+}
+
+function getPlayErrorMessage(err, video, fallback = "视频播放失败"){
+    if(err && err.name === "NotAllowedError") return "请再点一次播放";
+    if(err && err.name === "AbortError") return "视频播放被中断，请重试";
+    return getVideoErrorMessage(video, fallback);
+}
+
+function getHlsErrorMessage(data, streamUrl){
+    const detail = String((data && data.details) || "");
+    const type = String((data && data.type) || "");
+    const usingProxy = String(streamUrl || "").includes("/media-proxy");
+    const sourceText = usingProxy ? "代理源" : "直连源";
+    if(/manifest/i.test(detail)) return `m3u8${sourceText}主文件加载失败`;
+    if(/frag|segment/i.test(detail)) return `m3u8${sourceText}分片加载失败`;
+    if(/key/i.test(detail)) return `m3u8${sourceText}密钥加载失败`;
+    if(/buffer|media/i.test(type + detail)) return "m3u8视频解码/缓冲失败";
+    if(/network/i.test(type + detail)) return `m3u8${sourceText}网络加载失败`;
+    return `m3u8${sourceText}加载失败`;
+}
+
 function toggleVideoPlay(video){
     if(video.classList.contains("media-video") && !video.dataset.hlsLoaded){
         startHlsVideo(video);
@@ -1196,7 +1274,7 @@ function toggleVideoPlay(video){
         pauseOtherVideos(video);
         video.play().catch(err => {
             console.warn("视频播放失败：", err);
-            showToast("视频播放失败");
+            showToast(getPlayErrorMessage(err, video, "视频播放失败"));
         });
     }else{
         video.pause();
@@ -1413,7 +1491,7 @@ function startHlsVideo(video){
                 video.addEventListener("loadeddata", retryPlay, {once:true});
                 setTimeout(()=>playNow(false), 450);
             }else{
-                showToast(err && err.name === "NotAllowedError" ? "请再点一次播放" : "视频播放失败");
+                showToast(getPlayErrorMessage(err, video, "m3u8播放失败"));
             }
         });
     };
@@ -1456,13 +1534,14 @@ function startHlsVideo(video){
                 console.warn("HLS致命错误：", data);
                 const nextIndex = sourceIndex + 1;
                 if(nextIndex < uniqueSources.length){
+                    showToast(`${getHlsErrorMessage(data, streamUrl)}，正在尝试备用源`);
                     video.dataset.hlsAttempt = String(nextIndex);
                     delete video.dataset.hlsLoaded;
                     try{ hls.destroy(); }catch(e){}
                     video.hlsInstance = null;
                     startHlsVideo(video);
                 }else{
-                    showToast("m3u8加载失败");
+                    showToast(getHlsErrorMessage(data, streamUrl));
                 }
             }
         });
@@ -1524,6 +1603,9 @@ function initHlsVideo(){
             };
             posterImg.src = video.poster;
         }
+        video.addEventListener("error", ()=>{
+            showToast(getVideoErrorMessage(video));
+        });
         if(video.classList.contains("media-video")){
             video.addEventListener("play", ()=>{
             if(!video.dataset.hlsLoaded) {
