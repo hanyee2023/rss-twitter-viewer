@@ -1252,7 +1252,7 @@ function getVideoErrorMessage(video, fallback = "视频播放失败"){
 
 function getPlayErrorMessage(err, video, fallback = "视频播放失败"){
     if(err && err.name === "NotAllowedError") return "请再点一次播放";
-    if(err && err.name === "AbortError") return "视频播放被中断，请重试";
+    if(err && err.name === "AbortError") return "";
     return getVideoErrorMessage(video, fallback);
 }
 
@@ -1501,14 +1501,13 @@ function startHlsVideo(video){
                 video.addEventListener("loadeddata", retryPlay, {once:true});
                 setTimeout(()=>playNow(false), 450);
             }else{
-                showToast(getPlayErrorMessage(err, video, "m3u8播放失败"));
+                const msg = getPlayErrorMessage(err, video, "m3u8播放失败");
+                if(msg) showToast(msg);
             }
         });
     };
     const bindPendingPlayRetry = () => {
-        ["loadedmetadata","loadeddata","canplay","canplaythrough"].forEach(evt=>{
-            video.addEventListener(evt, ()=>playNow(false), {once:true});
-        });
+        video.addEventListener("canplay", ()=>playNow(false), {once:true});
     };
 
     if (video.dataset.hlsLoaded) {
@@ -1533,12 +1532,11 @@ function startHlsVideo(video){
         });
         video.hlsInstance = hls;
         bindPendingPlayRetry();
+        hls.loadSource(streamUrl);
         hls.attachMedia(video);
         playNow(false);
         hls.on(Hls.Events.MEDIA_ATTACHED, () => {
-            hls.loadSource(streamUrl);
             video.dataset.hlsLoaded = "1";
-            playNow();
         });
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
             hls.startLoad();
