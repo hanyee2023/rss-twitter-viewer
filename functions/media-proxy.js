@@ -8,7 +8,7 @@ const ALLOW_PROXY_HOSTS = [
   "abs.twimg.com",
   "xcancel.com",
   "nitter.net",
-  "media.redgifs.com",
+  "video.shturl",
   "video.3go.fun"
 ];
 
@@ -67,7 +67,7 @@ function rewriteM3u8Text(text, baseUrl, requestUrl) {
     .map(line => {
       const trimmed = line.trim();
       if (!trimmed) return line;
-      if (trimmed.startsWith("#EXT-X-KEY") || trimmed.startsWith("#EXT-X-MAP")) {
+      if (trimmed.startsWith("#") && /URI="/i.test(trimmed)) {
         return rewriteUriAttributes(line, baseUrl, requestUrl);
       }
       if (trimmed.startsWith("#")) return line;
