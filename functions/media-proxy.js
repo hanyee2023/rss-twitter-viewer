@@ -8,7 +8,7 @@ const ALLOW_PROXY_HOSTS = [
   "abs.twimg.com",
   "xcancel.com",
   "nitter.net",
-  "video.shturl",
+  "media.redgifs.com",
   "video.3go.fun"
 ];
 
