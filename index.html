@@ -1474,7 +1474,7 @@ function bindCustomMediaControls(video){
 }
 
 function startHlsVideo(video){
-    const sources = [video.dataset.src, video.dataset.altSrc].filter(Boolean);
+    const sources = [fullDecodeXml(video.dataset.src), fullDecodeXml(video.dataset.altSrc)].filter(Boolean);
     const uniqueSources = [...new Set(sources)];
     let sourceIndex = Number(video.dataset.hlsAttempt || 0);
     const streamUrl = uniqueSources[sourceIndex] || uniqueSources[0];
@@ -1506,11 +1506,7 @@ function startHlsVideo(video){
         return;
     }
 
-    if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        video.src = streamUrl;
-        video.dataset.hlsLoaded = "1";
-        playNow();
-    } else if (window.Hls && Hls.isSupported()) {
+    if (window.Hls && Hls.isSupported()) {
         if(video.hlsInstance){
             try{ video.hlsInstance.destroy(); }catch(e){}
             video.hlsInstance = null;
@@ -1549,6 +1545,16 @@ function startHlsVideo(video){
                 }
             }
         });
+    } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        video.src = streamUrl;
+        const markNativeLoaded = ()=>{
+            video.dataset.hlsLoaded = "1";
+            video.removeEventListener("loadedmetadata", markNativeLoaded);
+            video.removeEventListener("canplay", markNativeLoaded);
+        };
+        video.addEventListener("loadedmetadata", markNativeLoaded, {once:true});
+        video.addEventListener("canplay", markNativeLoaded, {once:true});
+        playNow();
     } else {
         showToast("当前浏览器不支持m3u8播放");
     }
