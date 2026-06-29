@@ -1531,9 +1531,7 @@ function startHlsVideo(video){
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
             hls.startLoad();
             video.dataset.hlsLoaded = "1";
-            if(manualSecondClick){
-                showToast("视频已加载，再点一次播放");
-            }else{
+            if(!manualSecondClick){
                 playNow();
             }
         });
@@ -1564,7 +1562,6 @@ function startHlsVideo(video){
         video.addEventListener("canplay", markNativeLoaded, {once:true});
         if(manualSecondClick){
             video.load();
-            showToast("视频已加载，再点一次播放");
         }else{
             playNow();
         }
