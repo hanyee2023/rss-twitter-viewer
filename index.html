@@ -1281,6 +1281,7 @@ function toggleVideoPlay(video){
             showToast(getPlayErrorMessage(err, video, "视频播放失败"));
         });
     }else{
+        delete video.dataset.pendingPlay;
         video.pause();
         if(video.hlsInstance) video.hlsInstance.stopLoad();
     }
@@ -1481,8 +1482,13 @@ function startHlsVideo(video){
     if(!streamUrl) return;
 
     pauseOtherVideos(video);
+    video.dataset.pendingPlay = "1";
+    video.addEventListener("playing", ()=>{
+        delete video.dataset.pendingPlay;
+    }, {once:true});
 
     const playNow = (retry = true) => {
+        if(!video.dataset.pendingPlay && video.paused) return;
         video.play().catch(err => {
             console.warn("m3u8播放失败：", err);
             if(retry && err && err.name !== "NotAllowedError"){
@@ -1499,9 +1505,15 @@ function startHlsVideo(video){
             }
         });
     };
+    const bindPendingPlayRetry = () => {
+        ["loadedmetadata","loadeddata","canplay","canplaythrough"].forEach(evt=>{
+            video.addEventListener(evt, ()=>playNow(false), {once:true});
+        });
+    };
 
     if (video.dataset.hlsLoaded) {
         if(video.hlsInstance) video.hlsInstance.startLoad();
+        bindPendingPlayRetry();
         playNow();
         return;
     }
@@ -1520,7 +1532,9 @@ function startHlsVideo(video){
             autoStartLoad: true
         });
         video.hlsInstance = hls;
+        bindPendingPlayRetry();
         hls.attachMedia(video);
+        playNow(false);
         hls.on(Hls.Events.MEDIA_ATTACHED, () => {
             hls.loadSource(streamUrl);
             video.dataset.hlsLoaded = "1";
@@ -1556,6 +1570,7 @@ function startHlsVideo(video){
         };
         video.addEventListener("loadedmetadata", markNativeLoaded, {once:true});
         video.addEventListener("canplay", markNativeLoaded, {once:true});
+        bindPendingPlayRetry();
         playNow();
     } else {
         showToast("当前浏览器不支持m3u8播放");
