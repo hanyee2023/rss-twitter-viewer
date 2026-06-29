@@ -8,8 +8,7 @@ const ALLOW_PROXY_HOSTS = [
   "abs.twimg.com",
   "xcancel.com",
   "nitter.net",
-  "video.shturl",
-  "video.3go.fun"
+  "media.redgifs.com"
 ];
 
 function normalizeHost(host) {
