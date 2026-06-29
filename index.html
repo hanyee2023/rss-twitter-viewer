@@ -1278,7 +1278,8 @@ function toggleVideoPlay(video){
         pauseOtherVideos(video);
         video.play().catch(err => {
             console.warn("视频播放失败：", err);
-            showToast(getPlayErrorMessage(err, video, "视频播放失败"));
+            const msg = getPlayErrorMessage(err, video, "视频播放失败");
+            if(msg) showToast(msg);
         });
     }else{
         delete video.dataset.pendingPlay;
@@ -1482,13 +1483,9 @@ function startHlsVideo(video){
     if(!streamUrl) return;
 
     pauseOtherVideos(video);
-    video.dataset.pendingPlay = "1";
-    video.addEventListener("playing", ()=>{
-        delete video.dataset.pendingPlay;
-    }, {once:true});
+    const manualSecondClick = video.dataset.proxyVideo === "1";
 
     const playNow = (retry = true) => {
-        if(!video.dataset.pendingPlay && video.paused) return;
         video.play().catch(err => {
             console.warn("m3u8播放失败：", err);
             if(retry && err && err.name !== "NotAllowedError"){
@@ -1506,13 +1503,9 @@ function startHlsVideo(video){
             }
         });
     };
-    const bindPendingPlayRetry = () => {
-        video.addEventListener("canplay", ()=>playNow(false), {once:true});
-    };
 
     if (video.dataset.hlsLoaded) {
         if(video.hlsInstance) video.hlsInstance.startLoad();
-        bindPendingPlayRetry();
         playNow();
         return;
     }
@@ -1531,17 +1524,18 @@ function startHlsVideo(video){
             autoStartLoad: true
         });
         video.hlsInstance = hls;
-        bindPendingPlayRetry();
-        hls.loadSource(streamUrl);
         hls.attachMedia(video);
-        playNow(false);
         hls.on(Hls.Events.MEDIA_ATTACHED, () => {
-            video.dataset.hlsLoaded = "1";
+            hls.loadSource(streamUrl);
         });
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
             hls.startLoad();
             video.dataset.hlsLoaded = "1";
-            playNow();
+            if(manualSecondClick){
+                showToast("视频已加载，再点一次播放");
+            }else{
+                playNow();
+            }
         });
         hls.on(Hls.Events.ERROR, (event, data) => {
             if(data && data.fatal){
@@ -1568,8 +1562,12 @@ function startHlsVideo(video){
         };
         video.addEventListener("loadedmetadata", markNativeLoaded, {once:true});
         video.addEventListener("canplay", markNativeLoaded, {once:true});
-        bindPendingPlayRetry();
-        playNow();
+        if(manualSecondClick){
+            video.load();
+            showToast("视频已加载，再点一次播放");
+        }else{
+            playNow();
+        }
     } else {
         showToast("当前浏览器不支持m3u8播放");
     }
