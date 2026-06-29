@@ -1517,12 +1517,14 @@ function startHlsVideo(video){
             maxBufferLength: 30,
             capLevelToPlayerSize: true,
             storage: null,
-            autoStartLoad: false
+            autoStartLoad: true
         });
         video.hlsInstance = hls;
         hls.attachMedia(video);
         hls.on(Hls.Events.MEDIA_ATTACHED, () => {
             hls.loadSource(streamUrl);
+            video.dataset.hlsLoaded = "1";
+            playNow();
         });
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
             hls.startLoad();
