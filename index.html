@@ -201,20 +201,12 @@ body{
 }
 .feed-title-text{
     font-size:15px;
-    font-weight:600;
-    font-family:"SimHei","黑体","PingFang SC","Microsoft YaHei",sans-serif;
+    font-weight:700;
+    font-family:"SimSun","宋体","Songti SC","Noto Serif CJK SC",serif;
     color:#111;
     word-break:break-all;
     line-height:1.4;
-    margin-bottom:4px;
 }
-.feed-cat-line{
-    height:3px;
-    border-radius:2px;
-    width:100%;
-}
-.feed-cat-line.line-img{background:#34c759;}
-.feed-cat-line.line-video{background:#007AFF;}
 
 .feed-btn-group{
     display:flex;
@@ -223,33 +215,19 @@ body{
 }
 .feed-btn-group button{
     border:none;
-    background:#e8e8e8;
-    color:#555;
-    width:32px;
-    height:32px;
+    padding:6px 12px;
     border-radius:6px;
-    font-size:16px;
-    cursor:pointer;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    padding:0;
-}
-.feed-btn-group button:hover{background:#d0d0d0;color:#222;}
-.feed-btn-group .view-feed{background:#e8f4fd;color:#1d9bf0;}
-.feed-btn-group .view-feed:hover{background:#d0e9fc;}
-.feed-btn-group .del{background:#fde8e8;color:#c0392b;}
-.feed-btn-group .del:hover{background:#fcd0d0;}
-.feed-btn-group button{
-    border:none;
-    padding:4px 8px;
-    border-radius:999px;
-    font-size:12px;
+    font-size:13px;
     color:#fff;
+    cursor:pointer;
+    white-space:nowrap;
 }
 .feed-btn-group .view-feed{background:#1d9bf0;}
+.feed-btn-group .view-feed:hover{background:#0d8bf0;}
 .feed-btn-group .edit{background:#ff9500;}
+.feed-btn-group .edit:hover{background:#e68600;}
 .feed-btn-group .del{background:#e53e3e;}
+.feed-btn-group .del:hover{background:#c0392b;}
 
 .add-feed-row{display:flex;flex-wrap:wrap;gap:10px;margin:15px 12px;}
 .add-feed-row input,.add-feed-row select{
@@ -260,10 +238,8 @@ body{
     border-radius:8px;
     font-size:15px;
 }
-#confirmAdd{background:#1d9bf0;color:#fff;border:none;padding:0 16px;border-radius:8px;font-size:15px;min-width:100px;}
-.add-feed-row-third select{flex:1;}
-.add-feed-row-third #confirmAdd{flex:0 0 auto;flex-shrink:0;}
-.add-feed-form{padding-bottom:10px;}
+#confirmAdd{background:#1d9bf0;color:#fff;border:none;padding:11px 16px;border-radius:8px;font-size:15px;min-width:70px;flex-shrink:0;}
+.add-feed-form{margin:0 12px;padding-bottom:10px;}
 .keyword-block-section{
     border-top:2px solid #000;
     margin:20px 12px 0;
@@ -678,18 +654,15 @@ body{
     </div>
     <div class="page-add" id="pageAdd">
         <div class="add-feed-form">
+            <div class="keyword-block-title">添加新订阅</div>
             <div class="add-feed-row">
                 <input id="feedUrl" placeholder="粘贴标准RSS订阅链接">
             </div>
             <div class="add-feed-row">
                 <input id="feedName" placeholder="自定义订阅名称（可选）">
             </div>
-            <div class="add-feed-row add-feed-row-third">
-                <select id="feedCat">
-                    <option value="img">图片类RSS</option>
-                    <option value="video">视频类RSS</option>
-                </select>
-                <button id="confirmAdd">确认添加</button>
+            <div class="add-feed-row" style="justify-content:flex-end;">
+                <button id="confirmAdd">添加</button>
             </div>
         </div>
         <div class="keyword-block-section">
@@ -751,10 +724,6 @@ body{
         <h3>编辑订阅源</h3>
         <input id="editIndex" type="hidden">
         <input id="editName" placeholder="自定义订阅名称">
-        <select id="editCat">
-            <option value="img">图片类RSS</option>
-            <option value="video">视频类RSS</option>
-        </select>
         <input id="editUrl" placeholder="RSS订阅链接">
         <div class="modal-btn-bar">
             <button id="cancelEdit">取消</button>
@@ -790,7 +759,7 @@ const FORCE_PROXY_HOSTS = [
     "abs.twimg.com",
     "xcancel.com",
     "nitter.net",
-    "media.redgifs.com"
+    "video.shturl."
 ];
 
 function normalizeUrl(rawUrl) {
@@ -1243,7 +1212,9 @@ function getAvatarStyle(key){
         "linear-gradient(135deg,#f093fb,#f5576c)",
         "linear-gradient(135deg,#4facfe,#00f2fe)",
         "linear-gradient(135deg,#fa709a,#fee140)",
-        "linear-gradient(135deg,#30cfd0,#330867)"
+        "linear-gradient(135deg,#30cfd0,#330867)",
+        "linear-gradient(135deg,#a8edea,#fed6e3)",
+        "linear-gradient(135deg,#ff9a9e,#fecfef)"
     ];
     return gradients[hashText(key) % gradients.length];
 }
@@ -2548,12 +2519,10 @@ document.getElementById("delAllFeed").onclick = function(){
 document.getElementById("saveEdit").onclick = function(){
     const idx = Number(document.getElementById("editIndex").value);
     const name = document.getElementById("editName").value.trim();
-    const cat = document.getElementById("editCat").value;
     const url = document.getElementById("editUrl").value.trim();
     const oldUrl = feedList[idx].url;
     if(feedList.some((f,i)=>i!==idx && f.url === url)){alert("该RSS链接已存在");return;}
     feedList[idx].name = name;
-    feedList[idx].category = cat;
     feedList[idx].url = url;
     localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
     lastRefreshTime = 0;
@@ -2574,7 +2543,6 @@ function renderManage(){
     const reverseFeed = [...feedList].reverse();
     reverseFeed.forEach((f, idx)=>{
         const realIndex = idx + 1;
-        const lineClass = f.category === "video" ? "line-video" : "line-img";
         const avatarKey = f.url || f.name || "?";
         const avatarIndex = hashText(avatarKey);
         const avatarSvg = avatarIconSvg(avatarIndex);
@@ -2586,13 +2554,12 @@ function renderManage(){
                 <div class="card-avatar" style="background:${avatarStyle};width:28px;height:28px;flex-shrink:0;">${avatarSvg}</div>
                 <div class="feed-name-block">
                     <div class="feed-title-text">${escapeHtml(f.name||"未命名订阅")}</div>
-                    <div class="feed-cat-line ${lineClass}"></div>
                 </div>
             </div>
             <div class="feed-btn-group">
-                <button class="view-feed" data-source="${f.url}" title="查看">👁</button>
-                <button class="edit" data-idx="${feedList.indexOf(f)}" title="编辑">✎</button>
-                <button class="del" data-idx="${feedList.indexOf(f)}" title="删除">🗑</button>
+                <button class="view-feed" data-source="${f.url}">查看</button>
+                <button class="edit" data-idx="${feedList.indexOf(f)}">编辑</button>
+                <button class="del" data-idx="${feedList.indexOf(f)}">删除</button>
             </div>
         </div>`;
     })
@@ -2616,16 +2583,21 @@ function renderManage(){
             const f = feedList[idx];
             document.getElementById("editIndex").value = idx;
             document.getElementById("editName").value = f.name||"";
-            document.getElementById("editCat").value = f.category||"img";
             document.getElementById("editUrl").value = f.url;
             editModal.style.display = "flex";
         }
     }
 }
 
+function getFeedCategoryByContent(sourceUrl){
+    const items = localCacheArticles.filter(item => String(item.sourceUrl || "").trim() === String(sourceUrl || "").trim());
+    if(items.length === 0) return "img";
+    const hasVideo = items.some(item => item.isM3u8Video || item.videoUrl);
+    return hasVideo ? "video" : "img";
+}
+
 document.getElementById("confirmAdd").onclick = function(){
     const feedName = document.getElementById("feedName").value.trim();
-    const feedCat = document.getElementById("feedCat").value;
     const feedUrl = document.getElementById("feedUrl").value.trim();
 
     if (!feedUrl) {
@@ -2639,7 +2611,7 @@ document.getElementById("confirmAdd").onclick = function(){
 
     feedList.push({
         name: feedName || "未命名订阅",
-        category: feedCat,
+        category: getFeedCategoryByContent(feedUrl),
         url: feedUrl
     });
     localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
