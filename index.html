@@ -174,7 +174,7 @@ body{
     padding:12px 10px;
     border-bottom:1px solid #ddd;
     display:flex;
-    align-items:center;
+    align-items:flex-start;
     justify-content:space-between;
     gap:10px;
 }
@@ -182,8 +182,10 @@ body{
 
 .feed-left-area{
     display:flex;
-    align-items:center;
+    align-items:flex-start;
     gap:8px;
+    flex:1;
+    min-width:0;
 }
 .feed-index{
     width:24px;
@@ -191,20 +193,53 @@ body{
     font-size:14px;
     color:#666;
     flex-shrink:0;
+    line-height:24px;
 }
-.feed-name-btn{
-    padding:4px 10px;
-    border-radius:6px;
-    font-size:14px;
-    white-space:nowrap;
+.feed-name-block{
+    flex:1;
+    min-width:0;
 }
-.btn-img{background:#34c759;color:#fff;}
-.btn-video{background:#ff7597;color:#fff;}
+.feed-title-text{
+    font-size:15px;
+    font-weight:600;
+    font-family:"SimHei","黑体","PingFang SC","Microsoft YaHei",sans-serif;
+    color:#111;
+    word-break:break-all;
+    line-height:1.4;
+    margin-bottom:4px;
+}
+.feed-cat-line{
+    height:3px;
+    border-radius:2px;
+    width:100%;
+}
+.feed-cat-line.line-img{background:#34c759;}
+.feed-cat-line.line-video{background:#007AFF;}
 
 .feed-btn-group{
     display:flex;
     gap:4px;
+    flex-shrink:0;
 }
+.feed-btn-group button{
+    border:none;
+    background:#e8e8e8;
+    color:#555;
+    width:32px;
+    height:32px;
+    border-radius:6px;
+    font-size:16px;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:0;
+}
+.feed-btn-group button:hover{background:#d0d0d0;color:#222;}
+.feed-btn-group .view-feed{background:#e8f4fd;color:#1d9bf0;}
+.feed-btn-group .view-feed:hover{background:#d0e9fc;}
+.feed-btn-group .del{background:#fde8e8;color:#c0392b;}
+.feed-btn-group .del:hover{background:#fcd0d0;}
 .feed-btn-group button{
     border:none;
     padding:4px 8px;
@@ -624,7 +659,7 @@ body{
 <header id="mainHeader">
 <div class="title-wrap">
   <h1 id="pageTitle">RSS媒体阅读器</h1>
-  <span class="beta-tag">Beta4.0</span>
+  <span class="beta-tag">Beta4.2</span>
 </div>
 </header>
 
@@ -1183,14 +1218,18 @@ function hashText(str){
 
 function avatarIconSvg(index){
     const icons = [
-        `<svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10"></path><path d="M12 2v10l7 4"></path></svg>`,
-        `<svg viewBox="0 0 24 24"><path d="M4 19V5"></path><path d="M4 19h16"></path><path d="m7 15 4-4 3 3 5-7"></path></svg>`,
-        `<svg viewBox="0 0 24 24"><path d="m13 2-2 8h7l-7 12 2-8H6z"></path></svg>`,
-        `<svg viewBox="0 0 24 24"><path d="M3 12c3-5 6-5 9 0s6 5 9 0"></path><path d="M3 18c3-5 6-5 9 0s6 5 9 0"></path></svg>`,
-        `<svg viewBox="0 0 24 24"><path d="M12 3v18"></path><path d="M3 12h18"></path><path d="m5 5 14 14"></path><path d="m19 5-14 14"></path></svg>`,
-        `<svg viewBox="0 0 24 24"><path d="M15 10 20 7v10l-5-3z"></path><rect x="4" y="6" width="11" height="12" rx="2"></rect></svg>`,
-        `<svg viewBox="0 0 24 24"><path d="M12 2 9 9l-7 1 5 5-1 7 6-3 6 3-1-7 5-5-7-1z"></path></svg>`,
-        `<svg viewBox="0 0 24 24"><path d="M4 17 10 5l4 8 2-4 4 8z"></path><path d="M4 17h16"></path></svg>`
+        /* 苹果 */ `<svg viewBox="0 0 24 24"><path d="M12 5c-1-3-3-4-5-3-2 1-3 4-1 7 2 3 6 4 8 9 1-3 0-6-2-8-2-2-1-4 0-5z"/><path d="M12 5c1-3 3-4 5-3 2 1 3 4 1 7-2 3-6 4-8 9-1-3 0-6 2-8 2-2 1-4 0-5z"/></svg>`,
+        /* 胡萝卜 */ `<svg viewBox="0 0 24 24"><path d="M12 2c-2 3-3 7-1 11l2 4c1 2 1 3 1 5h-4c0-2 0-3 1-5l2-4c1-2 1-4 0-6"/><path d="M8 12 6 10C4 8 5 5 8 5l2 1"/><path d="M16 12l2-2c2-2 1-5-2-5l-2 1"/></svg>`,
+        /* 樱桃 */ `<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><circle cx="17" cy="8" r="4"/><path d="M12 8L12 2"/><path d="M9 4l3-2 3 2"/></svg>`,
+        /* 小鱼 */ `<svg viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="10" ry="7"/><path d="M22 12l3-3v6z"/><circle cx="8" cy="11" r="1.5"/></svg>`,
+        /* 蝴蝶 */ `<svg viewBox="0 0 24 24"><path d="M12 3v8"/><path d="M12 11c-5-2-8-8-4-10 2-1 4 0 4 2"/><path d="M12 11c5-2 8-8 4-10-2-1-4 0-4 2"/><path d="M12 11c-5 2-8 8-4 10 2 1 4 0 4-2"/><path d="M12 11c5 2 8 8 4 10-2 1-4 0-4-2"/></svg>`,
+        /* 蘑菇 */ `<svg viewBox="0 0 24 24"><path d="M12 4c-4 0-7 3-7 7 0 1 1 1 1 1h12c0 0 1 0 1-1 0-4-3-7-7-7z"/><rect x="7" y="12" width="10" height="4" rx="1"/><rect x="9" y="16" width="6" height="3" rx="1"/></svg>`,
+        /* 兔子 */ `<svg viewBox="0 0 24 24"><ellipse cx="10" cy="15" rx="8" ry="6"/><circle cx="12" cy="8" r="4"/><ellipse cx="8" cy="4" rx="2" ry="5"/><ellipse cx="16" cy="4" rx="2" ry="5"/><circle cx="10" cy="11" r="1"/><circle cx="14" cy="11" r="1"/><path d="M11 14h2"/></svg>`,
+        /* 猫咪 */ `<svg viewBox="0 0 24 24"><path d="M12 4c-3 0-5 2-5 5v4c0 3 2 5 5 5s5-2 5-5V9c0-3-2-5-5-5z"/><path d="M8 5 6 1l3 2"/><path d="M16 5l2-4-3 2"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><path d="M10 15q2 2 4 0"/></svg>`,
+        /* 蜜蜂 */ `<svg viewBox="0 0 24 24"><ellipse cx="12" cy="13" rx="5" ry="6"/><path d="M8 7 4 4l2 4"/><path d="M16 7l4-3-2 4"/><path d="M7 13h10"/><path d="M8 10h8"/><path d="M8 16h8"/></svg>`,
+        /* 茄子 */ `<svg viewBox="0 0 24 24"><path d="M12 2c-2 0-3 2-3 4v2c-2 3-3 7-3 11 0 2 3 3 6 3s6-1 6-3c0-4-1-8-3-11V6c0-2-1-4-3-4z"/><path d="M9 6h6"/></svg>`,
+        /* 花朵 */ `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="4" r="2"/><circle cx="12" cy="20" r="2"/><circle cx="4" cy="12" r="2"/><circle cx="20" cy="12" r="2"/><path d="M12 6v-2"/><path d="M12 20v-2"/><path d="M6 12H4"/><path d="M20 12h-2"/></svg>`,
+        /* 小鸟 */ `<svg viewBox="0 0 24 24"><path d="M16 7h4l-2 4 2 4h-4"/><path d="M12 15c3 0 6-3 6-6s-3-6-6-6C6 3 3 6 3 9s3 6 6 6z"/><circle cx="8" cy="10" r="1"/><path d="M12 15v4"/><path d="M9 19h6"/></svg>`
     ];
     return icons[index % icons.length];
 }
@@ -1271,10 +1310,12 @@ function getHlsErrorMessage(data, streamUrl){
 
 function toggleVideoPlay(video){
     if(video.classList.contains("media-video") && !video.dataset.hlsLoaded){
+        video.dataset.userAttempted = "1";
         startHlsVideo(video);
         return;
     }
     if(video.paused){
+        video.dataset.userAttempted = "1";
         pauseOtherVideos(video);
         video.play().catch(err => {
             console.warn("视频播放失败：", err);
@@ -1624,7 +1665,9 @@ function initHlsVideo(){
             posterImg.src = video.poster;
         }
         video.addEventListener("error", ()=>{
-            showToast(getVideoErrorMessage(video));
+            if(video.dataset.userAttempted){
+                showToast(getVideoErrorMessage(video));
+            }
         });
         if(video.classList.contains("media-video")){
             video.addEventListener("play", ()=>{
@@ -2531,17 +2574,25 @@ function renderManage(){
     const reverseFeed = [...feedList].reverse();
     reverseFeed.forEach((f, idx)=>{
         const realIndex = idx + 1;
-        const btnClass = f.category === "video" ? "btn-video" : "btn-img";
+        const lineClass = f.category === "video" ? "line-video" : "line-img";
+        const avatarKey = f.url || f.name || "?";
+        const avatarIndex = hashText(avatarKey);
+        const avatarSvg = avatarIconSvg(avatarIndex);
+        const avatarStyle = escapeAttr(getAvatarStyle(avatarKey));
         html += `
         <div class="feed-item" data-idx="${feedList.indexOf(f)}" data-source-url="${f.url}">
             <div class="feed-left-area">
                 <div class="feed-index">${realIndex}</div>
-                <div class="feed-name-btn ${btnClass}">${escapeHtml(f.name||"未命名订阅")}</div>
+                <div class="card-avatar" style="background:${avatarStyle};width:28px;height:28px;flex-shrink:0;">${avatarSvg}</div>
+                <div class="feed-name-block">
+                    <div class="feed-title-text">${escapeHtml(f.name||"未命名订阅")}</div>
+                    <div class="feed-cat-line ${lineClass}"></div>
+                </div>
             </div>
             <div class="feed-btn-group">
-                <button class="view-feed" data-source="${f.url}">查看</button>
-                <button class="edit" data-idx="${feedList.indexOf(f)}">编辑</button>
-                <button class="del" data-idx="${feedList.indexOf(f)}">删除</button>
+                <button class="view-feed" data-source="${f.url}" title="查看">👁</button>
+                <button class="edit" data-idx="${feedList.indexOf(f)}" title="编辑">✎</button>
+                <button class="del" data-idx="${feedList.indexOf(f)}" title="删除">🗑</button>
             </div>
         </div>`;
     })
