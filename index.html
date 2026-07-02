@@ -215,19 +215,18 @@ body{
 }
 .feed-btn-group button{
     border:none;
-    padding:6px 12px;
+    padding:6px;
     border-radius:6px;
     font-size:13px;
-    color:#fff;
+    color:#333;
+    background:transparent;
     cursor:pointer;
-    white-space:nowrap;
+    display:flex;
+    align-items:center;
+    justify-content:center;
 }
-.feed-btn-group .view-feed{background:#1d9bf0;}
-.feed-btn-group .view-feed:hover{background:#0d8bf0;}
-.feed-btn-group .edit{background:#ff9500;}
-.feed-btn-group .edit:hover{background:#e68600;}
-.feed-btn-group .del{background:#e53e3e;}
-.feed-btn-group .del:hover{background:#c0392b;}
+.feed-btn-group button svg{width:18px;height:18px;stroke:currentColor;}
+.feed-btn-group button:hover{color:#000;background:#f0f0f0;}
 
 .add-feed-row{display:flex;flex-wrap:wrap;gap:10px;margin:15px 12px;}
 .add-feed-row input,.add-feed-row select{
@@ -506,6 +505,19 @@ body{
 .modal-box{width:100%;max-width:480px;background:#fff;padding:16px;border-radius:12px;}
 .modal-box input,.modal-box select{width:100%;margin-bottom:10px;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:15px;}
 .modal-btn-bar{display:flex;gap:10px;justify-content:flex-end;margin-top:12px;}
+#clearModal .modal-btn-bar button{
+    border:none;
+    padding:8px 18px;
+    border-radius:8px;
+    font-size:14px;
+    cursor:pointer;
+    background:#1d9bf0;
+    color:#fff;
+}
+#clearModal .modal-btn-bar button:hover{background:#0d8bf0;}
+.clear-options{display:flex;flex-direction:column;gap:10px;margin:12px 0;}
+.clear-options label{display:flex;align-items:center;gap:8px;font-size:14px;color:#333;cursor:pointer;}
+.clear-options input[type="checkbox"]{width:18px;height:18px;cursor:pointer;}
 #cancelEdit{
     border:none;
     padding:8px 18px;
@@ -607,6 +619,17 @@ body{
     align-items:center;
     margin-top:8px;
 }
+.del-fav{
+    border:none;
+    background:transparent;
+    padding:4px;
+    cursor:pointer;
+    color:#ff9500;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+}
+.del-fav svg{width:20px;height:20px;stroke:currentColor;}
 .update-float-bar{
     position:fixed;
     top:56px;
@@ -659,9 +682,7 @@ body{
                 <input id="feedUrl" placeholder="粘贴标准RSS订阅链接">
             </div>
             <div class="add-feed-row">
-                <input id="feedName" placeholder="自定义订阅名称（可选）">
-            </div>
-            <div class="add-feed-row" style="justify-content:flex-end;">
+                <input id="feedName" placeholder="自定义订阅名称（可选）" style="flex:1;">
                 <button id="confirmAdd">添加</button>
             </div>
         </div>
@@ -728,6 +749,22 @@ body{
         <div class="modal-btn-bar">
             <button id="cancelEdit">取消</button>
             <button id="saveEdit">保存修改</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal-mask" id="clearModal">
+    <div class="modal-box">
+        <h3>一键清空</h3>
+        <div class="clear-options">
+            <label><input type="checkbox" id="clearFeeds" checked> 清除所有订阅源</label>
+            <label><input type="checkbox" id="clearArticles" checked> 清除主页所有内容</label>
+            <label><input type="checkbox" id="clearFav" checked> 清除收藏所有内容</label>
+            <label><input type="checkbox" id="clearKeywords" checked> 清除关键字屏蔽记录</label>
+        </div>
+        <div class="modal-btn-bar">
+            <button id="cancelClear">取消</button>
+            <button id="confirmClear">确认清除</button>
         </div>
     </div>
 </div>
@@ -1140,6 +1177,18 @@ function shareIconSvg(){
 
 function favIconSvg(filled = false){
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="${filled ? "currentColor" : "none"}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>`;
+}
+
+function viewIconSvg(){
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
+}
+
+function editIconSvg(){
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"></path></svg>`;
+}
+
+function trashIconSvg(){
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>`;
 }
 
 function playIconSvg(){
@@ -1802,7 +1851,10 @@ async function checkAndPromptUpdate(isManual = false){
         return;
     }
     const now = Date.now();
-    const minInterval = isManual ? MANUAL_REFRESH_INTERVAL : AUTO_REFRESH_INTERVAL;
+    const hour = new Date().getHours();
+    const isEvening = hour >= 21 || hour < 6;
+    const baseInterval = isManual ? MANUAL_REFRESH_INTERVAL : AUTO_REFRESH_INTERVAL;
+    const minInterval = isEvening && !isManual ? baseInterval * 6 : baseInterval;
     if(lastRefreshTime && now - lastRefreshTime < minInterval){
         if(isManual) showUpdateFloat("刚刚检查过，稍后再试");
         return;
@@ -2101,7 +2153,7 @@ function buildCard(item, isFav = false){
             ${mediaHtml}
             <div class="fav-card-bottom">
                 <div class="card-bottom-left">${dateText}</div>
-                <button class="del-fav" data-link="${itemLinkAttr}" style="border:none;background:transparent;font-size:13px;color:#666;">取消收藏</button>
+                <button class="del-fav" data-link="${itemLinkAttr}" title="取消收藏">${favIconSvg(true)}</button>
             </div>
         </div>`;
     }else{
@@ -2238,7 +2290,8 @@ function bindAllCardEvent(){
             e.stopPropagation();
             const link = this.dataset.link;
             const target = allArticles.find(i=>i.link === link);
-            if(target && !favList.some(f=>f.link === link)){
+            if(!target) return;
+            if(!favList.some(f=>f.link === link)){
                 favList.push(target);
                 localStorage.setItem(FAV_KEY, JSON.stringify(favList));
                 this.innerHTML = favIconSvg(true);
@@ -2246,6 +2299,14 @@ function bindAllCardEvent(){
                 this.setAttribute("title", "已收藏");
                 this.classList.add("collected");
                 showToast("已添加到收藏");
+            }else{
+                favList = favList.filter(f=>f.link !== link);
+                localStorage.setItem(FAV_KEY, JSON.stringify(favList));
+                this.innerHTML = favIconSvg(false);
+                this.setAttribute("aria-label", "收藏");
+                this.setAttribute("title", "收藏");
+                this.classList.remove("collected");
+                showToast("已取消收藏");
             }
         }
     })
@@ -2504,16 +2565,60 @@ document.getElementById("exportAllBtn").onclick = function(){
     exportJsonFile(feedList, "rss订阅备份.json");
 }
 document.getElementById("delAllFeed").onclick = function(){
-    if(confirm("确定清空全部订阅？收藏不会同步删除")){
+    document.getElementById("clearFeeds").checked = true;
+    document.getElementById("clearArticles").checked = true;
+    document.getElementById("clearFav").checked = true;
+    document.getElementById("clearKeywords").checked = true;
+    document.getElementById("clearModal").style.display = "flex";
+}
+document.getElementById("cancelClear").onclick = function(){
+    document.getElementById("clearModal").style.display = "none";
+}
+document.getElementById("confirmClear").onclick = function(){
+    const clearFeeds = document.getElementById("clearFeeds").checked;
+    const clearArticles = document.getElementById("clearArticles").checked;
+    const clearFav = document.getElementById("clearFav").checked;
+    const clearKeywords = document.getElementById("clearKeywords").checked;
+
+    if(clearFeeds){
         feedList = [];
         localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
+    }
+    if(clearArticles){
         allArticles = [];
         localCacheArticles = [];
         localStorage.removeItem(ARTICLE_CACHE_KEY);
         localStorage.removeItem(LAST_REFRESH_KEY);
         lastRefreshTime = 0;
-        renderManage();
+        homeIsCached = false;
+        homeArticleHtml = "";
     }
+    if(clearFav){
+        favList = [];
+        localStorage.setItem(FAV_KEY, JSON.stringify(favList));
+    }
+    if(clearKeywords){
+        blockKeywordList = [];
+        localStorage.setItem(BLOCK_KEYWORD_KEY, JSON.stringify(blockKeywordList));
+    }
+
+    document.getElementById("clearModal").style.display = "none";
+
+    if(clearFeeds && clearArticles && clearFav && clearKeywords){
+        readLinkSet = new Set();
+        sessionStartReadSet = new Set();
+        localStorage.removeItem(READ_KEY);
+        currentArticles = [];
+        renderedArticleCount = 0;
+        renderPageNum = 1;
+        articleBox.innerHTML = `<div class="empty-tip">暂无内容，请添加订阅源</div>`;
+        showToast("已全部清空，阅读器已重置");
+    }else{
+        showToast("已清除所选内容");
+    }
+
+    if(clearFeeds || clearKeywords) renderManage();
+    if(clearFav && pageFav.style.display !== "none") renderFav();
 }
 
 document.getElementById("saveEdit").onclick = function(){
@@ -2557,29 +2662,32 @@ function renderManage(){
                 </div>
             </div>
             <div class="feed-btn-group">
-                <button class="view-feed" data-source="${f.url}">查看</button>
-                <button class="edit" data-idx="${feedList.indexOf(f)}">编辑</button>
-                <button class="del" data-idx="${feedList.indexOf(f)}">删除</button>
+                <button class="view-feed" data-source="${f.url}" title="查看">${viewIconSvg()}</button>
+                <button class="edit" data-idx="${feedList.indexOf(f)}" title="编辑">${editIconSvg()}</button>
+                <button class="del" data-idx="${feedList.indexOf(f)}" title="删除">${trashIconSvg()}</button>
             </div>
         </div>`;
     })
     feedPanel.innerHTML = html;
     feedPanel.onclick = async function(e){
-        const t = e.target;
-        const idx = Number(t.dataset.idx);
-       if(t.classList.contains("view-feed")){
-    filterSourceUrl = t.dataset.source;
-    homeIsCached = false;
-    showPage(pageHome, "RSS媒体阅读器");
-    await renderSingleFeedFromSource(filterSourceUrl);
-    return;
-}
-        if(t.classList.contains("del")){
+        const viewBtn = e.target.closest(".view-feed");
+        const delBtn = e.target.closest(".del");
+        const editBtn = e.target.closest(".edit");
+        if(viewBtn){
+            filterSourceUrl = viewBtn.dataset.source;
+            homeIsCached = false;
+            showPage(pageHome, "RSS媒体阅读器");
+            await renderSingleFeedFromSource(filterSourceUrl);
+            return;
+        }
+        if(delBtn){
+            const idx = Number(delBtn.dataset.idx);
             feedList.splice(idx,1);
             localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
             renderManage();
         }
-        if(t.classList.contains("edit")){
+        if(editBtn){
+            const idx = Number(editBtn.dataset.idx);
             const f = feedList[idx];
             document.getElementById("editIndex").value = idx;
             document.getElementById("editName").value = f.name||"";
