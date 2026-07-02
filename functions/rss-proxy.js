@@ -8,8 +8,8 @@ const ALLOW_RSS_PROXY_HOSTS = [
   "abs.twimg.com",
   "xcancel.com",
   "nitter.net",
-  "video.shturl",
-  "video.3go.fun"
+  "xxxfollow.com",
+  "media.redgifs.com"
 ];
 
 function normalizeHost(host) {
@@ -85,7 +85,7 @@ export async function onRequest({ request }) {
     const text = await res.text();
     const headers = corsHeaders({
       "Content-Type": "application/xml;charset=utf-8",
-      "Cache-Control": res.ok ? "public, max-age=300" : "no-store"
+      "Cache-Control": res.ok ? "public, max-age=1800" : "no-store"
     });
     return new Response(text, { status: res.status, headers });
   } catch (err) {
