@@ -10,6 +10,7 @@ const ALLOW_PROXY_HOSTS = [
   "nitter.net",
   "xxxfollow.com",
   "media.redgifs.com"
+  "viet69z.sex"
 ];
 
 function normalizeHost(host) {
