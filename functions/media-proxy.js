@@ -9,7 +9,10 @@ const ALLOW_PROXY_HOSTS = [
   "xcancel.com",
   "nitter.net",
   "xxxfollow.com",
-  "media.redgifs.com"
+  "media.redgifs.com" 
+  "redd.it"
+  "phe69.asia"
+  "770118.xyz"
 ];
 
 function normalizeHost(host) {
