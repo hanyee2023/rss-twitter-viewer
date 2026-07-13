@@ -12,7 +12,8 @@ const ALLOW_PROXY_HOSTS = [
   "media.redgifs.com", 
   "redd.it",
   "770118.xyz",
-  "phe69.asia"
+  "phe69",
+  "3go.fun"
 ];
 
 function normalizeHost(host) {
