@@ -11,7 +11,6 @@ const ALLOW_PROXY_HOSTS = [
   "xxxfollow.com",
   "media.redgifs.com" 
   "redd.it"
-  "phe69.asia"
   "770118.xyz"
 ];
 
