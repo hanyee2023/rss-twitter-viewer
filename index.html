@@ -331,6 +331,7 @@ body{
     justify-content:center;
     flex-shrink:0;
     overflow:hidden;
+    position:relative;
     box-shadow:0 2px 8px rgba(0,0,0,.12);
 }
 .card-avatar svg{
@@ -341,6 +342,12 @@ body{
     stroke-width:2;
     stroke-linecap:round;
     stroke-linejoin:round;
+}
+.card-avatar img{
+    width:100%;
+    height:100%;
+    object-fit:cover;
+    border-radius:50%;
 }
 .source-name-text{
     font-size:16px;
@@ -547,23 +554,19 @@ body{
 }
 .preview-wrap{
     width:100%;height:100%;
-    display:flex;
-    overflow-x:auto;
-    scroll-snap-type:x mandatory;
-    scroll-snap-stop:always;
-    scrollbar-width:none;
-    -ms-overflow-style:none;
-    -webkit-overflow-scrolling: touch;
+    overflow:hidden;
+    position:relative;
 }
-.preview-wrap::-webkit-scrollbar{display:none;}
 .preview-slide{
-    flex:0 0 100%;
-    height:100%;
+    position:absolute;
+    top:0;left:0;
+    width:100%;height:100%;
     display:flex;
     align-items:center;
     justify-content:center;
-    scroll-snap-align:center;
     padding:10px;
+    box-sizing:border-box;
+    will-change:transform;
 }
 .preview-img{max-width:92vw;max-height:92vh;object-fit:contain;}
 .preview-close{
@@ -1229,31 +1232,146 @@ function mediaControlsHtml(){
 }
 
 function hashText(str){
-    let hash = 0;
     const text = String(str || "");
+    let hash1 = 5381;
+    let hash2 = 0;
     for(let i = 0; i < text.length; i++){
-        hash = ((hash << 5) - hash) + text.charCodeAt(i);
-        hash |= 0;
+        const ch = text.charCodeAt(i);
+        hash1 = ((hash1 << 5) + hash1) ^ ch;
+        hash2 = (hash2 * 33) ^ ch;
     }
-    return Math.abs(hash);
+    return Math.abs((hash1 >>> 0) + (hash2 >>> 0));
 }
 
 function avatarIconSvg(index){
-    const icons = [
-        /* 苹果 */ `<svg viewBox="0 0 24 24"><path d="M12 5c-1-3-3-4-5-3-2 1-3 4-1 7 2 3 6 4 8 9 1-3 0-6-2-8-2-2-1-4 0-5z"/><path d="M12 5c1-3 3-4 5-3 2 1 3 4 1 7-2 3-6 4-8 9-1-3 0-6 2-8 2-2 1-4 0-5z"/></svg>`,
-        /* 胡萝卜 */ `<svg viewBox="0 0 24 24"><path d="M12 2c-2 3-3 7-1 11l2 4c1 2 1 3 1 5h-4c0-2 0-3 1-5l2-4c1-2 1-4 0-6"/><path d="M8 12 6 10C4 8 5 5 8 5l2 1"/><path d="M16 12l2-2c2-2 1-5-2-5l-2 1"/></svg>`,
-        /* 樱桃 */ `<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><circle cx="17" cy="8" r="4"/><path d="M12 8L12 2"/><path d="M9 4l3-2 3 2"/></svg>`,
-        /* 小鱼 */ `<svg viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="10" ry="7"/><path d="M22 12l3-3v6z"/><circle cx="8" cy="11" r="1.5"/></svg>`,
-        /* 蝴蝶 */ `<svg viewBox="0 0 24 24"><path d="M12 3v8"/><path d="M12 11c-5-2-8-8-4-10 2-1 4 0 4 2"/><path d="M12 11c5-2 8-8 4-10-2-1-4 0-4 2"/><path d="M12 11c-5 2-8 8-4 10 2 1 4 0 4-2"/><path d="M12 11c5 2 8 8 4 10-2 1-4 0-4-2"/></svg>`,
-        /* 蘑菇 */ `<svg viewBox="0 0 24 24"><path d="M12 4c-4 0-7 3-7 7 0 1 1 1 1 1h12c0 0 1 0 1-1 0-4-3-7-7-7z"/><rect x="7" y="12" width="10" height="4" rx="1"/><rect x="9" y="16" width="6" height="3" rx="1"/></svg>`,
-        /* 兔子 */ `<svg viewBox="0 0 24 24"><ellipse cx="10" cy="15" rx="8" ry="6"/><circle cx="12" cy="8" r="4"/><ellipse cx="8" cy="4" rx="2" ry="5"/><ellipse cx="16" cy="4" rx="2" ry="5"/><circle cx="10" cy="11" r="1"/><circle cx="14" cy="11" r="1"/><path d="M11 14h2"/></svg>`,
-        /* 猫咪 */ `<svg viewBox="0 0 24 24"><path d="M12 4c-3 0-5 2-5 5v4c0 3 2 5 5 5s5-2 5-5V9c0-3-2-5-5-5z"/><path d="M8 5 6 1l3 2"/><path d="M16 5l2-4-3 2"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><path d="M10 15q2 2 4 0"/></svg>`,
-        /* 蜜蜂 */ `<svg viewBox="0 0 24 24"><ellipse cx="12" cy="13" rx="5" ry="6"/><path d="M8 7 4 4l2 4"/><path d="M16 7l4-3-2 4"/><path d="M7 13h10"/><path d="M8 10h8"/><path d="M8 16h8"/></svg>`,
-        /* 茄子 */ `<svg viewBox="0 0 24 24"><path d="M12 2c-2 0-3 2-3 4v2c-2 3-3 7-3 11 0 2 3 3 6 3s6-1 6-3c0-4-1-8-3-11V6c0-2-1-4-3-4z"/><path d="M9 6h6"/></svg>`,
-        /* 花朵 */ `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="4" r="2"/><circle cx="12" cy="20" r="2"/><circle cx="4" cy="12" r="2"/><circle cx="20" cy="12" r="2"/><path d="M12 6v-2"/><path d="M12 20v-2"/><path d="M6 12H4"/><path d="M20 12h-2"/></svg>`,
-        /* 小鸟 */ `<svg viewBox="0 0 24 24"><path d="M16 7h4l-2 4 2 4h-4"/><path d="M12 15c3 0 6-3 6-6s-3-6-6-6C6 3 3 6 3 9s3 6 6 6z"/><circle cx="8" cy="10" r="1"/><path d="M12 15v4"/><path d="M9 19h6"/></svg>`
-    ];
-    return icons[index % icons.length];
+    // 基于 hash 值确定性生成独特几何图案，理论上可产生数千种不同组合
+    let s = Math.abs(index >>> 0) || 1;
+    function next(){
+        s = (s * 1664525 + 1013904223) | 0;
+        return (s >>> 0) / 0x100000000;
+    }
+    const nextInt = (min, max) => Math.floor(next() * (max - min + 1)) + min;
+
+    const elements = [];
+    const layout = nextInt(0, 7);
+
+    // 所有图案共享一个 SVG viewBox="0 0 24 24"
+    if(layout === 0){
+        // 3x3 点阵 + 外框
+        const shape = nextInt(0, 2);
+        if(shape === 0) elements.push(`<rect x="2" y="2" width="20" height="20" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>`);
+        else if(shape === 1) elements.push(`<circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.5"/>`);
+        else elements.push(`<polygon points="12,2 21,7 21,17 12,22 3,17 3,7" fill="none" stroke="currentColor" stroke-width="1.5"/>`);
+        for(let r = 0; r < 3; r++){
+            for(let c = 0; c < 3; c++){
+                if(next() > 0.45){
+                    const dot = nextInt(0, 2);
+                    const cx = 5 + c * 7, cy = 5 + r * 7;
+                    if(dot === 0) elements.push(`<circle cx="${cx}" cy="${cy}" r="2" fill="currentColor"/>`);
+                    else if(dot === 1) elements.push(`<rect x="${cx-1.5}" y="${cy-1.5}" width="3" height="3" rx="0.5" fill="currentColor"/>`);
+                    else elements.push(`<polygon points="${cx},${cy-1.5} ${cx+1.5},${cy} ${cx},${cy+1.5} ${cx-1.5},${cy}" fill="currentColor"/>`);
+                }
+            }
+        }
+    }else if(layout === 1){
+        // 双层同心形状
+        const outer = nextInt(0, 2);
+        if(outer === 0) elements.push(`<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.5"/>`);
+        else if(outer === 1) elements.push(`<rect x="3" y="3" width="18" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>`);
+        else elements.push(`<polygon points="12,3 20,8 20,16 12,21 4,16 4,8" fill="none" stroke="currentColor" stroke-width="1.5"/>`);
+        const inner = nextInt(0, 3);
+        if(inner === 0) elements.push(`<circle cx="12" cy="12" r="3" fill="currentColor"/>`);
+        else if(inner === 1) elements.push(`<rect x="9" y="9" width="6" height="6" rx="1" fill="currentColor"/>`);
+        else if(inner === 2) elements.push(`<polygon points="12,8 16,12 12,16 8,12" fill="currentColor"/>`);
+        else elements.push(`<path d="M9,12 Q12,7 15,12 Q12,17 9,12" fill="currentColor"/>`);
+    }else if(layout === 2){
+        // 对角线条纹 + 点缀
+        const angle = nextInt(0, 1);
+        if(angle === 0){
+            elements.push(`<line x1="4" y1="20" x2="20" y2="4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`);
+            if(next() > 0.4) elements.push(`<line x1="2" y1="14" x2="10" y2="6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>`);
+            if(next() > 0.4) elements.push(`<line x1="14" y1="18" x2="22" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>`);
+        }else{
+            elements.push(`<line x1="4" y1="4" x2="20" y2="20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`);
+            if(next() > 0.4) elements.push(`<line x1="10" y1="2" x2="22" y2="14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>`);
+            if(next() > 0.4) elements.push(`<line x1="2" y1="10" x2="14" y2="22" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>`);
+        }
+        const dotCount = nextInt(1, 4);
+        for(let i = 0; i < dotCount; i++){
+            const dx = nextInt(3, 21), dy = nextInt(3, 21);
+            elements.push(`<circle cx="${dx}" cy="${dy}" r="${nextInt(1, 2)}" fill="currentColor"/>`);
+        }
+    }else if(layout === 3){
+        // 折线 + 端点
+        const midX = nextInt(6, 18), midY = nextInt(6, 18);
+        elements.push(`<polyline points="${nextInt(2,6)},${nextInt(2,6)} ${midX},${midY} ${nextInt(18,22)},${nextInt(18,22)}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`);
+        elements.push(`<circle cx="${midX}" cy="${midY}" r="2" fill="currentColor"/>`);
+        if(next() > 0.5){
+            elements.push(`<circle cx="${nextInt(2,10)}" cy="${nextInt(14,22)}" r="1.5" fill="currentColor"/>`);
+        }
+        if(next() > 0.5){
+            elements.push(`<circle cx="${nextInt(14,22)}" cy="${nextInt(2,10)}" r="1.5" fill="currentColor"/>`);
+        }
+    }else if(layout === 4){
+        // 上下对称 + 中间
+        const top = nextInt(0, 2);
+        if(top === 0) elements.push(`<path d="M6,8 Q12,2 18,8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`);
+        else if(top === 1) elements.push(`<polyline points="2,8 12,3 22,8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`);
+        else elements.push(`<line x1="4" y1="8" x2="20" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`);
+        const bottom = nextInt(0, 2);
+        if(bottom === 0) elements.push(`<path d="M6,16 Q12,22 18,16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`);
+        else if(bottom === 1) elements.push(`<polyline points="2,16 12,21 22,16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`);
+        else elements.push(`<line x1="4" y1="16" x2="20" y2="16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`);
+        const mid = nextInt(0, 3);
+        if(mid === 0) elements.push(`<circle cx="12" cy="12" r="2" fill="currentColor"/>`);
+        else if(mid === 1) elements.push(`<rect x="10" y="10" width="4" height="4" rx="0.5" fill="currentColor"/>`);
+        else if(mid === 2) elements.push(`<polygon points="12,9 15,12 12,15 9,12" fill="currentColor"/>`);
+        else elements.push(`<path d="M10,12 h4 M12,10 v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>`);
+    }else if(layout === 5){
+        // 放射状/太阳状
+        const rays = nextInt(4, 8);
+        const r = nextInt(7, 9);
+        for(let i = 0; i < rays; i++){
+            const a = (i / rays) * Math.PI * 2;
+            const x1 = 12 + Math.cos(a) * 4, y1 = 12 + Math.sin(a) * 4;
+            const x2 = 12 + Math.cos(a) * r, y2 = 12 + Math.sin(a) * r;
+            elements.push(`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>`);
+        }
+        elements.push(`<circle cx="12" cy="12" r="3" fill="currentColor"/>`);
+    }else if(layout === 6){
+        // 十字 + 角标
+        elements.push(`<line x1="12" y1="4" x2="12" y2="20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`);
+        elements.push(`<line x1="4" y1="12" x2="20" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`);
+        const corners = nextInt(1, 4);
+        const cornerPos = [
+            [4, 4], [20, 4], [4, 20], [20, 20]
+        ];
+        const used = new Set();
+        for(let i = 0; i < corners; i++){
+            let ci;
+            do{ ci = nextInt(0, 3); }while(used.has(ci));
+            used.add(ci);
+            const [cx, cy] = cornerPos[ci];
+            const ct = nextInt(0, 2);
+            if(ct === 0) elements.push(`<circle cx="${cx}" cy="${cy}" r="2" fill="currentColor"/>`);
+            else if(ct === 1) elements.push(`<rect x="${cx-2}" y="${cy-2}" width="4" height="4" rx="0.5" fill="currentColor"/>`);
+            else elements.push(`<polygon points="${cx},${cy-2} ${cx+2},${cy} ${cx},${cy+2} ${cx-2},${cy}" fill="currentColor"/>`);
+        }
+    }else if(layout === 7){
+        // 弧形 + 浮动圆点
+        const arcDir = nextInt(0, 3);
+        if(arcDir === 0) elements.push(`<path d="M4,18 Q12,4 20,18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`);
+        else if(arcDir === 1) elements.push(`<path d="M4,6 Q12,20 20,6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`);
+        else if(arcDir === 2) elements.push(`<path d="M4,4 Q20,12 4,20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`);
+        else elements.push(`<path d="M20,4 Q4,12 20,20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`);
+        const dots = nextInt(2, 5);
+        for(let i = 0; i < dots; i++){
+            const dx = nextInt(4, 20), dy = nextInt(4, 20);
+            elements.push(`<circle cx="${dx}" cy="${dy}" r="${nextInt(1, 2)}" fill="currentColor"/>`);
+        }
+    }
+
+    return `<svg viewBox="0 0 24 24">${elements.join('')}</svg>`;
 }
 
 function getAvatarStyle(key){
@@ -1267,7 +1385,37 @@ function getAvatarStyle(key){
         "linear-gradient(135deg,#fa709a,#fee140)",
         "linear-gradient(135deg,#30cfd0,#330867)",
         "linear-gradient(135deg,#a8edea,#fed6e3)",
-        "linear-gradient(135deg,#ff9a9e,#fecfef)"
+        "linear-gradient(135deg,#ff9a9e,#fecfef)",
+        "linear-gradient(135deg,#fccb90,#d57eeb)",
+        "linear-gradient(135deg,#e0c3fc,#8ec5fc)",
+        "linear-gradient(135deg,#f5576c,#ff6a88)",
+        "linear-gradient(135deg,#96fbc4,#f9f586)",
+        "linear-gradient(135deg,#fcb69f,#ffecd2)",
+        "linear-gradient(135deg,#a18cd1,#fbc2eb)",
+        "linear-gradient(135deg,#fad0c4,#ffd1ff)",
+        "linear-gradient(135deg,#ffecd2,#fcb69f)",
+        "linear-gradient(135deg,#89f7fe,#66a6ff)",
+        "linear-gradient(135deg,#fddb92,#d1fdff)",
+        "linear-gradient(135deg,#c471f5,#fa71cd)",
+        "linear-gradient(135deg,#11998e,#38ef7d)",
+        "linear-gradient(135deg,#ee9ca7,#ffdde1)",
+        "linear-gradient(135deg,#76b2fe,#b69efe)",
+        "linear-gradient(135deg,#f53844,#42378f)",
+        "linear-gradient(135deg,#3b82f6,#8b5cf6)",
+        "linear-gradient(135deg,#f97316,#f59e0b)",
+        "linear-gradient(135deg,#10b981,#34d399)",
+        "linear-gradient(135deg,#ec4899,#f472b6)",
+        "linear-gradient(135deg,#6366f1,#a78bfa)",
+        "linear-gradient(135deg,#14b8a6,#2dd4bf)",
+        "linear-gradient(135deg,#e11d48,#fb7185)",
+        "linear-gradient(135deg,#7c3aed,#c084fc)",
+        "linear-gradient(135deg,#f59e0b,#fbbf24)",
+        "linear-gradient(135deg,#059669,#6ee7b7)",
+        "linear-gradient(135deg,#d97706,#fcd34d)",
+        "linear-gradient(135deg,#9333ea,#d8b4fe)",
+        "linear-gradient(135deg,#0ea5e9,#38bdf8)",
+        "linear-gradient(135deg,#db2777,#f9a8d4)",
+        "linear-gradient(135deg,#2563eb,#60a5fa)",
     ];
     return gradients[hashText(key) % gradients.length];
 }
@@ -2007,7 +2155,6 @@ function renderPagedList(reset = false){
     bindVideoPauseObserver();
     initHlsVideo();
 }
-
 function bindScrollLoadMore(){
     if(scrollObserver) scrollObserver.disconnect();
     const loadDom = document.getElementById("loadMoreDom");
@@ -2016,8 +2163,14 @@ function bindScrollLoadMore(){
         const entry = entries[0];
         if(entry.isIntersecting && !loadLock){
             loadLock = true;
+            const prevCount = renderedArticleCount;
             renderPageNum += 1;
             renderPagedList();
+            // 如果没有新内容，不再重复绑定
+            if(renderedArticleCount === prevCount){
+                loadLock = false;
+                return;
+            }
             setTimeout(()=>bindScrollLoadMore(), 30);
             loadLock = false;
         }
@@ -2122,7 +2275,7 @@ function buildCard(item, isFav = false){
             const imgProxy = getProxyUrl(src, isFav);
             const imgDirect = cleanMediaUrl(src);
             mediaHtml += `<div class="grid-img-box">
-                <img class="grid-img" ${hostMatched(src) ? 'crossorigin="anonymous"' : ""} data-imggroup='${escapeAttr(JSON.stringify(imgs))}' data-direct-src="${escapeAttr(imgDirect)}" src="${escapeAttr(imgProxy)}" loading="lazy" onerror="if(this.dataset.directSrc && this.src!==this.dataset.directSrc){this.src=this.dataset.directSrc;}">${overlay}
+                <img class="grid-img" ${hostMatched(src) ? 'crossorigin="anonymous"' : ""} referrerpolicy="no-referrer" data-imggroup='${escapeAttr(JSON.stringify(imgs))}' data-direct-src="${escapeAttr(imgDirect)}" src="${escapeAttr(imgProxy)}" loading="lazy" onerror="if(this.dataset.directSrc && this.src!==this.dataset.directSrc){this.src=this.dataset.directSrc;}">${overlay}
             </div>`;
         })
         mediaHtml += `</div></div>`;
@@ -2137,7 +2290,7 @@ function buildCard(item, isFav = false){
     const itemLinkAttr = escapeAttr(itemLink);
     const sourceUrlAttr = escapeAttr(item.sourceUrl || "");
     const sourceNameText = escapeHtml(item.sourceName || "未知来源");
-    const avatarKey = item.sourceUrl || item.sourceName || item.link || "?";
+    const avatarKey = (item.sourceUrl || "") + "|" + (item.sourceName || "") + "|" + (item.link || "");
     const avatarIndex = hashText(avatarKey);
     const avatarStyle = escapeAttr(getAvatarStyle(avatarKey));
     const avatarSvg = avatarIconSvg(avatarIndex);
@@ -2344,22 +2497,99 @@ function bindAllCardEvent(){
     });
 }
 
+let previewSwipeIndex = 0;
+let previewSwipeStartX = 0;
+let previewSwipeDx = 0;
+let previewSwipeLock = false;
+let previewSwipeBound = false;
+
 function renderPreviewSlider(imgs, startIndex = 0){
     previewWrap.innerHTML = "";
-imgs.forEach(src=>{
-    const slide = document.createElement("div");
-    slide.className = "preview-slide";
-    // 图片自动走代理判断
-    const imgUrl = getProxyUrl(src);
-    slide.innerHTML = `<img class="preview-img" src="${escapeAttr(imgUrl)}" loading="lazy">`;
-    previewWrap.appendChild(slide);
-})
-    previewTip.innerText = "";
-    setTimeout(()=>{
-        previewWrap.scrollLeft = previewWrap.clientWidth * startIndex;
-    }, 10);
+    previewSwipeIndex = startIndex;
+    previewSwipeLock = false;
+    imgs.forEach((src, i)=>{
+        const slide = document.createElement("div");
+        slide.className = "preview-slide";
+        const imgUrl = getProxyUrl(src);
+        const imgDirect = cleanMediaUrl(src);
+        slide.innerHTML = `<img class="preview-img" src="${escapeAttr(imgUrl)}" referrerpolicy="no-referrer" data-direct-src="${escapeAttr(imgDirect)}" onerror="if(this.dataset.directSrc && this.src!==this.dataset.directSrc){this.src=this.dataset.directSrc;}">`;
+        slide.style.transform = `translateX(${(i - startIndex) * 100}%)`;
+        previewWrap.appendChild(slide);
+    });
+    // 预加载当前及相邻图片，确保滑动流畅
+    const preloadIndexes = [startIndex];
+    if(startIndex > 0) preloadIndexes.push(startIndex - 1);
+    if(startIndex < imgs.length - 1) preloadIndexes.push(startIndex + 1);
+    preloadIndexes.forEach(idx => {
+        const pre = new Image();
+        pre.referrerPolicy = "no-referrer";
+        pre.src = getProxyUrl(imgs[idx]);
+    });
+    updatePreviewTip();
+
+    if(previewSwipeBound) return;
+    previewSwipeBound = true;
+
+    previewWrap.addEventListener("touchstart", function(e){
+        if(previewSwipeLock) return;
+        previewSwipeStartX = e.touches[0].clientX;
+        previewSwipeDx = 0;
+    }, {passive: true});
+    previewWrap.addEventListener("touchmove", function(e){
+        if(previewSwipeLock) return;
+        previewSwipeDx = e.touches[0].clientX - previewSwipeStartX;
+        const slides = this.querySelectorAll(".preview-slide");
+        const dxPercent = (previewSwipeDx / this.clientWidth * 100);
+        slides.forEach((s, i)=>{
+            s.style.transition = "none";
+            s.style.transform = `translateX(${(i - previewSwipeIndex) * 100 + dxPercent}%)`;
+        });
+    }, {passive: true});
+    function endSwipe(){
+        if(previewSwipeLock) return;
+        previewSwipeLock = true;
+        const slides = previewWrap.querySelectorAll(".preview-slide");
+        const total = slides.length;
+        const threshold = previewWrap.clientWidth * 0.12;
+        if(previewSwipeDx < -threshold && previewSwipeIndex < total - 1){
+            previewSwipeIndex++;
+        }else if(previewSwipeDx > threshold && previewSwipeIndex > 0){
+            previewSwipeIndex--;
+        }
+        slides.forEach((s, i)=>{
+            s.style.transition = "transform 0.25s cubic-bezier(0.25,0.1,0.25,1)";
+            s.style.transform = `translateX(${(i - previewSwipeIndex) * 100}%)`;
+        });
+        updatePreviewTip();
+        // 预加载下一张图片
+        const nextIdx = previewSwipeIndex + 1;
+        if(nextIdx < currentPreviewImgs.length){
+            const pre = new Image();
+            pre.referrerPolicy = "no-referrer";
+            pre.src = getProxyUrl(currentPreviewImgs[nextIdx]);
+        }
+        setTimeout(()=>{ previewSwipeLock = false; }, 260);
+    }
+    previewWrap.addEventListener("touchend", endSwipe, {passive: true});
+    previewWrap.addEventListener("touchcancel", endSwipe, {passive: true});
 }
+
+function updatePreviewTip(){
+    const slides = previewWrap.querySelectorAll(".preview-slide");
+    const total = slides.length;
+    if(previewSwipeIndex === total - 1){
+        previewTip.innerText = "这是最后一张啦";
+    }else{
+        previewTip.innerText = `${previewSwipeIndex + 1} / ${total}`;
+    }
+}
+
 previewClose.onclick = ()=> imgPreviewMask.style.display = "none";
+imgPreviewMask.addEventListener("click", function(e){
+    if(e.target === this){
+        imgPreviewMask.style.display = "none";
+    }
+});
 
 async function loadAllRSS(){
     const queue = [...feedList];
@@ -2652,7 +2882,7 @@ function renderManage(){
     const reverseFeed = [...feedList].reverse();
     reverseFeed.forEach((f, idx)=>{
         const realIndex = idx + 1;
-        const avatarKey = f.url || f.name || "?";
+        const avatarKey = (f.url || "") + "|" + (f.name || "");
         const avatarIndex = hashText(avatarKey);
         const avatarSvg = avatarIconSvg(avatarIndex);
         const avatarStyle = escapeAttr(getAvatarStyle(avatarKey));
@@ -2818,6 +3048,15 @@ showPage = function(targetDom, titleText){
         renderKeywordList();
     }
 };
+
+// 全局 ESC 关闭弹窗
+document.addEventListener("keydown", (e)=>{
+    if(e.key === "Escape"){
+        if(imgPreviewMask.style.display === "flex"){
+            imgPreviewMask.style.display = "none";
+        }
+    }
+});
 
 window.onload = async function(){
     initVideoObserver();
