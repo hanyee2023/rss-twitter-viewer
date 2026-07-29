@@ -41,7 +41,7 @@ body{
 .beta-tag {
   position: absolute;
   top: -3px;
-  right: -65px;
+  right: -40px;
   font-size: 12px;
   background:#28a745;
   color:#fff;
@@ -206,6 +206,28 @@ body{
     color:#111;
     word-break:break-all;
     line-height:1.4;
+}
+.feed-update-time{
+    font-size:12px;
+    color:#999;
+    margin-top:4px;
+    line-height:1.2;
+}
+.feed-unread-badge-inline{
+    display:inline-block;
+    min-width:16px;
+    height:16px;
+    line-height:16px;
+    padding:0 4px;
+    background:#ff3b30;
+    color:#fff;
+    font-size:11px;
+    font-weight:600;
+    border-radius:8px;
+    text-align:center;
+    box-sizing:border-box;
+    margin-right:6px;
+    vertical-align:middle;
 }
 
 .feed-btn-group{
@@ -512,7 +534,8 @@ body{
 .modal-box{width:100%;max-width:480px;background:#fff;padding:16px;border-radius:12px;}
 .modal-box input,.modal-box select{width:100%;margin-bottom:10px;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:15px;}
 .modal-btn-bar{display:flex;gap:10px;justify-content:flex-end;margin-top:12px;}
-#clearModal .modal-btn-bar button{
+#clearModal .modal-btn-bar button,
+#exportModal .modal-btn-bar button{
     border:none;
     padding:8px 18px;
     border-radius:8px;
@@ -521,7 +544,8 @@ body{
     background:#1d9bf0;
     color:#fff;
 }
-#clearModal .modal-btn-bar button:hover{background:#0d8bf0;}
+#clearModal .modal-btn-bar button:hover,
+#exportModal .modal-btn-bar button:hover{background:#0d8bf0;}
 .clear-options{display:flex;flex-direction:column;gap:10px;margin:12px 0;}
 .clear-options label{display:flex;align-items:center;gap:8px;font-size:14px;color:#333;cursor:pointer;}
 .clear-options input[type="checkbox"]{width:18px;height:18px;cursor:pointer;}
@@ -661,7 +685,7 @@ body{
 <header id="mainHeader">
 <div class="title-wrap">
   <h1 id="pageTitle">RSS媒体阅读器</h1>
-  <span class="beta-tag">Beta4.2</span>
+  <span class="beta-tag">4.3</span>
 </div>
 </header>
 
@@ -772,6 +796,21 @@ body{
     </div>
 </div>
 
+<div class="modal-mask" id="exportModal">
+    <div class="modal-box">
+        <h3>一键导出数据</h3>
+        <div class="clear-options">
+            <label><input type="checkbox" id="exportFeeds" checked> 所有订阅源列表</label>
+            <label><input type="checkbox" id="exportFav" checked> 收藏记录数据</label>
+            <label><input type="checkbox" id="exportKeywords" checked> 关键字屏蔽</label>
+        </div>
+        <div class="modal-btn-bar">
+            <button id="cancelExport">取消</button>
+            <button id="confirmExport">确认导出</button>
+        </div>
+    </div>
+</div>
+
 <div class="img-preview-mask" id="imgPreviewMask">
     <button class="preview-close" id="previewClose">×</button>
     <div class="preview-wrap" id="previewWrap"></div>
@@ -798,12 +837,8 @@ const FORCE_PROXY_HOSTS = [
     "pbs.twimg.com",
     "abs.twimg.com",
     "xcancel.com",
-    "xxxfollow.com",
-    "media.redgifs.com", 
-    "redd.it",
-    "770118.xyz",
-    "phe69",
-    "3go.fun"
+    "nitter.net",
+    "video.shturl."
 ];
 
 function normalizeUrl(rawUrl) {
@@ -2387,6 +2422,23 @@ function renderFav(){
 }
 
 function bindAllCardEvent(){
+    // 主页卡片头像点击：跳转查看该订阅源所有内容
+    document.querySelectorAll("#pageHome .card-avatar").forEach(avatar=>{
+        avatar.style.cursor = "pointer";
+        avatar.title = "点击查看该订阅源";
+        avatar.onclick = async function(e){
+            e.stopPropagation();
+            const card = this.closest(".tweet-card");
+            if(!card) return;
+            const sourceUrl = card.dataset.sourceUrl;
+            if(!sourceUrl) return;
+            filterSourceUrl = sourceUrl;
+            homeIsCached = false;
+            showPage(pageHome, "RSS媒体阅读器");
+            await renderSingleFeedFromSource(filterSourceUrl);
+        }
+    })
+
     document.querySelectorAll(".grid-img").forEach((img)=>{
         img.onclick = function(){
             const imgs = JSON.parse(this.dataset.imggroup);
@@ -2780,23 +2832,95 @@ document.getElementById("importFileInput").onchange = function(e){
     reader.onload = ev=>{
         try{
             const data = JSON.parse(ev.target.result);
-            let addNum = 0;
-            data.forEach(item=>{
-                if(item.url && !feedList.some(f=>f.url === item.url)){
-                    feedList.push(item);addNum++;
+            let feedAddNum = 0;
+            let favAddNum = 0;
+            let kwAddNum = 0;
+
+            // 兼容旧格式：纯数组（订阅源列表）
+            if(Array.isArray(data)){
+                data.forEach(item=>{
+                    if(item.url && !feedList.some(f=>f.url === item.url)){
+                        feedList.push(item);feedAddNum++;
+                    }
+                })
+            }else{
+                // 新格式：对象 {feeds, favorites, blockKeywords}
+                if(Array.isArray(data.feeds)){
+                    data.feeds.forEach(item=>{
+                        if(item.url && !feedList.some(f=>f.url === item.url)){
+                            feedList.push(item);feedAddNum++;
+                        }
+                    })
                 }
-            })
-            localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
-            lastRefreshTime = 0;
-            localStorage.removeItem(LAST_REFRESH_KEY);
+                if(Array.isArray(data.favorites)){
+                    data.favorites.forEach(item=>{
+                        if(item.link && !favList.some(f=>f.link === item.link)){
+                            favList.push(item);favAddNum++;
+                        }
+                    })
+                }
+                if(Array.isArray(data.blockKeywords)){
+                    data.blockKeywords.forEach(kw=>{
+                        if(kw && !blockKeywordList.some(k=>k === kw)){
+                            blockKeywordList.push(kw);kwAddNum++;
+                        }
+                    })
+                }
+            }
+
+            if(feedAddNum > 0){
+                localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
+                lastRefreshTime = 0;
+                localStorage.removeItem(LAST_REFRESH_KEY);
+            }
+            if(favAddNum > 0){
+                localStorage.setItem(FAV_KEY, JSON.stringify(favList));
+            }
+            if(kwAddNum > 0){
+                saveBlockKeywords();
+            }
             renderManage();
-            alert(`成功导入${addNum}条订阅，切换主页加载内容`);
-        }catch(err){alert("备份文件格式错误");}
+            renderKeywordList();
+
+            let msg = "导入完成：";
+            const parts = [];
+            if(feedAddNum > 0) parts.push(`订阅源+${feedAddNum}`);
+            if(favAddNum > 0) parts.push(`收藏+${favAddNum}`);
+            if(kwAddNum > 0) parts.push(`屏蔽词+${kwAddNum}`);
+            if(parts.length === 0) parts.push("没有新数据");
+            msg += parts.join("，");
+            showToast(msg);
+        }catch(err){showToast("备份文件格式错误");}
+        e.target.value = "";
     }
     reader.readAsText(file);
 }
 document.getElementById("exportAllBtn").onclick = function(){
-    exportJsonFile(feedList, "rss订阅备份.json");
+    document.getElementById("exportModal").style.display = "flex";
+}
+document.getElementById("cancelExport").onclick = function(){
+    document.getElementById("exportModal").style.display = "none";
+}
+document.getElementById("confirmExport").onclick = function(){
+    const expFeeds = document.getElementById("exportFeeds").checked;
+    const expFav = document.getElementById("exportFav").checked;
+    const expKeywords = document.getElementById("exportKeywords").checked;
+
+    if(!expFeeds && !expFav && !expKeywords){
+        showToast("请至少选择一项要导出的数据");
+        return;
+    }
+
+    const exportData = {};
+    if(expFeeds) exportData.feeds = feedList;
+    if(expFav) exportData.favorites = favList;
+    if(expKeywords) exportData.blockKeywords = blockKeywordList;
+    exportData.exportTime = new Date().toISOString();
+    exportData.version = 1;
+
+    const fileName = "rss备份_" + new Date().toISOString().slice(0,10).replace(/-/g,"") + ".json";
+    exportJsonFile(exportData, fileName);
+    document.getElementById("exportModal").style.display = "none";
 }
 document.getElementById("delAllFeed").onclick = function(){
     document.getElementById("clearFeeds").checked = true;
@@ -2886,17 +3010,37 @@ function renderManage(){
         const avatarIndex = hashText(avatarKey);
         const avatarSvg = avatarIconSvg(avatarIndex);
         const avatarStyle = escapeAttr(getAvatarStyle(avatarKey));
+
+        // 计算该订阅源的最新更新时间和未读数
+        const feedItems = localCacheArticles.filter(item => String(item.sourceUrl || "").trim() === String(f.url || "").trim());
+        let latestTime = "";
+        let unreadCount = 0;
+        if(feedItems.length > 0){
+            const sorted = feedItems.sort((a,b)=> new Date(b.date) - new Date(a.date));
+            const latestDate = new Date(sorted[0].date);
+            if(!Number.isNaN(latestDate.getTime())){
+                const m = latestDate.getMonth() + 1;
+                const d = latestDate.getDate();
+                const h = String(latestDate.getHours()).padStart(2, "0");
+                const mi = String(latestDate.getMinutes()).padStart(2, "0");
+                latestTime = `最近更新于 ${m}/${d} ${h}:${mi}`;
+            }
+            unreadCount = feedItems.filter(item => !readLinkSet.has(item.link)).length;
+        }
+
+        const unreadBadge = unreadCount > 0 ? `<span class="feed-unread-badge-inline">${unreadCount > 99 ? "99+" : unreadCount}</span>` : "";
+
         html += `
         <div class="feed-item" data-idx="${feedList.indexOf(f)}" data-source-url="${f.url}">
             <div class="feed-left-area">
                 <div class="feed-index">${realIndex}</div>
-                <div class="card-avatar" style="background:${avatarStyle};width:28px;height:28px;flex-shrink:0;">${avatarSvg}</div>
+                <div class="card-avatar feed-avatar-btn" data-source="${f.url}" style="background:${avatarStyle};width:36px;height:36px;flex-shrink:0;cursor:pointer;" title="点击查看该订阅源">${avatarSvg}</div>
                 <div class="feed-name-block">
                     <div class="feed-title-text">${escapeHtml(f.name||"未命名订阅")}</div>
+                    ${latestTime ? `<div class="feed-update-time">${unreadBadge}${latestTime}</div>` : ""}
                 </div>
             </div>
             <div class="feed-btn-group">
-                <button class="view-feed" data-source="${f.url}" title="查看">${viewIconSvg()}</button>
                 <button class="edit" data-idx="${feedList.indexOf(f)}" title="编辑">${editIconSvg()}</button>
                 <button class="del" data-idx="${feedList.indexOf(f)}" title="删除">${trashIconSvg()}</button>
             </div>
@@ -2904,11 +3048,11 @@ function renderManage(){
     })
     feedPanel.innerHTML = html;
     feedPanel.onclick = async function(e){
-        const viewBtn = e.target.closest(".view-feed");
+        const avatarBtn = e.target.closest(".feed-avatar-btn");
         const delBtn = e.target.closest(".del");
         const editBtn = e.target.closest(".edit");
-        if(viewBtn){
-            filterSourceUrl = viewBtn.dataset.source;
+        if(avatarBtn){
+            filterSourceUrl = avatarBtn.dataset.source;
             homeIsCached = false;
             showPage(pageHome, "RSS媒体阅读器");
             await renderSingleFeedFromSource(filterSourceUrl);
