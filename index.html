@@ -820,14 +820,16 @@ body{
 
 <script>
 // 全局代理配置：RSS 拉取和媒体资源分开，避免两套逻辑互相影响。
-// 如果你在 Cloudflare 上的路由不是 /rss-proxy 和 /media-proxy，只需要改这里。
+// 多个代理会并发竞速（RSS）或级联回退（媒体），修改下面的端点列表即可。
 const RSS_PROXY_ENDPOINTS = [
     "https://rss-twitter-viewer.pages.dev/rss-proxy",
     "https://rss-twitter-viewer.pages.dev/proxy",
-    "https://my-rss-proxy-sigma.vercel.app/api/proxy",
     "https://gloomy-bluejay-6924.hanyee2023.deno.net/?url="
 ];
-const MEDIA_PROXY_ENDPOINT = "https://rss-twitter-viewer.pages.dev/media-proxy";
+const MEDIA_PROXY_ENDPOINTS = [
+    "https://gloomy-bluejay-6924.hanyee2023.deno.net/?url=",
+    "https://rss-twitter-viewer.pages.dev/media-proxy"
+];
 
 // 这些域名的 RSS 或媒体资源默认走代理。需要新增国外或特殊域名时，加到这里即可。
 const FORCE_PROXY_HOSTS = [
@@ -959,16 +961,22 @@ function getRSSProxyCandidates(rssUrl) {
     return RSS_PROXY_ENDPOINTS.map(endpoint => buildProxyUrl(endpoint, rssUrl));
 }
 
+function getMediaProxyCandidates(rawUrl, isFav = false) {
+    const url = cleanMediaUrl(rawUrl);
+    if (!isHttpUrl(url)) return [];
+    if (!hostMatched(url)) return [];
+    const params = { raw: "1" };
+    if (isFav) params.cache = "long";
+    return MEDIA_PROXY_ENDPOINTS.map(endpoint => buildProxyUrl(endpoint, url, params));
+}
+
 function getProxyUrl(rawUrl, isFav = false) {
     const url = cleanMediaUrl(rawUrl);
     if (!isHttpUrl(url)) return url;
-
-    // 国内普通图片、MP4、M3U8 不动；推特/X 等指定域名才交给 media-proxy。
     if (!hostMatched(url)) return url;
-
     const params = { raw: "1" };
     if (isFav) params.cache = "long";
-    return buildProxyUrl(MEDIA_PROXY_ENDPOINT, url, params);
+    return buildProxyUrl(MEDIA_PROXY_ENDPOINTS[0], url, params);
 }
 
 function getForceMediaProxyUrl(rawUrl, isFav = false) {
@@ -977,7 +985,30 @@ function getForceMediaProxyUrl(rawUrl, isFav = false) {
     if (!hostMatched(url)) return url;
     const params = { raw: "1" };
     if (isFav) params.cache = "long";
-    return buildProxyUrl(MEDIA_PROXY_ENDPOINT, url, params);
+    return buildProxyUrl(MEDIA_PROXY_ENDPOINTS[0], url, params);
+}
+
+function getProxyFallbacksAttr(rawUrl, isFav = false) {
+    const candidates = getMediaProxyCandidates(rawUrl, isFav);
+    const fallbacks = candidates.slice(1);
+    if (fallbacks.length === 0) return "";
+    return `data-proxy-fallbacks="${escapeAttr(JSON.stringify(fallbacks))}"`;
+}
+
+function fallbackMediaProxy(el) {
+    const fallbacksStr = el.dataset.proxyFallbacks;
+    if (!fallbacksStr) return false;
+    try {
+        const fallbacks = JSON.parse(fallbacksStr);
+        let idx = parseInt(el.dataset.proxyIdx || "0", 10);
+        idx++;
+        if (idx < fallbacks.length) {
+            el.dataset.proxyIdx = String(idx);
+            el.src = fallbacks[idx];
+            return true;
+        }
+    } catch (e) {}
+    return false;
 }
 
 function escapeHtml(str) {
@@ -1526,7 +1557,7 @@ function getPlayErrorMessage(err, video, fallback = "视频播放失败"){
 function getHlsErrorMessage(data, streamUrl){
     const detail = String((data && data.details) || "");
     const type = String((data && data.type) || "");
-    const usingProxy = String(streamUrl || "").includes("/media-proxy");
+    const usingProxy = hostMatched(streamUrl);
     const sourceText = usingProxy ? "代理源" : "直连源";
     if(/manifest/i.test(detail)) return `m3u8${sourceText}主文件加载失败`;
     if(/frag|segment/i.test(detail)) return `m3u8${sourceText}分片加载失败`;
@@ -1539,11 +1570,13 @@ function getHlsErrorMessage(data, streamUrl){
 function toggleVideoPlay(video){
     if(video.classList.contains("media-video") && !video.dataset.hlsLoaded){
         video.dataset.userAttempted = "1";
+        delete video.dataset.errorShown;
         startHlsVideo(video);
         return;
     }
     if(video.paused){
         video.dataset.userAttempted = "1";
+        delete video.dataset.errorShown;
         pauseOtherVideos(video);
         video.play().catch(err => {
             console.warn("视频播放失败：", err);
@@ -1712,10 +1745,15 @@ function bindCustomMediaControls(video){
             requestMediaFullscreen(wrap, video);
         };
     }
-    // 监听全屏状态变化，更新按钮图标
-    ["fullscreenchange","webkitfullscreenchange"].forEach(evt=>{
-        document.addEventListener(evt, ()=>updateFullscreenBtnIcon(video));
-    });
+    // 监听全屏状态变化，更新按钮图标（用单次全局监听替代每个视频单独监听，避免内存泄漏）
+    if(!window._fullscreenMediaBound){
+        window._fullscreenMediaBound = true;
+        ["fullscreenchange","webkitfullscreenchange"].forEach(evt=>{
+            document.addEventListener(evt, ()=>{
+                document.querySelectorAll(".media-video, .media-video-mp4").forEach(v=>updateFullscreenBtnIcon(v));
+            });
+        });
+    }
     if(video.webkitSupportsFullscreen){
         video.addEventListener("webkitbeginfullscreen", ()=>updateFullscreenBtnIcon(video));
         video.addEventListener("webkitendfullscreen", ()=>updateFullscreenBtnIcon(video));
@@ -1745,8 +1783,15 @@ function bindCustomMediaControls(video){
 }
 
 function startHlsVideo(video){
-    const sources = [fullDecodeXml(video.dataset.src), fullDecodeXml(video.dataset.altSrc)].filter(Boolean);
-    const uniqueSources = [...new Set(sources)];
+    const sources = [fullDecodeXml(video.dataset.src)].filter(Boolean);
+    const fallbacksStr = video.dataset.proxyFallbacks;
+    if(fallbacksStr){
+        try{
+            JSON.parse(fallbacksStr).forEach(fb => sources.push(fullDecodeXml(fb)));
+        }catch(e){}
+    }
+    sources.push(fullDecodeXml(video.dataset.altSrc));
+    const uniqueSources = [...new Set(sources.filter(Boolean))];
     let sourceIndex = Number(video.dataset.hlsAttempt || 0);
     const streamUrl = uniqueSources[sourceIndex] || uniqueSources[0];
     if(!streamUrl) return;
@@ -1786,9 +1831,14 @@ function startHlsVideo(video){
         }
         const hls = new Hls({
             enableWorker: true,
-            lowLatencyMode: true,
-            maxBufferLength: 30,
+            lowLatencyMode: false,
+            maxBufferLength: 60,
+            maxMaxBufferLength: 120,
+            maxBufferSize: 60 * 1000 * 1000,
+            maxBufferHole: 0.5,
             capLevelToPlayerSize: true,
+            startLevel: -1,
+            abrEwmaDefaultEstimate: 500000,
             storage: null,
             autoStartLoad: true
         });
@@ -1817,6 +1867,8 @@ function startHlsVideo(video){
                     startHlsVideo(video);
                 }else{
                     showToast(getHlsErrorMessage(data, streamUrl));
+                    try{ hls.destroy(); }catch(e){}
+                    video.hlsInstance = null;
                 }
             }
         });
@@ -1844,10 +1896,35 @@ function preheatProxyVideo(video){
     if(video.dataset.proxyVideo !== "1") return;
     video.dataset.preheated = "1";
     if(video.classList.contains("media-video-mp4")){
-        video.preload = "metadata";
+        // 预加载元数据 + 前面一段数据
+        video.preload = "auto";
         video.load();
         return;
     }
+}
+
+// 播放后集中超前加载 MP4 视频，减少卡顿
+function boostVideoBuffer(video){
+    if(!video || video.dataset.boosting) return;
+    if(!video.classList.contains("media-video-mp4")) return;
+    video.dataset.boosting = "1";
+
+    const src = video.src;
+    if(!src) return;
+
+    // 用 fetch Range 请求预取视频前 5MB 数据，触发浏览器缓存
+    fetch(src, {
+        headers: { "Range": "bytes=0-5242880" },
+        cache: "force-cache"
+    }).catch(()=>{});
+
+    // 同时让 video 元素继续缓冲更多数据
+    try {
+        if(video.buffered.length === 0){
+            // 如果还没开始缓冲，用 preload="auto" 强制加载
+            video.preload = "auto";
+        }
+    } catch(e){}
 }
 
 function initProxyVideoPreheat(){
@@ -1881,11 +1958,24 @@ function initHlsVideo(){
                 toggleVideoPlay(video);
             });
         }
-        // 海报图加载失败回退：代理图失败时尝试直连
+        // 海报图加载失败回退：先尝试备用代理，再回退直连
         if(video.poster && video.dataset.posterDirect && !video.dataset.posterFallback){
             video.dataset.posterFallback = "1";
             const posterImg = new Image();
             posterImg.onerror = function(){
+                const fallbacksStr = video.dataset.posterProxyFallbacks;
+                if(fallbacksStr){
+                    try{
+                        const fallbacks = JSON.parse(fallbacksStr);
+                        let idx = parseInt(video.dataset.posterProxyIdx || "0", 10);
+                        idx++;
+                        if(idx < fallbacks.length){
+                            video.dataset.posterProxyIdx = String(idx);
+                            video.poster = fallbacks[idx];
+                            return;
+                        }
+                    }catch(e){}
+                }
                 if(video.dataset.posterDirect && video.poster !== video.dataset.posterDirect){
                     video.poster = video.dataset.posterDirect;
                 }
@@ -1893,7 +1983,13 @@ function initHlsVideo(){
             posterImg.src = video.poster;
         }
         video.addEventListener("error", ()=>{
-            if(video.dataset.userAttempted){
+            if(fallbackMediaProxy(video)) return;
+            if(video.dataset.directSrc && video.src !== video.dataset.directSrc){
+                video.src = video.dataset.directSrc;
+                return;
+            }
+            if(video.dataset.userAttempted && !video.dataset.errorShown){
+                video.dataset.errorShown = "1";
                 showToast(getVideoErrorMessage(video));
             }
         });
@@ -1906,6 +2002,12 @@ function initHlsVideo(){
                 video.hlsInstance.startLoad();
             }
         });
+        }
+        // MP4 视频播放时触发集中缓冲
+        if(video.classList.contains("media-video-mp4")){
+            video.addEventListener("play", ()=>{
+                boostVideoBuffer(video);
+            });
         }
         bindCustomMediaControls(video);
     });
@@ -2283,15 +2385,19 @@ function buildCard(item, isFav = false){
     const posterDirect = posterImg ? cleanMediaUrl(posterImg) : "";
     let posterAttr = posterProxy ? `poster="${escapeAttr(posterProxy)}"` : "";
     const posterDirectAttr = posterDirect ? `data-poster-direct="${escapeAttr(posterDirect)}"` : "";
+    const posterFallbacksArr = posterImg && hostMatched(posterImg) ? getMediaProxyCandidates(posterImg, isFav).slice(1) : [];
+    const posterFallbacksAttr = posterFallbacksArr.length > 0 ? `data-poster-proxy-fallbacks="${escapeAttr(JSON.stringify(posterFallbacksArr))}"` : "";
     const videoDirect = cleanMediaUrl(item.videoUrl);
     const preferProxy = hostMatched(item.videoUrl);
     const videoProxy = preferProxy ? getForceMediaProxyUrl(item.videoUrl, isFav) : "";
     const firstSrc = preferProxy ? videoProxy : videoDirect;
-    const altSrc = "";
+    const altSrc = preferProxy ? videoDirect : "";
     const proxyVideoAttr = preferProxy ? 'data-proxy-video="1"' : "";
+    const videoFallbacks = preferProxy ? getMediaProxyCandidates(item.videoUrl, isFav).slice(1) : [];
+    const videoFallbacksAttr = videoFallbacks.length > 0 ? `data-proxy-fallbacks="${escapeAttr(JSON.stringify(videoFallbacks))}"` : "";
 
     mediaHtml = `<div class="video-single-wrap">
-        <video class="media-video" data-m3u8="1" ${proxyVideoAttr} preload="none" playsinline ${posterAttr} ${posterDirectAttr} data-src="${escapeAttr(firstSrc)}" data-alt-src="${escapeAttr(altSrc)}">
+        <video class="media-video" data-m3u8="1" ${proxyVideoAttr} preload="none" playsinline ${posterAttr} ${posterDirectAttr} ${posterFallbacksAttr} data-src="${escapeAttr(firstSrc)}" data-alt-src="${escapeAttr(altSrc)}" ${videoFallbacksAttr}>
 </video>${mediaControlsHtml()}</div>`;
 }else if(item.videoUrl){
     // MP4视频：单独class media-video-mp4，完全脱离HLS逻辑
@@ -2301,11 +2407,16 @@ function buildCard(item, isFav = false){
     const posterDirect = posterImg ? cleanMediaUrl(posterImg) : "";
     let posterAttr = posterProxy ? `poster="${escapeAttr(posterProxy)}"` : "";
     const posterDirectAttr = posterDirect ? `data-poster-direct="${escapeAttr(posterDirect)}"` : "";
+    const posterFallbacksArr = posterImg && hostMatched(posterImg) ? getMediaProxyCandidates(posterImg, isFav).slice(1) : [];
+    const posterFallbacksAttr = posterFallbacksArr.length > 0 ? `data-poster-proxy-fallbacks="${escapeAttr(JSON.stringify(posterFallbacksArr))}"` : "";
     const videoProxy = getProxyUrl(item.videoUrl, isFav);
+    const videoDirect = cleanMediaUrl(item.videoUrl);
     const proxyVideoAttr = hostMatched(item.videoUrl) ? 'data-proxy-video="1"' : "";
-    
+    const videoFallbacksAttr = hostMatched(item.videoUrl) ? getProxyFallbacksAttr(item.videoUrl, isFav) : "";
+    const videoDirectAttr = videoDirect ? `data-direct-src="${escapeAttr(videoDirect)}"` : "";
+
     mediaHtml = `<div class="video-single-wrap">
-        <video ${hostMatched(item.videoUrl) ? 'crossorigin="anonymous"' : ""} class="media-video-mp4" ${proxyVideoAttr} preload="none" playsinline ${posterAttr} ${posterDirectAttr} src="${escapeAttr(videoProxy)}">
+        <video ${hostMatched(item.videoUrl) ? 'crossorigin="anonymous"' : ""} class="media-video-mp4" ${proxyVideoAttr} preload="none" playsinline ${posterAttr} ${posterDirectAttr} ${posterFallbacksAttr} src="${escapeAttr(videoProxy)}" ${videoFallbacksAttr} ${videoDirectAttr}>
 </video>${mediaControlsHtml()}</div>`;
 }else if(item.iframe){
     let iframeStr = sanitizeIframeHtml(item.iframe);
@@ -2330,8 +2441,9 @@ function buildCard(item, isFav = false){
             }
             const imgProxy = getProxyUrl(src, isFav);
             const imgDirect = cleanMediaUrl(src);
+            const imgFallbacksAttr = hostMatched(src) ? getProxyFallbacksAttr(src, isFav) : "";
             mediaHtml += `<div class="grid-img-box">
-                <img class="grid-img" ${hostMatched(src) ? 'crossorigin="anonymous"' : ""} referrerpolicy="no-referrer" data-imggroup='${escapeAttr(JSON.stringify(imgs))}' data-direct-src="${escapeAttr(imgDirect)}" src="${escapeAttr(imgProxy)}" loading="lazy" onerror="if(this.dataset.directSrc && this.src!==this.dataset.directSrc){this.src=this.dataset.directSrc;}">${overlay}
+                <img class="grid-img" ${hostMatched(src) ? 'crossorigin="anonymous"' : ""} referrerpolicy="no-referrer" decoding="async" data-imggroup='${escapeAttr(JSON.stringify(imgs))}' data-direct-src="${escapeAttr(imgDirect)}" src="${escapeAttr(imgProxy)}" loading="lazy" ${imgFallbacksAttr} onerror="if(!fallbackMediaProxy(this) && this.dataset.directSrc && this.src!==this.dataset.directSrc){this.src=this.dataset.directSrc;}">${overlay}
             </div>`;
         })
         mediaHtml += `</div></div>`;
@@ -2585,7 +2697,8 @@ function renderPreviewSlider(imgs, startIndex = 0){
         slide.className = "preview-slide";
         const imgUrl = getProxyUrl(src);
         const imgDirect = cleanMediaUrl(src);
-        slide.innerHTML = `<img class="preview-img" src="${escapeAttr(imgUrl)}" referrerpolicy="no-referrer" data-direct-src="${escapeAttr(imgDirect)}" onerror="if(this.dataset.directSrc && this.src!==this.dataset.directSrc){this.src=this.dataset.directSrc;}">`;
+        const imgFallbacksAttr = hostMatched(src) ? getProxyFallbacksAttr(src) : "";
+        slide.innerHTML = `<img class="preview-img" src="${escapeAttr(imgUrl)}" referrerpolicy="no-referrer" decoding="async" data-direct-src="${escapeAttr(imgDirect)}" ${imgFallbacksAttr} onerror="if(!fallbackMediaProxy(this) && this.dataset.directSrc && this.src!==this.dataset.directSrc){this.src=this.dataset.directSrc;}">`;
         slide.style.transform = `translateX(${(i - startIndex) * 100}%)`;
         previewWrap.appendChild(slide);
     });
@@ -2596,6 +2709,7 @@ function renderPreviewSlider(imgs, startIndex = 0){
     preloadIndexes.forEach(idx => {
         const pre = new Image();
         pre.referrerPolicy = "no-referrer";
+        pre.decoding = "async";
         pre.src = getProxyUrl(imgs[idx]);
     });
     updatePreviewTip();
@@ -2639,6 +2753,7 @@ function renderPreviewSlider(imgs, startIndex = 0){
         if(nextIdx < currentPreviewImgs.length){
             const pre = new Image();
             pre.referrerPolicy = "no-referrer";
+            pre.decoding = "async";
             pre.src = getProxyUrl(currentPreviewImgs[nextIdx]);
         }
         setTimeout(()=>{ previewSwipeLock = false; }, 260);
@@ -3034,7 +3149,7 @@ function renderManage(){
 
         // 计算该订阅源的最新更新时间和未读数
         const feedItems = localCacheArticles.filter(item => String(item.sourceUrl || "").trim() === String(f.url || "").trim());
-        let latestTime = "";
+        let latestTime = "暂无数据";
         let unreadCount = 0;
         if(feedItems.length > 0){
             const sorted = feedItems.sort((a,b)=> new Date(b.date) - new Date(a.date));
@@ -3058,7 +3173,7 @@ function renderManage(){
                 <div class="card-avatar feed-avatar-btn" data-source="${f.url}" style="background:${avatarStyle};width:36px;height:36px;flex-shrink:0;cursor:pointer;" title="点击查看该订阅源">${avatarSvg}</div>
                 <div class="feed-name-block">
                     <div class="feed-title-text">${escapeHtml(f.name||"未命名订阅")}</div>
-                    ${latestTime ? `<div class="feed-update-time">${unreadBadge}${latestTime}</div>` : ""}
+                    <div class="feed-update-time">${unreadBadge}${latestTime}</div>
                 </div>
             </div>
             <div class="feed-btn-group">
