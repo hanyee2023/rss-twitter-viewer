@@ -1904,32 +1904,38 @@ function preheatProxyVideo(video){
     if(video.dataset.proxyVideo !== "1") return;
     video.dataset.preheated = "1";
     if(video.classList.contains("media-video-mp4")){
-        // 预加载元数据 + 前面一段数据
-        video.preload = "auto";
+        // 预加载元数据
+        video.preload = "metadata";
         video.load();
         return;
     }
+    // M3U8 视频：预加载 m3u8 manifest（通过fetch触发缓存）
+    if(video.classList.contains("media-video")){
+        const src = video.dataset.src;
+        if(src) fetch(src, {cache: "force-cache", signal: AbortSignal.timeout(5000)}).catch(()=>{});
+    }
 }
 
-// 播放后集中超前加载 MP4 视频，减少卡顿
+// 播放后集中超前加载视频，减少卡顿
 function boostVideoBuffer(video){
     if(!video || video.dataset.boosting) return;
-    if(!video.classList.contains("media-video-mp4")) return;
     video.dataset.boosting = "1";
 
     const src = video.src;
     if(!src) return;
 
-    // 用 fetch Range 请求预取视频前 5MB 数据，触发浏览器缓存
+    // 用 fetch Range 请求预取视频前 3MB 数据（减少量避免占用过多带宽），带5秒超时
+    const ctrl = new AbortController();
+    const timer = setTimeout(()=>ctrl.abort(), 5000);
     fetch(src, {
-        headers: { "Range": "bytes=0-5242880" },
-        cache: "force-cache"
-    }).catch(()=>{});
+        headers: { "Range": "bytes=0-3145728" },
+        cache: "force-cache",
+        signal: ctrl.signal
+    }).catch(()=>{}).finally(()=>clearTimeout(timer));
 
     // 同时让 video 元素继续缓冲更多数据
     try {
         if(video.buffered.length === 0){
-            // 如果还没开始缓冲，用 preload="auto" 强制加载
             video.preload = "auto";
         }
     } catch(e){}
@@ -1944,7 +1950,7 @@ function initProxyVideoPreheat(){
                     mediaPreheatObserver.unobserve(entry.target);
                 }
             });
-        }, {rootMargin:"420px 0px", threshold:0.01});
+        }, {rootMargin:"300px 0px", threshold:0.01});
     }
     document.querySelectorAll(".media-video-mp4[data-proxy-video='1']").forEach(video=>{
         if(video.dataset.preheatObserve) return;
@@ -1991,11 +1997,12 @@ function initHlsVideo(){
             posterImg.src = video.poster;
         }
         video.addEventListener("error", ()=>{
-            if(fallbackMediaProxy(video)) return;
+            // 代理域名：代理失败→直连 fallback
             if(video.dataset.directSrc && video.src !== video.dataset.directSrc){
                 video.src = video.dataset.directSrc;
                 return;
             }
+            if(fallbackMediaProxy(video)) return;
             if(video.dataset.userAttempted && !video.dataset.errorShown){
                 video.dataset.errorShown = "1";
                 showToast(getVideoErrorMessage(video));
@@ -2011,12 +2018,10 @@ function initHlsVideo(){
             }
         });
         }
-        // MP4 视频播放时触发集中缓冲
-        if(video.classList.contains("media-video-mp4")){
-            video.addEventListener("play", ()=>{
-                boostVideoBuffer(video);
-            });
-        }
+        // 所有视频播放时触发集中缓冲
+        video.addEventListener("play", ()=>{
+            boostVideoBuffer(video);
+        });
         bindCustomMediaControls(video);
     });
     initProxyVideoPreheat();
@@ -2405,7 +2410,7 @@ function buildCard(item, isFav = false){
     const videoFallbacksAttr = videoFallbacks.length > 0 ? `data-proxy-fallbacks="${escapeAttr(JSON.stringify(videoFallbacks))}"` : "";
 
     mediaHtml = `<div class="video-single-wrap">
-        <video class="media-video" data-m3u8="1" ${proxyVideoAttr} preload="none" playsinline ${posterAttr} ${posterDirectAttr} ${posterFallbacksAttr} data-src="${escapeAttr(firstSrc)}" data-alt-src="${escapeAttr(altSrc)}" ${videoFallbacksAttr}>
+        <video class="media-video" data-m3u8="1" ${proxyVideoAttr} preload="metadata" playsinline ${posterAttr} ${posterDirectAttr} ${posterFallbacksAttr} data-src="${escapeAttr(firstSrc)}" data-alt-src="${escapeAttr(altSrc)}" ${videoFallbacksAttr}>
 </video>${mediaControlsHtml()}</div>`;
 }else if(item.videoUrl){
     // MP4视频：单独class media-video-mp4，完全脱离HLS逻辑
@@ -2419,12 +2424,15 @@ function buildCard(item, isFav = false){
     const posterFallbacksAttr = posterFallbacksArr.length > 0 ? `data-poster-proxy-fallbacks="${escapeAttr(JSON.stringify(posterFallbacksArr))}"` : "";
     const videoProxy = getProxyUrl(item.videoUrl, isFav);
     const videoDirect = cleanMediaUrl(item.videoUrl);
-    const proxyVideoAttr = hostMatched(item.videoUrl) ? 'data-proxy-video="1"' : "";
-    const videoFallbacksAttr = hostMatched(item.videoUrl) ? getProxyFallbacksAttr(item.videoUrl, isFav) : "";
-    const videoDirectAttr = videoDirect ? `data-direct-src="${escapeAttr(videoDirect)}"` : "";
+    const useProxy = hostMatched(item.videoUrl);
+    const proxyVideoAttr = useProxy ? 'data-proxy-video="1"' : "";
+    const videoFallbacksAttr = useProxy ? getProxyFallbacksAttr(item.videoUrl, isFav) : "";
+    // 代理域名强制走代理，直连域名保持直连
+    const videoSrc = useProxy ? videoProxy : videoDirect;
+    const videoDirectAttr = useProxy && videoDirect ? `data-direct-src="${escapeAttr(videoDirect)}"` : "";
 
     mediaHtml = `<div class="video-single-wrap">
-        <video ${hostMatched(item.videoUrl) ? 'crossorigin="anonymous"' : ""} class="media-video-mp4" ${proxyVideoAttr} preload="none" playsinline ${posterAttr} ${posterDirectAttr} ${posterFallbacksAttr} src="${escapeAttr(videoProxy)}" ${videoFallbacksAttr} ${videoDirectAttr}>
+        <video class="media-video-mp4" ${proxyVideoAttr} preload="metadata" playsinline ${posterAttr} ${posterDirectAttr} ${posterFallbacksAttr} src="${escapeAttr(videoSrc)}" ${videoFallbacksAttr} ${videoDirectAttr}>
 </video>${mediaControlsHtml()}</div>`;
 }else if(item.iframe){
     let iframeStr = sanitizeIframeHtml(item.iframe);
