@@ -1065,16 +1065,30 @@ async function fetchRSSFeed(rssUrl) {
         ? getRSSProxyCandidates(url)
         : [url];
 
-    let lastErr = null;
-    for (const candidate of candidates) {
-        try {
-            return await fetchTextWithTimeout(candidate);
-        } catch (err) {
-            lastErr = err;
-            console.warn("RSS 拉取失败，尝试下一个地址：", candidate, err.message);
-        }
-    }
-    throw lastErr || new Error("RSS 拉取失败");
+    // 并发竞速：所有代理同时请求，谁先成功就用谁的结果
+    return new Promise((resolve, reject) => {
+        let remaining = candidates.length;
+        let lastErr = null;
+        let settled = false;
+
+        candidates.forEach(candidate => {
+            fetchTextWithTimeout(candidate)
+                .then(text => {
+                    if(!settled){
+                        settled = true;
+                        resolve(text);
+                    }
+                })
+                .catch(err => {
+                    console.warn("RSS 拉取失败：", candidate, err.message);
+                    lastErr = err;
+                    remaining--;
+                    if(remaining === 0 && !settled){
+                        reject(lastErr || new Error("RSS 拉取失败"));
+                    }
+                });
+        });
+    });
 }
 
 function exportJsonFile(jsonData, fileName = "rss订阅备份.json") {
