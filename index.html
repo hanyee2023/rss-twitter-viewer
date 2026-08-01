@@ -1521,9 +1521,23 @@ function initVideoObserver(){
         entries.forEach(item=>{
             const video = item.target;
             if(!item.isIntersecting){
+                // 滑出屏幕：暂停播放
                 video.pause();
                 if(video.hlsInstance){
                     video.hlsInstance.stopLoad();
+                }
+                // 直连视频：滑出屏幕降低预加载以节省流量
+                if(video.dataset.proxyVideo !== "1" && video.classList.contains("media-video-mp4")){
+                    video.preload = "metadata";
+                }
+            }else{
+                // 滑入屏幕：恢复预加载
+                if(video.classList.contains("media-video-mp4")){
+                    if(video.dataset.proxyVideo === "1"){
+                        video.preload = "auto";
+                    }else if(!video.paused){
+                        video.preload = "auto";
+                    }
                 }
             }
         })
@@ -1905,7 +1919,7 @@ function startHlsVideo(video){
     }
 }
 
-// 可见视频预加载：进入视口的视频预取前3MB，点击即播
+// 可见视频预加载：直连视频进入视口时预取开头数据，省流量且点击即播
 let visibleVideoObserver = null;
 function initVisibleVideoPreload(){
     if(!visibleVideoObserver){
@@ -1913,8 +1927,11 @@ function initVisibleVideoPreload(){
             entries.forEach(entry=>{
                 const video = entry.target;
                 if(entry.isIntersecting){
-                    // 进入视口：预取前3MB数据，保证点击即播
-                    preloadVideoStart(video);
+                    // 只对直连视频做轻量预取，代理视频已有 preload=auto
+                    if(video.dataset.proxyVideo !== "1" && video.classList.contains("media-video-mp4")){
+                        preloadVideoStart(video, 3);
+                    }
+                    visibleVideoObserver.unobserve(video);
                 }
             });
         }, {rootMargin:"200px 0px", threshold:0.01});
@@ -1926,7 +1943,7 @@ function initVisibleVideoPreload(){
     });
 }
 
-// 预取视频开头数据（默认3MB），用于点击即播
+// 预取视频开头数据，用于点击即播
 function preloadVideoStart(video, sizeMB = 3){
     if(!video || video.dataset.preloadStarted) return;
     const src = video.src;
@@ -1947,8 +1964,8 @@ function preheatProxyVideo(video){
     if(video.dataset.proxyVideo !== "1") return;
     video.dataset.preheated = "1";
     if(video.classList.contains("media-video-mp4")){
-        // 代理视频仅预加载元数据，进入视口后再预取数据
-        video.preload = "metadata";
+        // 代理视频保持 auto 预加载，确保流畅
+        video.preload = "auto";
         video.load();
         return;
     }
@@ -1972,17 +1989,19 @@ function boostVideoBuffer(video){
     const src = video.src;
     if(!src) return;
 
-    // 切换到完整预加载模式
+    // 确保完整预加载模式
     video.preload = "auto";
 
-    // 用 fetch Range 请求预取视频前 8MB 数据，带10秒超时
-    const ctrl = new AbortController();
-    const timer = setTimeout(()=>ctrl.abort(), 10000);
-    fetch(src, {
-        headers: { "Range": "bytes=0-8388607" },
-        cache: "force-cache",
-        signal: ctrl.signal
-    }).catch(()=>{}).finally(()=>clearTimeout(timer));
+    // 直连视频额外用 Range 加速
+    if(video.dataset.proxyVideo !== "1"){
+        const ctrl = new AbortController();
+        const timer = setTimeout(()=>ctrl.abort(), 10000);
+        fetch(src, {
+            headers: { "Range": "bytes=0-8388607" },
+            cache: "force-cache",
+            signal: ctrl.signal
+        }).catch(()=>{}).finally(()=>clearTimeout(timer));
+    }
 }
 
 function initProxyVideoPreheat(){
@@ -2482,9 +2501,11 @@ function buildCard(item, isFav = false){
     // 代理域名强制走代理，直连域名保持直连
     const videoSrc = useProxy ? videoProxy : videoDirect;
     const videoDirectAttr = useProxy && videoDirect ? `data-direct-src="${escapeAttr(videoDirect)}"` : "";
+    // 代理视频默认 auto 预加载保证流畅，直连视频 metadata 省流量
+    const preloadVal = useProxy ? "auto" : "metadata";
 
     mediaHtml = `<div class="video-single-wrap">
-        <video class="media-video-mp4" ${proxyVideoAttr} preload="metadata" playsinline ${posterAttr} ${posterDirectAttr} ${posterFallbacksAttr} src="${escapeAttr(videoSrc)}" ${videoFallbacksAttr} ${videoDirectAttr}>
+        <video class="media-video-mp4" ${proxyVideoAttr} preload="${preloadVal}" playsinline ${posterAttr} ${posterDirectAttr} ${posterFallbacksAttr} src="${escapeAttr(videoSrc)}" ${videoFallbacksAttr} ${videoDirectAttr}>
 </video>${mediaControlsHtml()}</div>`;
 }else if(item.iframe){
     let iframeStr = sanitizeIframeHtml(item.iframe);
@@ -2509,9 +2530,11 @@ function buildCard(item, isFav = false){
             }
             const imgProxy = getProxyUrl(src, isFav);
             const imgDirect = cleanMediaUrl(src);
-            const imgFallbacksAttr = hostMatched(src) ? getProxyFallbacksAttr(src, isFav) : "";
+            const imgIsProxy = hostMatched(src);
+            const imgFallbacksAttr = imgIsProxy ? getProxyFallbacksAttr(src, isFav) : "";
+            const imgSrc = imgIsProxy ? imgProxy : imgDirect;
             mediaHtml += `<div class="grid-img-box">
-                <img class="grid-img" ${hostMatched(src) ? 'crossorigin="anonymous"' : ""} referrerpolicy="no-referrer" decoding="async" data-imggroup='${escapeAttr(JSON.stringify(imgs))}' data-direct-src="${escapeAttr(imgDirect)}" src="${escapeAttr(imgProxy)}" loading="lazy" ${imgFallbacksAttr} onerror="if(!fallbackMediaProxy(this) && this.dataset.directSrc && this.src!==this.dataset.directSrc){this.src=this.dataset.directSrc;}">${overlay}
+                <img class="grid-img" ${imgIsProxy ? 'crossorigin="anonymous"' : ""} referrerpolicy="no-referrer" decoding="async" data-imggroup='${escapeAttr(JSON.stringify(imgs))}' data-direct-src="${escapeAttr(imgDirect)}" src="${escapeAttr(imgSrc)}" loading="lazy" ${imgFallbacksAttr} onerror="if(!fallbackMediaProxy(this) && this.dataset.directSrc && this.src!==this.dataset.directSrc){this.src=this.dataset.directSrc;}">${overlay}
             </div>`;
         })
         mediaHtml += `</div></div>`;
