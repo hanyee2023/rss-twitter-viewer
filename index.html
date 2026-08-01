@@ -1519,14 +1519,104 @@ function initVideoObserver(){
     videoObserver = new IntersectionObserver((entries)=>{
         entries.forEach(item=>{
             const video = item.target;
-            if(!item.isIntersecting){
+            if(item.isIntersecting){
+                // 优化1：智能预加载 - 进入视口时加载元数据（封面+时长，很小）
+                if(video.preload !== "auto" && !video.dataset.userAttempted){
+                    video.preload = "metadata";
+                }
+                // 优化2：HLS 首帧优化 - 提前加载 manifest（只解析不分片，几KB）
+                if(video.classList.contains("media-video") && !video.dataset.hlsLoaded && !video.dataset.hlsPreloading){
+                    preloadHlsManifest(video);
+                }
+                // 优化5：内存优化恢复 - 滑回视口时恢复之前释放的视频
+                if(video.dataset.savedTime && !video.src){
+                    restoreVideoFromMem(video);
+                }
+            }else{
                 video.pause();
                 if(video.hlsInstance){
                     video.hlsInstance.stopLoad();
                 }
+                // 优化5：内存优化 - 长视频滑出视口且播放较多时释放内存
+                tryReleaseVideoMemory(video);
             }
         })
     }, {threshold:0.01});
+}
+
+// 优化2：HLS manifest 预加载（只加载不分片，加速首帧）
+function preloadHlsManifest(video){
+    const streamUrl = video.dataset.src;
+    if(!streamUrl || video.dataset.hlsPreloading) return;
+    video.dataset.hlsPreloading = "1";
+
+    if(video.canPlayType("application/vnd.apple.mpegurl")){
+        // Safari 原生支持，设置 src 但不播放（preload=metadata 只加载元数据）
+        video.src = streamUrl;
+        video.dataset.hlsLoaded = "1";
+        return;
+    }
+
+    if(window.Hls && Hls.isSupported()){
+        const hls = new Hls({
+            enableWorker: true,
+            lowLatencyMode: true,
+            maxBufferLength: 30,
+            capLevelToPlayerSize: true,
+            storage: null,
+            autoStartLoad: false  // 关键：只加载 manifest，不加载分片
+        });
+        video.hlsInstance = hls;
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+            hls.loadSource(streamUrl);
+        });
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            video.dataset.hlsLoaded = "1";
+            // manifest 加载完成，不 startLoad，等用户点播放再加载分片
+        });
+        hls.on(Hls.Events.ERROR, (event, data) => {
+            if(data && data.fatal){
+                console.warn("HLS预加载失败：", data);
+                // 预加载失败不影响，用户点击时会重新走 startHlsVideo 流程
+                delete video.dataset.hlsPreloading;
+            }
+        });
+    }
+}
+
+// 优化5：尝试释放视频内存（长视频+播放较多时）
+function tryReleaseVideoMemory(video){
+    // 只对 MP4 视频做，HLS 已经 stopLoad 了
+    if(!video.classList.contains("media-video-mp4")) return;
+    // 播放超过 30 秒才释放（短视频没必要）
+    if(!video.currentTime || video.currentTime < 30) return;
+    // 没有 src 就不用释放了
+    if(!video.src) return;
+
+    video.dataset.savedTime = String(video.currentTime);
+    video.dataset.savedSrc = video.src;
+    // 清空 src 释放内存
+    video.removeAttribute("src");
+    video.load();
+}
+
+// 优化5：从内存恢复视频
+function restoreVideoFromMem(video){
+    const savedSrc = video.dataset.savedSrc;
+    const savedTime = parseFloat(video.dataset.savedTime || "0");
+    if(!savedSrc) return;
+
+    video.src = savedSrc;
+    if(savedTime > 0){
+        const onLoaded = () => {
+            try { video.currentTime = savedTime; } catch(e){}
+            video.removeEventListener("loadedmetadata", onLoaded);
+        };
+        video.addEventListener("loadedmetadata", onLoaded);
+    }
+    delete video.dataset.savedTime;
+    delete video.dataset.savedSrc;
 }
 
 
@@ -1572,15 +1662,85 @@ function toggleVideoPlay(video){
         return;
     }
     if(video.paused){
+        video.dataset.userAttempted = "1";
+        video.preload = "auto";
         video.play().catch(err => {
             console.warn("视频播放失败：", err);
-            showToast("视频播放失败");
+            // 优化4：自动重试一次（网络波动场景）
+            if(!video.dataset.playRetried){
+                video.dataset.playRetried = "1";
+                console.log("自动重试播放...");
+                video.load();
+                video.play().catch(err2 => {
+                    console.warn("重试也失败：", err2);
+                    const msg = getPlayErrorMessage(err2, video, "视频播放失败");
+                    if(msg) showToast(msg);
+                });
+            }else{
+                const msg = getPlayErrorMessage(err, video, "视频播放失败");
+                if(msg) showToast(msg);
+            }
         });
     }else{
         video.pause();
         if(video.hlsInstance) video.hlsInstance.stopLoad();
     }
 }
+
+// 优化4：MP4 视频加载错误自动重试（切换 fallback 源）
+function bindVideoErrorRetry(video){
+    if(video.dataset.errorRetryBound) return;
+    video.dataset.errorRetryBound = "1";
+    video.addEventListener("error", () => {
+        // 只对 MP4 做自动 fallback 重试
+        if(!video.classList.contains("media-video-mp4")) return;
+        if(video.dataset.errorRetried) {
+            const msg = getVideoErrorMessage(video, "视频加载失败");
+            if(msg && !video.dataset.errorShown){
+                video.dataset.errorShown = "1";
+                showToast(msg);
+            }
+            return;
+        }
+        video.dataset.errorRetried = "1";
+        console.log("视频加载失败，尝试切换备用源...");
+        // 尝试 fallback 到下一个代理或直连
+        if(fallbackMediaProxy(video)){
+            // 切换成功，重新加载
+            video.load();
+        }
+    });
+}
+// 优化6：低网速检测 - waiting 频繁触发时提示
+function bindSlowNetworkDetect(video){
+    if(video.dataset.slowNetBound) return;
+    video.dataset.slowNetBound = "1";
+
+    let waitingTimes = [];
+    let slowWarned = false;
+
+    video.addEventListener("waiting", () => {
+        if(slowWarned) return;
+        const now = Date.now();
+        // 只保留最近 10 秒内的 waiting 记录
+        waitingTimes = waitingTimes.filter(t => now - t < 10000);
+        waitingTimes.push(now);
+        // 10 秒内出现 3 次以上 waiting，认为网络较慢
+        if(waitingTimes.length >= 3 && !video.dataset.slowWarnShown){
+            video.dataset.slowWarnShown = "1";
+            slowWarned = true;
+            showToast("当前网络较慢，播放可能卡顿");
+        }
+    });
+
+    // 播放顺畅一段时间后重置计数（用户可能切换到了好网络）
+    video.addEventListener("playing", () => {
+        if(slowWarned) return;
+        const now = Date.now();
+        waitingTimes = waitingTimes.filter(t => now - t < 10000);
+    });
+}
+
 
 function formatMediaTime(seconds){
     if(!Number.isFinite(seconds) || seconds < 0) return "00:00";
@@ -1768,8 +1928,17 @@ function bindCustomMediaControls(video){
         });
     }
 
-    ["play","pause","timeupdate","progress","durationchange","loadedmetadata","volumechange","ended"].forEach(evt=>{
+    ["play","pause","timeupdate","durationchange","loadedmetadata","volumechange","ended"].forEach(evt=>{
         video.addEventListener(evt, ()=>updateMediaControls(video));
+    });
+    // 优化3：progress 事件节流（100ms 最多一次，减少 DOM 操作）
+    let _progressTimer = null;
+    video.addEventListener("progress", ()=>{
+        if(_progressTimer) return;
+        _progressTimer = setTimeout(()=>{
+            _progressTimer = null;
+            updateMediaControls(video);
+        }, 100);
     });
     updateMediaControls(video);
 }
@@ -1852,6 +2021,10 @@ function initHlsVideo(){
         });
         }
         bindCustomMediaControls(video);
+        // 优化4：绑定错误自动重试
+        bindVideoErrorRetry(video);
+        // 优化6：绑定低网速检测
+        bindSlowNetworkDetect(video);
     });
 }
 
