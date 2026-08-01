@@ -1079,7 +1079,6 @@ let updateFloatTimer = null;
 let lastRefreshTime = Number(localStorage.getItem(LAST_REFRESH_KEY)) || 0;
 let rssRefreshPromise = null;
 let renderedArticleCount = 0;
-let mediaPreheatObserver = null;
 
 async function fetchTextWithTimeout(fetchUrl) {
     const controller = new AbortController();
@@ -1530,14 +1529,6 @@ function initVideoObserver(){
     }, {threshold:0.01});
 }
 
-function pauseOtherVideos(currentVideo){
-    document.querySelectorAll(".media-video, .media-video-mp4").forEach(v=>{
-        if(v !== currentVideo && !v.paused){
-            v.pause();
-            if(v.hlsInstance) v.hlsInstance.stopLoad();
-        }
-    });
-}
 
 function getVideoErrorMessage(video, fallback = "视频播放失败"){
     const err = video && video.error;
@@ -1577,28 +1568,15 @@ function getHlsErrorMessage(data, streamUrl){
 
 function toggleVideoPlay(video){
     if(video.classList.contains("media-video") && !video.dataset.hlsLoaded){
-        video.dataset.userAttempted = "1";
-        delete video.dataset.errorShown;
         startHlsVideo(video);
         return;
     }
     if(video.paused){
-        video.dataset.userAttempted = "1";
-        delete video.dataset.errorShown;
-        pauseOtherVideos(video);
-        // 点击播放时立即切换到完整预加载模式
-        video.preload = "auto";
-        // 代理视频：优先用 Range 预取开头数据加速启动
-        if(video.classList.contains("media-video-mp4")){
-            preloadVideoStart(video, 6);
-        }
         video.play().catch(err => {
             console.warn("视频播放失败：", err);
-            const msg = getPlayErrorMessage(err, video, "视频播放失败");
-            if(msg) showToast(msg);
+            showToast("视频播放失败");
         });
     }else{
-        delete video.dataset.pendingPlay;
         video.pause();
         if(video.hlsInstance) video.hlsInstance.stopLoad();
     }
@@ -1797,38 +1775,13 @@ function bindCustomMediaControls(video){
 }
 
 function startHlsVideo(video){
-    const sources = [fullDecodeXml(video.dataset.src)].filter(Boolean);
-    const fallbacksStr = video.dataset.proxyFallbacks;
-    if(fallbacksStr){
-        try{
-            JSON.parse(fallbacksStr).forEach(fb => sources.push(fullDecodeXml(fb)));
-        }catch(e){}
-    }
-    sources.push(fullDecodeXml(video.dataset.altSrc));
-    const uniqueSources = [...new Set(sources.filter(Boolean))];
-    let sourceIndex = Number(video.dataset.hlsAttempt || 0);
-    const streamUrl = uniqueSources[sourceIndex] || uniqueSources[0];
+    const streamUrl = video.dataset.src;
     if(!streamUrl) return;
 
-    pauseOtherVideos(video);
-    const manualSecondClick = video.dataset.proxyVideo === "1";
-
-    const playNow = (retry = true) => {
+    const playNow = () => {
         video.play().catch(err => {
             console.warn("m3u8播放失败：", err);
-            if(retry && err && err.name !== "NotAllowedError"){
-                const retryPlay = ()=>{
-                    video.removeEventListener("canplay", retryPlay);
-                    video.removeEventListener("loadeddata", retryPlay);
-                    playNow(false);
-                };
-                video.addEventListener("canplay", retryPlay, {once:true});
-                video.addEventListener("loadeddata", retryPlay, {once:true});
-                setTimeout(()=>playNow(false), 450);
-            }else{
-                const msg = getPlayErrorMessage(err, video, "m3u8播放失败");
-                if(msg) showToast(msg);
-            }
+            showToast("视频播放失败");
         });
     };
 
@@ -1838,23 +1791,18 @@ function startHlsVideo(video){
         return;
     }
 
-    if (window.Hls && Hls.isSupported()) {
-        if(video.hlsInstance){
-            try{ video.hlsInstance.destroy(); }catch(e){}
-            video.hlsInstance = null;
-        }
+    if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        video.src = streamUrl;
+        video.dataset.hlsLoaded = "1";
+        playNow();
+    } else if (window.Hls && Hls.isSupported()) {
         const hls = new Hls({
             enableWorker: true,
-            lowLatencyMode: false,
-            maxBufferLength: 60,
-            maxMaxBufferLength: 120,
-            maxBufferSize: 60 * 1000 * 1000,
-            maxBufferHole: 0.5,
+            lowLatencyMode: true,
+            maxBufferLength: 30,
             capLevelToPlayerSize: true,
-            startLevel: -1,
-            abrEwmaDefaultEstimate: 500000,
             storage: null,
-            autoStartLoad: true
+            autoStartLoad: false
         });
         video.hlsInstance = hls;
         hls.attachMedia(video);
@@ -1864,144 +1812,21 @@ function startHlsVideo(video){
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
             hls.startLoad();
             video.dataset.hlsLoaded = "1";
-            if(!manualSecondClick){
-                playNow();
-            }
+            playNow();
         });
         hls.on(Hls.Events.ERROR, (event, data) => {
             if(data && data.fatal){
                 console.warn("HLS致命错误：", data);
-                const nextIndex = sourceIndex + 1;
-                if(nextIndex < uniqueSources.length){
-                    showToast(`${getHlsErrorMessage(data, streamUrl)}，正在尝试备用源`);
-                    video.dataset.hlsAttempt = String(nextIndex);
-                    delete video.dataset.hlsLoaded;
-                    try{ hls.destroy(); }catch(e){}
-                    video.hlsInstance = null;
-                    startHlsVideo(video);
-                }else{
-                    showToast(getHlsErrorMessage(data, streamUrl));
-                    try{ hls.destroy(); }catch(e){}
-                    video.hlsInstance = null;
-                }
+                showToast("m3u8加载失败");
             }
         });
-    } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        video.src = streamUrl;
-        const markNativeLoaded = ()=>{
-            video.dataset.hlsLoaded = "1";
-            video.removeEventListener("loadedmetadata", markNativeLoaded);
-            video.removeEventListener("canplay", markNativeLoaded);
-        };
-        video.addEventListener("loadedmetadata", markNativeLoaded, {once:true});
-        video.addEventListener("canplay", markNativeLoaded, {once:true});
-        if(manualSecondClick){
-            video.load();
-        }else{
-            playNow();
-        }
     } else {
         showToast("当前浏览器不支持m3u8播放");
     }
 }
 
-// 可见视频预加载：进入视口的视频预取前3MB，点击即播
-let visibleVideoObserver = null;
-function initVisibleVideoPreload(){
-    if(!visibleVideoObserver){
-        visibleVideoObserver = new IntersectionObserver(entries=>{
-            entries.forEach(entry=>{
-                const video = entry.target;
-                if(entry.isIntersecting){
-                    // 进入视口：预取前3MB数据，保证点击即播
-                    preloadVideoStart(video);
-                }
-            });
-        }, {rootMargin:"200px 0px", threshold:0.01});
-    }
-    document.querySelectorAll(".media-video-mp4").forEach(video=>{
-        if(video.dataset.visiblePreloadObserve) return;
-        video.dataset.visiblePreloadObserve = "1";
-        visibleVideoObserver.observe(video);
-    });
-}
 
-// 预取视频开头数据（默认3MB），用于点击即播
-function preloadVideoStart(video, sizeMB = 3){
-    if(!video || video.dataset.preloadStarted) return;
-    const src = video.src;
-    if(!src) return;
-    video.dataset.preloadStarted = "1";
-    const size = sizeMB * 1024 * 1024;
-    const ctrl = new AbortController();
-    const timer = setTimeout(()=>ctrl.abort(), 10000);
-    fetch(src, {
-        headers: { "Range": `bytes=0-${size - 1}` },
-        cache: "force-cache",
-        signal: ctrl.signal
-    }).catch(()=>{}).finally(()=>clearTimeout(timer));
-}
 
-function preheatProxyVideo(video){
-    if(!video || video.dataset.preheated || video.dataset.hlsLoaded) return;
-    if(video.dataset.proxyVideo !== "1") return;
-    video.dataset.preheated = "1";
-    if(video.classList.contains("media-video-mp4")){
-        // 代理视频仅预加载元数据，进入视口后再预取数据
-        video.preload = "metadata";
-        video.load();
-        return;
-    }
-    // M3U8 视频：预加载 m3u8 manifest（通过fetch触发缓存）
-    if(video.classList.contains("media-video")){
-        const src = video.dataset.src;
-        if(src) fetch(src, {cache: "force-cache", signal: AbortSignal.timeout(5000)}).catch(()=>{});
-    }
-}
-
-// 播放后集中超前加载视频，减少卡顿
-function boostVideoBuffer(video){
-    if(!video) return;
-
-    // M3U8 视频：通知 HLS.js 继续加载更多分片
-    if(video.hlsInstance){
-        video.hlsInstance.startLoad();
-        return;
-    }
-
-    const src = video.src;
-    if(!src) return;
-
-    // 切换到完整预加载模式
-    video.preload = "auto";
-
-    // 用 fetch Range 请求预取视频前 8MB 数据，带10秒超时
-    const ctrl = new AbortController();
-    const timer = setTimeout(()=>ctrl.abort(), 10000);
-    fetch(src, {
-        headers: { "Range": "bytes=0-8388607" },
-        cache: "force-cache",
-        signal: ctrl.signal
-    }).catch(()=>{}).finally(()=>clearTimeout(timer));
-}
-
-function initProxyVideoPreheat(){
-    if(!mediaPreheatObserver){
-        mediaPreheatObserver = new IntersectionObserver(entries=>{
-            entries.forEach(entry=>{
-                if(entry.isIntersecting){
-                    preheatProxyVideo(entry.target);
-                    mediaPreheatObserver.unobserve(entry.target);
-                }
-            });
-        }, {rootMargin:"300px 0px", threshold:0.01});
-    }
-    document.querySelectorAll(".media-video-mp4[data-proxy-video='1']").forEach(video=>{
-        if(video.dataset.preheatObserve) return;
-        video.dataset.preheatObserve = "1";
-        mediaPreheatObserver.observe(video);
-    });
-}
 
 function initHlsVideo(){
     document.querySelectorAll(".media-video[data-m3u8], .media-video-mp4").forEach(video=>{
@@ -2016,42 +1841,6 @@ function initHlsVideo(){
                 toggleVideoPlay(video);
             });
         }
-        // 海报图加载失败回退：先尝试备用代理，再回退直连
-        if(video.poster && video.dataset.posterDirect && !video.dataset.posterFallback){
-            video.dataset.posterFallback = "1";
-            const posterImg = new Image();
-            posterImg.onerror = function(){
-                const fallbacksStr = video.dataset.posterProxyFallbacks;
-                if(fallbacksStr){
-                    try{
-                        const fallbacks = JSON.parse(fallbacksStr);
-                        let idx = parseInt(video.dataset.posterProxyIdx || "0", 10);
-                        idx++;
-                        if(idx < fallbacks.length){
-                            video.dataset.posterProxyIdx = String(idx);
-                            video.poster = fallbacks[idx];
-                            return;
-                        }
-                    }catch(e){}
-                }
-                if(video.dataset.posterDirect && video.poster !== video.dataset.posterDirect){
-                    video.poster = video.dataset.posterDirect;
-                }
-            };
-            posterImg.src = video.poster;
-        }
-        video.addEventListener("error", ()=>{
-            // 代理域名：代理失败→直连 fallback
-            if(video.dataset.directSrc && video.src !== video.dataset.directSrc){
-                video.src = video.dataset.directSrc;
-                return;
-            }
-            if(fallbackMediaProxy(video)) return;
-            if(video.dataset.userAttempted && !video.dataset.errorShown){
-                video.dataset.errorShown = "1";
-                showToast(getVideoErrorMessage(video));
-            }
-        });
         if(video.classList.contains("media-video")){
             video.addEventListener("play", ()=>{
             if(!video.dataset.hlsLoaded) {
@@ -2062,18 +1851,8 @@ function initHlsVideo(){
             }
         });
         }
-        // 所有视频播放时触发集中缓冲
-        video.addEventListener("play", ()=>{
-            boostVideoBuffer(video);
-        });
-        // 缓冲不足暂停时自动继续加载
-        video.addEventListener("waiting", ()=>{
-            boostVideoBuffer(video);
-        });
         bindCustomMediaControls(video);
     });
-    initProxyVideoPreheat();
-    initVisibleVideoPreload();
 }
 
 function bindVideoPauseObserver(){
@@ -2158,7 +1937,6 @@ function showPage(targetDom, titleText) {
         bindVideoPauseObserver();
         initHlsVideo();
         bindScrollLoadMore();
-        initVisibleVideoPreload();
         lastPageTitle = titleText;
         return;
     }
@@ -2376,7 +2154,6 @@ function renderPagedList(reset = false){
     bindAllCardEvent();
     bindVideoPauseObserver();
     initHlsVideo();
-    initVisibleVideoPreload();
 }
 function bindScrollLoadMore(){
     if(scrollObserver) scrollObserver.disconnect();
@@ -2462,7 +2239,7 @@ function buildCard(item, isFav = false){
     const videoFallbacksAttr = videoFallbacks.length > 0 ? `data-proxy-fallbacks="${escapeAttr(JSON.stringify(videoFallbacks))}"` : "";
 
     mediaHtml = `<div class="video-single-wrap">
-        <video class="media-video" data-m3u8="1" ${proxyVideoAttr} preload="metadata" playsinline ${posterAttr} ${posterDirectAttr} ${posterFallbacksAttr} data-src="${escapeAttr(firstSrc)}" data-alt-src="${escapeAttr(altSrc)}" ${videoFallbacksAttr}>
+        <video class="media-video" data-m3u8="1" ${proxyVideoAttr} preload="none" playsinline ${posterAttr} ${posterDirectAttr} ${posterFallbacksAttr} data-src="${escapeAttr(firstSrc)}" data-alt-src="${escapeAttr(altSrc)}" ${videoFallbacksAttr}>
 </video>${mediaControlsHtml()}</div>`;
 }else if(item.videoUrl){
     // MP4视频：单独class media-video-mp4，完全脱离HLS逻辑
@@ -2484,7 +2261,7 @@ function buildCard(item, isFav = false){
     const videoDirectAttr = useProxy && videoDirect ? `data-direct-src="${escapeAttr(videoDirect)}"` : "";
 
     mediaHtml = `<div class="video-single-wrap">
-        <video class="media-video-mp4" ${proxyVideoAttr} preload="metadata" playsinline ${posterAttr} ${posterDirectAttr} ${posterFallbacksAttr} src="${escapeAttr(videoSrc)}" ${videoFallbacksAttr} ${videoDirectAttr}>
+        <video class="media-video-mp4" ${proxyVideoAttr} preload="none" playsinline ${posterAttr} ${posterDirectAttr} ${posterFallbacksAttr} src="${escapeAttr(videoSrc)}" ${videoFallbacksAttr} ${videoDirectAttr}>
 </video>${mediaControlsHtml()}</div>`;
 }else if(item.iframe){
     let iframeStr = sanitizeIframeHtml(item.iframe);
@@ -2509,9 +2286,11 @@ function buildCard(item, isFav = false){
             }
             const imgProxy = getProxyUrl(src, isFav);
             const imgDirect = cleanMediaUrl(src);
-            const imgFallbacksAttr = hostMatched(src) ? getProxyFallbacksAttr(src, isFav) : "";
+            const imgIsProxy = hostMatched(src);
+            const imgFallbacksAttr = imgIsProxy ? getProxyFallbacksAttr(src, isFav) : "";
+            const imgSrc = imgIsProxy ? imgProxy : imgDirect;
             mediaHtml += `<div class="grid-img-box">
-                <img class="grid-img" ${hostMatched(src) ? 'crossorigin="anonymous"' : ""} referrerpolicy="no-referrer" decoding="async" data-imggroup='${escapeAttr(JSON.stringify(imgs))}' data-direct-src="${escapeAttr(imgDirect)}" src="${escapeAttr(imgProxy)}" loading="lazy" ${imgFallbacksAttr} onerror="if(!fallbackMediaProxy(this) && this.dataset.directSrc && this.src!==this.dataset.directSrc){this.src=this.dataset.directSrc;}">${overlay}
+                <img class="grid-img" ${imgIsProxy ? 'crossorigin="anonymous"' : ""} referrerpolicy="no-referrer" decoding="async" data-imggroup='${escapeAttr(JSON.stringify(imgs))}' data-direct-src="${escapeAttr(imgDirect)}" src="${escapeAttr(imgSrc)}" loading="lazy" ${imgFallbacksAttr} onerror="if(!fallbackMediaProxy(this) && this.dataset.directSrc && this.src!==this.dataset.directSrc){this.src=this.dataset.directSrc;}">${overlay}
             </div>`;
         })
         mediaHtml += `</div></div>`;
@@ -2594,7 +2373,6 @@ function renderFav(){
     bindAllCardEvent();
     bindVideoPauseObserver();
     initHlsVideo();
-    initVisibleVideoPreload();
     const favLoad = document.getElementById("favLoadMore");
     if(favLoad){
         const favObserver = new IntersectionObserver(async (e)=>{
@@ -2611,8 +2389,7 @@ function renderFav(){
                 bindAllCardEvent();
                 bindVideoPauseObserver();
                 initHlsVideo();
-                initVisibleVideoPreload();
-                favObserver.disconnect();
+                                        favObserver.disconnect();
                 setTimeout(()=>{
                     const newFavLoad = document.getElementById("favLoadMore");
                     if(newFavLoad) favObserver.observe(newFavLoad);
@@ -3024,7 +2801,6 @@ function renderSearchResult(keyword){
     bindAllCardEvent();
     bindVideoPauseObserver();
     initHlsVideo();
-    initVisibleVideoPreload();
 }
 searchInput.oninput = function(){
     renderSearchResult(this.value);
