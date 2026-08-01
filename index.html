@@ -1899,9 +1899,10 @@ function preheatProxyVideo(video){
     if(video.dataset.proxyVideo !== "1") return;
     video.dataset.preheated = "1";
     if(video.classList.contains("media-video-mp4")){
-        // 代理视频预加载自动缓冲更多数据
-        video.preload = "auto";
-        video.load();
+        // 代理视频进入视口，确保 auto 预加载（已有的话不动，不打断缓冲）
+        if(video.preload !== "auto"){
+            video.preload = "auto";
+        }
         return;
     }
     // M3U8 视频：预加载 m3u8 manifest（通过fetch触发缓存）
