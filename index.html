@@ -1526,10 +1526,6 @@ function initVideoObserver(){
                 if(video.hlsInstance){
                     video.hlsInstance.stopLoad();
                 }
-                // 滑出屏幕降低预加载，释放带宽
-                if(video.classList.contains("media-video-mp4")){
-                    video.preload = "metadata";
-                }
             }
         })
         // 可见性变化后重新调度预加载
@@ -1538,119 +1534,53 @@ function initVideoObserver(){
 }
 
 // ========== 智能视频预加载系统 ==========
-// 核心思路：同时只让2-3个视频全速预加载，避免带宽争抢
-// 优先级：正在播放 > 最居中可见 > 下方可见 > 上方可见
-const SMART_PRELOAD_CONCURRENCY = 3; // 同时全速预加载的视频数量
-const SMART_PRELOAD_BELOW_EXTRA = 2; // 下方额外轻量预加载的视频数量
+// 只做一件事：滑出屏幕的代理视频降为 metadata 省带宽，滑入时恢复 auto
+// 不影响正在播放的视频，不打断正在缓冲的视频
 let smartPreloadTimer = null;
-let smartPreloadRunning = false;
+let scrollPreloadTimer = null;
 
 function scheduleSmartPreload(){
     if(smartPreloadTimer) clearTimeout(smartPreloadTimer);
-    smartPreloadTimer = setTimeout(runSmartPreload, 150);
+    smartPreloadTimer = setTimeout(runSmartPreload, 200);
 }
 
 function runSmartPreload(){
-    if(smartPreloadRunning) return;
-    smartPreloadRunning = true;
+    const allVideos = Array.from(document.querySelectorAll(".media-video-mp4[data-proxy-video='1']"));
+    if(allVideos.length === 0) return;
 
-    const allVideos = Array.from(document.querySelectorAll(".media-video-mp4"));
-    if(allVideos.length === 0){
-        smartPreloadRunning = false;
-        return;
-    }
-
-    // 计算每个视频的可见比例和位置
     const viewportTop = mainWrap.scrollTop;
     const viewportHeight = mainWrap.clientHeight;
-    const viewportCenter = viewportTop + viewportHeight / 2;
+    const bufferTop = viewportTop - 100; // 上方100px缓冲
+    const bufferBottom = viewportTop + viewportHeight + 200; // 下方200px缓冲
 
-    const videoStates = allVideos.map(video => {
+    allVideos.forEach(video => {
+        // 正在播放的不动
+        if(!video.paused) return;
+
         const rect = video.getBoundingClientRect();
         const mainRect = mainWrap.getBoundingClientRect();
         const videoTop = rect.top - mainRect.top + viewportTop;
         const videoBottom = videoTop + rect.height;
-        const videoCenter = videoTop + rect.height / 2;
 
-        // 计算可见比例
-        const visibleTop = Math.max(videoTop, viewportTop);
-        const visibleBottom = Math.min(videoBottom, viewportTop + viewportHeight);
-        const visibleHeight = Math.max(0, visibleBottom - visibleTop);
-        const visibleRatio = rect.height > 0 ? visibleHeight / rect.height : 0;
-
-        // 距离视口中心的距离（越近优先级越高）
-        const distFromCenter = Math.abs(videoCenter - viewportCenter);
-
-        // 位置标记：在视口下方还是上方
-        const isBelow = videoCenter > viewportCenter;
-
-        return {
-            video,
-            visibleRatio,
-            distFromCenter,
-            isBelow,
-            isPlaying: !video.paused,
-            isProxy: video.dataset.proxyVideo === "1",
-            hasBuffer: video.buffered.length > 0 && video.buffered.end(0) > 5
-        };
-    });
-
-    // 按优先级排序
-    videoStates.sort((a, b) => {
-        // 正在播放的最高优先级
-        if(a.isPlaying && !b.isPlaying) return -1;
-        if(!a.isPlaying && b.isPlaying) return 1;
-        // 已缓冲足够的排后面（让出带宽给没缓冲的）
-        if(a.hasBuffer && !b.hasBuffer) return 1;
-        if(!a.hasBuffer && b.hasBuffer) return -1;
-        // 可见比例高的优先
-        if(b.visibleRatio !== a.visibleRatio) return b.visibleRatio - a.visibleRatio;
-        // 距离中心近的优先
-        return a.distFromCenter - b.distFromCenter;
-    });
-
-    // 分配预加载等级
-    let fullCount = 0;
-    videoStates.forEach((state, index) => {
-        const video = state.video;
-
-        if(state.isPlaying){
-            // 正在播放：全速加载
-            video.preload = "auto";
-            return;
-        }
-
-        if(state.visibleRatio <= 0){
-            // 完全不可见：只加载元数据
-            video.preload = "metadata";
-            return;
-        }
-
-        // 已缓冲超过15秒的视频：降低预加载，让出带宽
-        if(state.hasBuffer && fullCount >= SMART_PRELOAD_CONCURRENCY){
-            video.preload = "metadata";
-            return;
-        }
-
-        if(fullCount < SMART_PRELOAD_CONCURRENCY){
-            // 前N个可见视频：全速预加载
-            video.preload = "auto";
-            fullCount++;
+        // 完全不在可视范围内（上下都超出缓冲）→ 降为 metadata 省带宽
+        if(videoBottom < bufferTop || videoTop > bufferBottom){
+            if(video.preload !== "metadata"){
+                video.preload = "metadata";
+            }
         }else{
-            // 其他可见视频：轻量预加载
-            video.preload = "metadata";
+            // 在可视范围内 → 保持 auto 预加载
+            if(video.preload !== "auto"){
+                video.preload = "auto";
+            }
         }
     });
-
-    smartPreloadRunning = false;
 }
 
-// 监听滚动，停止滚动后重新调度预加载
-let scrollPreloadTimer = null;
+// 监听滚动，停止滚动后重新调度
 function initSmartPreloadScroll(){
     mainWrap.addEventListener("scroll", ()=>{
         if(scrollPreloadTimer) clearTimeout(scrollPreloadTimer);
-        scrollPreloadTimer = setTimeout(scheduleSmartPreload, 200);
+        scrollPreloadTimer = setTimeout(scheduleSmartPreload, 300);
     }, {passive:true});
 }
 
@@ -1710,14 +1640,11 @@ function toggleVideoPlay(video){
         video.dataset.userAttempted = "1";
         delete video.dataset.errorShown;
         pauseOtherVideos(video);
-        // 点击播放：立即切换到最高优先级预加载
+        // 确保完整预加载
         video.preload = "auto";
-        video.load();
-        // 立即重新调度预加载，确保当前视频获得全部带宽
-        scheduleSmartPreload();
         // 用 Range 预取开头数据加速启动
         if(video.classList.contains("media-video-mp4")){
-            preloadVideoStart(video, 8);
+            preloadVideoStart(video, 6);
         }
         video.play().catch(err => {
             console.warn("视频播放失败：", err);
@@ -1979,12 +1906,7 @@ function startHlsVideo(video){
             maxBufferHole: 0.5,
             capLevelToPlayerSize: true,
             startLevel: -1,
-            // 用较低初始码率快速启动，然后逐步提升质量
-            abrEwmaDefaultEstimate: 300000,
-            abrEwmaFastLive: 3,
-            abrEwmaSlowLive: 8,
-            // 初始加载更多分片保证快速起播
-            startPosition: -1,
+            abrEwmaDefaultEstimate: 500000,
             storage: null,
             autoStartLoad: true
         });
@@ -2082,8 +2004,8 @@ function preheatProxyVideo(video){
     if(video.dataset.proxyVideo !== "1") return;
     video.dataset.preheated = "1";
     if(video.classList.contains("media-video-mp4")){
-        // 代理视频由智能预加载系统统一调度，这里只触发加载元数据
-        video.preload = "metadata";
+        // 代理视频进入视口，确保 auto 预加载
+        video.preload = "auto";
         video.load();
         return;
     }
@@ -2204,13 +2126,6 @@ function initHlsVideo(){
         // 缓冲不足暂停时自动继续加载
         video.addEventListener("waiting", ()=>{
             boostVideoBuffer(video);
-        });
-        // 缓冲进度更新时重新调度预加载（已缓冲足够的视频让出带宽给下一个）
-        video.addEventListener("progress", ()=>{
-            if(video.buffered.length > 0 && video.buffered.end(0) > 15 && !video.dataset.bufferYielded){
-                video.dataset.bufferYielded = "1";
-                scheduleSmartPreload();
-            }
         });
         bindCustomMediaControls(video);
     });
@@ -2630,8 +2545,8 @@ function buildCard(item, isFav = false){
     // 代理域名强制走代理，直连域名保持直连
     const videoSrc = useProxy ? videoProxy : videoDirect;
     const videoDirectAttr = useProxy && videoDirect ? `data-direct-src="${escapeAttr(videoDirect)}"` : "";
-    // 初始全部 metadata，由智能预加载系统动态升级可见视频为 auto
-    const preloadVal = "metadata";
+    // 代理视频默认 auto 预加载保证流畅，直连视频 metadata 省流量
+    const preloadVal = useProxy ? "auto" : "metadata";
 
     mediaHtml = `<div class="video-single-wrap">
         <video class="media-video-mp4" ${proxyVideoAttr} preload="${preloadVal}" playsinline ${posterAttr} ${posterDirectAttr} ${posterFallbacksAttr} src="${escapeAttr(videoSrc)}" ${videoFallbacksAttr} ${videoDirectAttr}>
