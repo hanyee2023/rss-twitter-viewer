@@ -850,7 +850,12 @@ const FORCE_PROXY_HOSTS = [
     "abs.twimg.com",
     "xcancel.com",
     "nitter.net",
-    "video.shturl."
+    "xxxfollow.com",
+    "media.redgifs.com", 
+    "redd.it",
+    "770118.xyz",
+    "phe69",
+    "3go.fun"
 ];
 
 function normalizeUrl(rawUrl) {
@@ -1581,8 +1586,12 @@ function toggleVideoPlay(video){
         video.dataset.userAttempted = "1";
         delete video.dataset.errorShown;
         pauseOtherVideos(video);
-        // 确保完整预加载模式
+        // 点击播放时立即切换到完整预加载模式
         video.preload = "auto";
+        // 代理视频：优先用 Range 预取开头数据加速启动
+        if(video.classList.contains("media-video-mp4")){
+            preloadVideoStart(video, 6);
+        }
         video.play().catch(err => {
             console.warn("视频播放失败：", err);
             const msg = getPlayErrorMessage(err, video, "视频播放失败");
@@ -1896,15 +1905,63 @@ function startHlsVideo(video){
     }
 }
 
+// 可见视频预加载：进入视口的视频预取前3MB，点击即播
+let visibleVideoObserver = null;
+function initVisibleVideoPreload(){
+    if(!visibleVideoObserver){
+        visibleVideoObserver = new IntersectionObserver(entries=>{
+            entries.forEach(entry=>{
+                const video = entry.target;
+                if(entry.isIntersecting){
+                    // 进入视口：预取前3MB数据，保证点击即播
+                    preloadVideoStart(video);
+                }
+            });
+        }, {rootMargin:"200px 0px", threshold:0.01});
+    }
+    document.querySelectorAll(".media-video-mp4").forEach(video=>{
+        if(video.dataset.visiblePreloadObserve) return;
+        video.dataset.visiblePreloadObserve = "1";
+        visibleVideoObserver.observe(video);
+    });
+}
+
+// 预取视频开头数据（默认3MB），用于点击即播
+function preloadVideoStart(video, sizeMB = 3){
+    if(!video || video.dataset.preloadStarted) return;
+    const src = video.src;
+    if(!src) return;
+    video.dataset.preloadStarted = "1";
+    const size = sizeMB * 1024 * 1024;
+    const ctrl = new AbortController();
+    const timer = setTimeout(()=>ctrl.abort(), 10000);
+    fetch(src, {
+        headers: { "Range": `bytes=0-${size - 1}` },
+        cache: "force-cache",
+        signal: ctrl.signal
+    }).catch(()=>{}).finally(()=>clearTimeout(timer));
+}
+
 function preheatProxyVideo(video){
-    // 所有视频已经是 preload="auto"，不需要额外预热
-    return;
+    if(!video || video.dataset.preheated || video.dataset.hlsLoaded) return;
+    if(video.dataset.proxyVideo !== "1") return;
+    video.dataset.preheated = "1";
+    if(video.classList.contains("media-video-mp4")){
+        // 代理视频仅预加载元数据，进入视口后再预取数据
+        video.preload = "metadata";
+        video.load();
+        return;
+    }
+    // M3U8 视频：预加载 m3u8 manifest（通过fetch触发缓存）
+    if(video.classList.contains("media-video")){
+        const src = video.dataset.src;
+        if(src) fetch(src, {cache: "force-cache", signal: AbortSignal.timeout(5000)}).catch(()=>{});
+    }
 }
 
 // 播放后集中超前加载视频，减少卡顿
 function boostVideoBuffer(video){
-    if(!video || video.dataset.boosting) return;
-    video.dataset.boosting = "1";
+    if(!video) return;
 
     // M3U8 视频：通知 HLS.js 继续加载更多分片
     if(video.hlsInstance){
@@ -1918,11 +1975,11 @@ function boostVideoBuffer(video){
     // 切换到完整预加载模式
     video.preload = "auto";
 
-    // 用 fetch Range 请求预取视频前 8MB 数据，带8秒超时
+    // 用 fetch Range 请求预取视频前 8MB 数据，带10秒超时
     const ctrl = new AbortController();
-    const timer = setTimeout(()=>ctrl.abort(), 8000);
+    const timer = setTimeout(()=>ctrl.abort(), 10000);
     fetch(src, {
-        headers: { "Range": "bytes=0-8388608" },
+        headers: { "Range": "bytes=0-8388607" },
         cache: "force-cache",
         signal: ctrl.signal
     }).catch(()=>{}).finally(()=>clearTimeout(timer));
@@ -2005,13 +2062,18 @@ function initHlsVideo(){
             }
         });
         }
-        // 视频播放时触发集中缓冲
+        // 所有视频播放时触发集中缓冲
         video.addEventListener("play", ()=>{
+            boostVideoBuffer(video);
+        });
+        // 缓冲不足暂停时自动继续加载
+        video.addEventListener("waiting", ()=>{
             boostVideoBuffer(video);
         });
         bindCustomMediaControls(video);
     });
     initProxyVideoPreheat();
+    initVisibleVideoPreload();
 }
 
 function bindVideoPauseObserver(){
@@ -2096,6 +2158,7 @@ function showPage(targetDom, titleText) {
         bindVideoPauseObserver();
         initHlsVideo();
         bindScrollLoadMore();
+        initVisibleVideoPreload();
         lastPageTitle = titleText;
         return;
     }
@@ -2313,6 +2376,7 @@ function renderPagedList(reset = false){
     bindAllCardEvent();
     bindVideoPauseObserver();
     initHlsVideo();
+    initVisibleVideoPreload();
 }
 function bindScrollLoadMore(){
     if(scrollObserver) scrollObserver.disconnect();
@@ -2418,11 +2482,9 @@ function buildCard(item, isFav = false){
     // 代理域名强制走代理，直连域名保持直连
     const videoSrc = useProxy ? videoProxy : videoDirect;
     const videoDirectAttr = useProxy && videoDirect ? `data-direct-src="${escapeAttr(videoDirect)}"` : "";
-    // 所有视频默认 auto 预加载，保证点击即播
-    const preloadVal = "auto";
 
     mediaHtml = `<div class="video-single-wrap">
-        <video class="media-video-mp4" ${proxyVideoAttr} preload="${preloadVal}" playsinline ${posterAttr} ${posterDirectAttr} ${posterFallbacksAttr} src="${escapeAttr(videoSrc)}" ${videoFallbacksAttr} ${videoDirectAttr}>
+        <video class="media-video-mp4" ${proxyVideoAttr} preload="metadata" playsinline ${posterAttr} ${posterDirectAttr} ${posterFallbacksAttr} src="${escapeAttr(videoSrc)}" ${videoFallbacksAttr} ${videoDirectAttr}>
 </video>${mediaControlsHtml()}</div>`;
 }else if(item.iframe){
     let iframeStr = sanitizeIframeHtml(item.iframe);
@@ -2447,11 +2509,9 @@ function buildCard(item, isFav = false){
             }
             const imgProxy = getProxyUrl(src, isFav);
             const imgDirect = cleanMediaUrl(src);
-            const imgIsProxy = hostMatched(src);
-            const imgFallbacksAttr = imgIsProxy ? getProxyFallbacksAttr(src, isFav) : "";
-            const imgSrc = imgIsProxy ? imgProxy : imgDirect;
+            const imgFallbacksAttr = hostMatched(src) ? getProxyFallbacksAttr(src, isFav) : "";
             mediaHtml += `<div class="grid-img-box">
-                <img class="grid-img" ${imgIsProxy ? 'crossorigin="anonymous"' : ""} referrerpolicy="no-referrer" decoding="async" data-imggroup='${escapeAttr(JSON.stringify(imgs))}' data-direct-src="${escapeAttr(imgDirect)}" src="${escapeAttr(imgSrc)}" loading="lazy" ${imgFallbacksAttr} onerror="if(!fallbackMediaProxy(this) && this.dataset.directSrc && this.src!==this.dataset.directSrc){this.src=this.dataset.directSrc;}">${overlay}
+                <img class="grid-img" ${hostMatched(src) ? 'crossorigin="anonymous"' : ""} referrerpolicy="no-referrer" decoding="async" data-imggroup='${escapeAttr(JSON.stringify(imgs))}' data-direct-src="${escapeAttr(imgDirect)}" src="${escapeAttr(imgProxy)}" loading="lazy" ${imgFallbacksAttr} onerror="if(!fallbackMediaProxy(this) && this.dataset.directSrc && this.src!==this.dataset.directSrc){this.src=this.dataset.directSrc;}">${overlay}
             </div>`;
         })
         mediaHtml += `</div></div>`;
@@ -2534,6 +2594,7 @@ function renderFav(){
     bindAllCardEvent();
     bindVideoPauseObserver();
     initHlsVideo();
+    initVisibleVideoPreload();
     const favLoad = document.getElementById("favLoadMore");
     if(favLoad){
         const favObserver = new IntersectionObserver(async (e)=>{
@@ -2550,7 +2611,8 @@ function renderFav(){
                 bindAllCardEvent();
                 bindVideoPauseObserver();
                 initHlsVideo();
-                                        favObserver.disconnect();
+                initVisibleVideoPreload();
+                favObserver.disconnect();
                 setTimeout(()=>{
                     const newFavLoad = document.getElementById("favLoadMore");
                     if(newFavLoad) favObserver.observe(newFavLoad);
@@ -2962,6 +3024,7 @@ function renderSearchResult(keyword){
     bindAllCardEvent();
     bindVideoPauseObserver();
     initHlsVideo();
+    initVisibleVideoPreload();
 }
 searchInput.oninput = function(){
     renderSearchResult(this.value);
