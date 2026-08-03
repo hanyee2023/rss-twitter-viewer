@@ -1,19 +1,19 @@
 const ALLOW_PROXY_HOSTS = [
   "twitter.com",
-  "x.com",
-  "t.co",
-  "twimg.com",
-  "video.twimg.com",
-  "pbs.twimg.com",
-  "abs.twimg.com",
-  "xcancel.com",
-  "nitter.net",
-  "xxxfollow.com",
-  "media.redgifs.com", 
-  "redd.it",
-  "770118.xyz",
-  "phe69",
-  "3go.fun"
+   "x.com",
+    "t.co",
+    "twimg.com",
+    "video.twimg.com",
+    "pbs.twimg.com",
+    "abs.twimg.com",
+    "xcancel.com",
+    "nitter.net",
+    "xxxfollow.com",
+    "media.redgifs.com", 
+    "redd.it",
+    "770118.xyz",
+    "phe69",
+    "3go.fun"
 ];
 
 function normalizeHost(host) {
@@ -127,7 +127,9 @@ export async function onRequest({ request }) {
 
     if (isLikelyM3u8(targetUrl, res)) {
       const text = await res.text();
-      const rewritten = rewriteM3u8Text(text, targetUrl, request.url);
+      // 使用 res.url（重定向后的最终 URL）作为 base，避免 Twitter 重定向导致分片 URL 解析错误
+      const baseUrl = res.url || targetUrl;
+      const rewritten = rewriteM3u8Text(text, baseUrl, request.url);
       return new Response(rewritten, {
         status: res.status,
         headers: corsHeaders({
