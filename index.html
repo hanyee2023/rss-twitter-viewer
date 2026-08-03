@@ -403,22 +403,6 @@ body{
     -webkit-line-clamp:999;
     max-height:none;
 }
-.title-translate-badge{
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    font-size:11px;
-    font-weight:600;
-    color:#fff;
-    background:linear-gradient(135deg,#667eea,#764ba2);
-    padding:1px 7px;
-    border-radius:10px;
-    margin-right:5px;
-    vertical-align:middle;
-    line-height:1.5;
-    flex-shrink:0;
-    white-space:nowrap;
-}
 .title-toggle-btn{
     font-size:13px;
     color:#1d9bf0;
@@ -857,7 +841,7 @@ const MEDIA_PROXY_ENDPOINTS = [
 // 这些域名的 RSS 或媒体资源默认走代理。需要新增国外或特殊域名时，加到这里即可。
 const FORCE_PROXY_HOSTS = [
     "twitter.com",
-    "x.com",
+   "x.com",
     "t.co",
     "twimg.com",
     "video.twimg.com",
@@ -2447,218 +2431,6 @@ function renderCardList(list){
     return html;
 }
 
-// ===================== 标题自动翻译 =====================
-// 检测文本是否包含中文
-function containsChinese(text){
-    return /[\u4e00-\u9fff\u3400-\u4dbf]/.test(String(text || ""));
-}
-
-// 检测文字的源语言（基于 Unicode 字符范围）
-// 返回 MyMemory 兼容的语言代码
-function detectLanguage(text){
-    const str = String(text || "");
-    // 中文字符（含日文汉字）
-    if(/[\u4e00-\u9fff\u3400-\u4dbf]/.test(str)) return "zh";
-    // 日文平假名 \u3040-\u309f 片假名 \u30a0-\u30ff
-    if(/[\u3040-\u309f\u30a0-\u30ff]/.test(str)) return "ja";
-    // 韩文 Hangul \uac00-\ud7af
-    if(/[\uac00-\ud7af]/.test(str)) return "ko";
-    // 泰文 \u0e00-\u0e7f
-    if(/[\u0e00-\u0e7f]/.test(str)) return "th";
-    // 阿拉伯文 \u0600-\u06ff
-    if(/[\u0600-\u06ff]/.test(str)) return "ar";
-    // 俄文/西里尔文 \u0400-\u04ff
-    if(/[\u0400-\u04ff]/.test(str)) return "ru";
-    // 越南文（基于拉丁字母+特殊符号特征）
-    if(/[\u0100-\u024f\u1e00-\u1eff]/.test(str) && /[ăâđêôơưăắằẳẵặâấầẩẫậêếềểễệôốồổỗộơớờởỡợưứừửữự]/i.test(str)) return "vi";
-    // 默认按英文处理（涵盖英语及大部分拉丁字母语言）
-    return "en";
-}
-
-// 翻译缓存（localStorage）
-const TRANSLATE_CACHE_PREFIX = "tr_";
-const TRANSLATE_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7天
-
-function getTranslateCache(originalText){
-    try{
-        const key = TRANSLATE_CACHE_PREFIX + btoa(unescape(encodeURIComponent(originalText))).slice(0,100);
-        const raw = localStorage.getItem(key);
-        if(!raw) return null;
-        const data = JSON.parse(raw);
-        if(!data || !data.text) return null;
-        if(Date.now() - (data.time || 0) > TRANSLATE_CACHE_TTL) return null;
-        return data.text;
-    }catch(e){
-        return null;
-    }
-}
-
-function saveTranslateCache(originalText, translatedText){
-    try{
-        const key = TRANSLATE_CACHE_PREFIX + btoa(unescape(encodeURIComponent(originalText))).slice(0,100);
-        localStorage.setItem(key, JSON.stringify({
-            text: translatedText,
-            time: Date.now()
-        }));
-    }catch(e){
-        // 静默失败
-    }
-}
-
-// 调用翻译 API（免费、无需API Key）
-// 优先使用 Google Translate（翻译质量高、支持自动检测），CORS失败时回退到 MyMemory
-// Google Translate: 浏览器端可调用，无字符限制
-// MyMemory: 每个用户IP每天5000字符匿名额度，支持CORS
-async function translateTitle(text){
-    const cleanText = String(text || "").trim();
-    if(!cleanText || containsChinese(cleanText)) return null;
-
-    // 先查缓存
-    const cached = getTranslateCache(cleanText);
-    if(cached) return cached;
-
-    // 1. 优先尝试 Google Translate 免费端点
-    const googleResult = await tryGoogleTranslate(cleanText);
-    if(googleResult){
-        saveTranslateCache(cleanText, googleResult);
-        return googleResult;
-    }
-
-    // 2. 回退到 MyMemory API
-    const myMemoryResult = await tryMyMemoryTranslate(cleanText);
-    if(myMemoryResult){
-        saveTranslateCache(cleanText, myMemoryResult);
-        return myMemoryResult;
-    }
-
-    return null;
-}
-
-// Google Translate 免费端点
-async function tryGoogleTranslate(text){
-    try{
-        const url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=zh-CN&dt=t&q=" + encodeURIComponent(text.slice(0, 1800));
-        const res = await fetch(url, {
-            signal: AbortSignal.timeout(5000)
-        });
-        if(!res.ok) return null;
-        const data = await res.json();
-        // 响应格式: [[["译文","原文",...],...],...,["检测到的语言"]]
-        if(data && data[0] && Array.isArray(data[0])){
-            let translated = data[0].map(s => s[0] || "").join("");
-            translated = translated.trim();
-            if(translated && translated.toLowerCase() !== text.trim().toLowerCase()){
-                return translated;
-            }
-        }
-    }catch(e){
-        // CORS 失败或网络错误，静默回退
-    }
-    return null;
-}
-
-// MyMemory 翻译 API
-// 先尝试 源语言->zh-CN，如果失败则尝试 源语言->en 再 en->zh-CN 两步翻译
-async function tryMyMemoryTranslate(text){
-    try{
-        const truncated = text.slice(0, 450);
-        const sourceLang = detectLanguage(truncated);
-
-        // 策略1：直接源语言 -> 中文
-        const directResult = await myMemoryFetch(truncated, sourceLang, "zh-CN");
-        if(directResult) return directResult;
-
-        // 策略2：源语言 -> 英文 -> 中文（两步翻译，覆盖直译不支持的语言对）
-        if(sourceLang !== "en"){
-            const enResult = await myMemoryFetch(truncated, sourceLang, "en");
-            if(enResult && !containsChinese(enResult)){
-                const finalResult = await myMemoryFetch(enResult.slice(0, 450), "en", "zh-CN");
-                if(finalResult) return finalResult;
-            }
-        }
-
-        // 策略3：如果是混合文本（含拉丁字母），尝试用 en->zh-CN 兜底
-        if(sourceLang === "en"){
-            return await myMemoryFetch(truncated, "en", "zh-CN");
-        }
-    }catch(e){
-        // 网络错误或超时
-    }
-    return null;
-}
-
-// MyMemory 单次翻译请求
-async function myMemoryFetch(text, fromLang, toLang){
-    try{
-        const params = new URLSearchParams({
-            q: text,
-            langpair: `${fromLang}|${toLang}`
-        });
-        const res = await fetch(`https://api.mymemory.translated.net/get?${params}`, {
-            signal: AbortSignal.timeout(5000)
-        });
-        if(!res.ok) return null;
-        const data = await res.json();
-        if(data.responseStatus === 200 && data.responseData && data.responseData.translatedText){
-            let translated = data.responseData.translatedText;
-            // 过滤API返回的警告信息
-            if(/MYMEMORY|WARNING|QUERY LENGTH LIMIT/i.test(translated)) return null;
-            // 翻译结果和原文一样说明翻译失败
-            if(translated.trim().toLowerCase() === text.trim().toLowerCase()) return null;
-            // 检查翻译结果是否包含目标语言字符
-            if(toLang === "zh-CN" && !containsChinese(translated)) return null;
-            return translated;
-        }
-    }catch(e){
-        // 静默失败
-    }
-    return null;
-}
-
-// 批量为卡片标题添加翻译
-// 在卡片渲染后调用，异步翻译非中文标题
-async function translateCardTitles(container){
-    if(!container) container = document;
-    const titleEls = container.querySelectorAll(".card-title[data-need-translate='1']");
-    if(titleEls.length === 0) return;
-
-    // 并发翻译，但限制并发数为3避免API过载
-    const queue = Array.from(titleEls);
-    const CONCURRENCY = 3;
-
-    async function processOne(el){
-        const originalTitle = el.dataset.originalTitle || "";
-        if(!originalTitle) return;
-        const translated = await translateTitle(originalTitle);
-        if(translated){
-            el.innerHTML = `<span class="title-translate-badge">译文</span>${escapeHtml(translated)}`;
-            el.removeAttribute("data-need-translate");
-            // 重新检测展开按钮
-            const wrap = el.closest(".card-title-wrap");
-            if(wrap){
-                const toggleBtn = wrap.querySelector(".title-toggle-btn");
-                const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 22;
-                const needToggle = el.scrollHeight > lineHeight * 2 + 2;
-                if(toggleBtn){
-                    toggleBtn.style.display = needToggle ? "block" : "none";
-                    toggleBtn.innerText = "展开";
-                }
-            }
-        }else{
-            el.removeAttribute("data-need-translate");
-        }
-    }
-
-    async function worker(){
-        while(queue.length){
-            const el = queue.shift();
-            if(el) await processOne(el);
-        }
-    }
-
-    await Promise.all(Array.from({length: Math.min(CONCURRENCY, queue.length)}, worker));
-}
-
 function getPureText(str){
     if(!str) return "无标题";
     let div = document.createElement("div");
@@ -2773,10 +2545,7 @@ function buildCard(item, isFav = false){
     }
 }
 
-    const titleText = getPureText(item.title);
-    const titleNeedsTranslate = !containsChinese(titleText) && titleText !== "无标题";
-    const titleRaw = escapeHtml(titleText);
-    const titleDataAttr = titleNeedsTranslate ? `data-need-translate="1" data-original-title="${escapeAttr(titleText)}"` : "";
+    const titleRaw = escapeHtml(getPureText(item.title));
     const isCollected = favList.some(f=>f.link === item.link);
     const favTxt = isCollected ? "已收藏" : "收藏";
     const favCls = isCollected ? "btn-fav collected" : "btn-fav";
@@ -2798,7 +2567,7 @@ function buildCard(item, isFav = false){
                 <div class="source-name-text">${sourceNameText}</div>
             </div>
             <div class="card-title-wrap">
-                <div class="card-title" ${titleDataAttr}>${titleRaw}</div>
+                <div class="card-title">${titleRaw}</div>
                 <button class="title-toggle-btn">展开</button>
             </div>
             ${mediaHtml}
@@ -2815,7 +2584,7 @@ function buildCard(item, isFav = false){
                 <div class="source-name-text">${sourceNameText}</div>
             </div>
             <div class="card-title-wrap">
-                <div class="card-title" ${titleDataAttr}>${titleRaw}</div>
+                <div class="card-title">${titleRaw}</div>
                 <button class="title-toggle-btn">展开</button>
             </div>
             ${mediaHtml}
@@ -3006,9 +2775,6 @@ function bindAllCardEvent(){
     document.querySelectorAll(".tweet-card").forEach(card => {
         readObserver.observe(card);
     });
-
-    // 异步翻译非中文标题
-    translateCardTitles();
 }
 
 let previewSwipeIndex = 0;
