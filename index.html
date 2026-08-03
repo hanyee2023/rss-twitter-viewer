@@ -737,13 +737,6 @@ body{
                 <input id="feedName" placeholder="自定义订阅名称（可选）" style="flex:1;">
                 <button id="confirmAdd">添加</button>
             </div>
-            <div style="font-size:12px;color:#888;line-height:1.6;margin-top:8px;padding:8px;background:rgba(0,0,0,0.03);border-radius:6px;">
-                <b>推特/X 订阅推荐格式：</b><br>
-                x2rss 服务（免登录免API）：<br>
-                <code style="word-break:break-all;">https://rss.gurify.com/用户名/rss</code><br>
-                例如：https://rss.gurify.com/elonmusk/rss<br>
-                <span style="color:#e74c3c;">注意：nitter.net 已宕机，xcancel.com 有反爬验证，均无法通过代理获取RSS。</span>
-            </div>
         </div>
         <div class="keyword-block-section">
             <div class="keyword-block-title">关键字屏蔽</div>
@@ -864,7 +857,7 @@ const MEDIA_PROXY_ENDPOINTS = [
 // 这些域名的 RSS 或媒体资源默认走代理。需要新增国外或特殊域名时，加到这里即可。
 const FORCE_PROXY_HOSTS = [
     "twitter.com",
-     "x.com",
+    "x.com",
     "t.co",
     "twimg.com",
     "video.twimg.com",
