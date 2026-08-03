@@ -832,8 +832,7 @@ body{
 // 多个代理会并发竞速（RSS）或级联回退（媒体），修改下面的端点列表即可。
 const RSS_PROXY_ENDPOINTS = [
     "https://rss-twitter-viewer.pages.dev/rss-proxy",
-    "https://rss-twitter-viewer.pages.dev/proxy",
-    "https://gloomy-bluejay-6924.hanyee2023.deno.net/?url="
+    "https://rss-twitter-viewer.pages.dev/media-proxy"
 ];
 const MEDIA_PROXY_ENDPOINTS = [
     "https://rss-twitter-viewer.pages.dev/media-proxy"
@@ -842,7 +841,7 @@ const MEDIA_PROXY_ENDPOINTS = [
 // 这些域名的 RSS 或媒体资源默认走代理。需要新增国外或特殊域名时，加到这里即可。
 const FORCE_PROXY_HOSTS = [
     "twitter.com",
-     "x.com",
+    "x.com",
     "t.co",
     "twimg.com",
     "video.twimg.com",
@@ -1095,6 +1094,23 @@ async function fetchTextWithTimeout(fetchUrl) {
     }
 }
 
+// 检查响应是否像 RSS/Atom XML，而不是 HTML 页面
+function isRssContent(text){
+    const sample = String(text || "").slice(0, 2000).toLowerCase();
+    // RSS/Atom 标志
+    if(sample.includes("<rss") || sample.includes("<feed") || 
+       sample.includes("<channel") || sample.includes("<rdf:rdf")){
+        return true;
+    }
+    // 明显是 HTML
+    if(sample.includes("<!doctype html") || sample.includes("<html")){
+        return false;
+    }
+    // 有 <item> 或 <entry> 标签
+    if(/<(item|entry)[\s>]/i.test(sample)) return true;
+    return false;
+}
+
 async function fetchRSSFeed(rssUrl) {
     const url = normalizeUrl(rssUrl);
     if (!isHttpUrl(url)) throw new Error("RSS 链接格式不正确");
@@ -1103,7 +1119,7 @@ async function fetchRSSFeed(rssUrl) {
         ? getRSSProxyCandidates(url)
         : [url];
 
-    // 并发竞速：所有代理同时请求，谁先成功就用谁的结果
+    // 并发竞速：所有代理同时请求，谁先返回有效 RSS 内容就用谁的结果
     return new Promise((resolve, reject) => {
         let remaining = candidates.length;
         let lastErr = null;
@@ -1112,9 +1128,18 @@ async function fetchRSSFeed(rssUrl) {
         candidates.forEach(candidate => {
             fetchTextWithTimeout(candidate)
                 .then(text => {
-                    if(!settled){
+                    if(settled) return;
+                    // 验证响应是 RSS/XML，不是 HTML 页面
+                    if(isRssContent(text)){
                         settled = true;
                         resolve(text);
+                    }else{
+                        console.warn("RSS 代理返回了非 RSS 内容：", candidate);
+                        lastErr = new Error("代理返回了无效内容");
+                        remaining--;
+                        if(remaining === 0 && !settled){
+                            reject(lastErr || new Error("RSS 拉取失败"));
+                        }
                     }
                 })
                 .catch(err => {
@@ -2762,6 +2787,7 @@ imgPreviewMask.addEventListener("click", function(e){
 async function loadAllRSS(){
     const queue = [...feedList];
     const allGroups = [];
+    const failedFeeds = [];
     async function worker(){
         while(queue.length){
             const f = queue.shift();
@@ -2774,6 +2800,7 @@ async function loadAllRSS(){
                 }
             }catch(e){
                 console.warn(`订阅【${f.name}】拉取失败：`, e.message);
+                failedFeeds.push({name: f.name, url: f.url, error: e.message});
                 allGroups.push([]);
             }
         }
@@ -2783,6 +2810,11 @@ async function loadAllRSS(){
     let res = [];
     allGroups.forEach(group=>res = res.concat(group));
     res.sort((a,b)=> new Date(b.date).getTime() - new Date(a.date).getTime());
+    // 提示加载失败的订阅
+    if(failedFeeds.length > 0){
+        const names = failedFeeds.map(f => f.name).join("、");
+        showToast(`以下订阅加载失败：${names}`);
+    }
     return res;
 }
 
