@@ -842,7 +842,7 @@ const MEDIA_PROXY_ENDPOINTS = [
 // 这些域名的 RSS 或媒体资源默认走代理。需要新增国外或特殊域名时，加到这里即可。
 const FORCE_PROXY_HOSTS = [
     "twitter.com",
-    "x.com",
+     "x.com",
     "t.co",
     "twimg.com",
     "video.twimg.com",
@@ -991,7 +991,8 @@ function getForceMediaProxyUrl(rawUrl, isFav = false) {
     const url = cleanMediaUrl(rawUrl);
     if (!isHttpUrl(url)) return url;
     if (!hostMatched(url)) return url;
-    const params = { raw: "1" };
+    // m3u8 不带 raw=1，确保代理端检测到 m3u8 后会重写分片 URL
+    const params = {};
     if (isFav) params.cache = "long";
     return buildProxyUrl(MEDIA_PROXY_ENDPOINTS[0], url, params);
 }
@@ -1525,7 +1526,7 @@ function initVideoObserver(){
                     video.preload = "metadata";
                 }
                 // 优化2：HLS 首帧优化 - 提前加载 manifest（只解析不分片，几KB）
-                if(video.classList.contains("media-video") && !video.dataset.hlsLoaded && !video.dataset.hlsPreloading){
+                if(video.classList.contains("media-video") && !video.dataset.hlsManifestPreloaded && !video.dataset.hlsPreloading){
                     preloadHlsManifest(video);
                 }
                 // 优化5：内存优化恢复 - 滑回视口时恢复之前释放的视频
@@ -1544,6 +1545,20 @@ function initVideoObserver(){
     }, {threshold:0.01});
 }
 
+// HLS 安全网：如果代理端没有重写 m3u8 分片 URL，HLS.js 会自动代理 Twitter 分片请求
+function makeHlsXhrSetup(){
+    return (xhr, url) => {
+        try {
+            // 只代理直接访问 Twitter 域名的请求，不重复代理已代理的 URL
+            const host = getUrlHost(url);
+            if(FORCE_PROXY_HOSTS.some(rule => hostMatchesRule(host, rule))){
+                const proxiedUrl = buildProxyUrl(MEDIA_PROXY_ENDPOINTS[0], url);
+                xhr.open("GET", proxiedUrl, true);
+            }
+        } catch(e) {}
+    };
+}
+
 // 优化2：HLS manifest 预加载（只加载不分片，加速首帧）
 function preloadHlsManifest(video){
     const streamUrl = video.dataset.src;
@@ -1553,7 +1568,7 @@ function preloadHlsManifest(video){
     if(video.canPlayType("application/vnd.apple.mpegurl")){
         // Safari 原生支持，设置 src 但不播放（preload=metadata 只加载元数据）
         video.src = streamUrl;
-        video.dataset.hlsLoaded = "1";
+        video.dataset.hlsManifestPreloaded = "1";
         return;
     }
 
@@ -1564,7 +1579,8 @@ function preloadHlsManifest(video){
             maxBufferLength: 30,
             capLevelToPlayerSize: true,
             storage: null,
-            autoStartLoad: false  // 关键：只加载 manifest，不加载分片
+            autoStartLoad: false,  // 关键：只加载 manifest，不加载分片
+            xhrSetup: makeHlsXhrSetup()
         });
         video.hlsInstance = hls;
         hls.attachMedia(video);
@@ -1572,7 +1588,7 @@ function preloadHlsManifest(video){
             hls.loadSource(streamUrl);
         });
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            video.dataset.hlsLoaded = "1";
+            video.dataset.hlsManifestPreloaded = "1";
             // manifest 加载完成，不 startLoad，等用户点播放再加载分片
         });
         hls.on(Hls.Events.ERROR, (event, data) => {
@@ -1580,6 +1596,9 @@ function preloadHlsManifest(video){
                 console.warn("HLS预加载失败：", data);
                 // 预加载失败不影响，用户点击时会重新走 startHlsVideo 流程
                 delete video.dataset.hlsPreloading;
+                delete video.dataset.hlsManifestPreloaded;
+                try { hls.destroy(); } catch(e){}
+                video.hlsInstance = null;
             }
         });
     }
@@ -1657,7 +1676,8 @@ function getHlsErrorMessage(data, streamUrl){
 }
 
 function toggleVideoPlay(video){
-    if(video.classList.contains("media-video") && !video.dataset.hlsLoaded){
+    if(video.classList.contains("media-video") && !video.dataset.hlsStarted){
+        video.dataset.hlsStarted = "1";
         startHlsVideo(video);
         return;
     }
@@ -1667,15 +1687,32 @@ function toggleVideoPlay(video){
         video.play().catch(err => {
             console.warn("视频播放失败：", err);
             // 优化4：自动重试一次（网络波动场景）
+            // 注意：m3u8 视频不能调用 video.load()，会破坏 HLS.js 的 MediaSource
             if(!video.dataset.playRetried){
                 video.dataset.playRetried = "1";
-                console.log("自动重试播放...");
-                video.load();
-                video.play().catch(err2 => {
-                    console.warn("重试也失败：", err2);
-                    const msg = getPlayErrorMessage(err2, video, "视频播放失败");
-                    if(msg) showToast(msg);
-                });
+                if(video.classList.contains("media-video")){
+                    // m3u8 视频：通过 HLS 重启而非 video.load()
+                    console.log("m3u8播放重试：重启HLS加载...");
+                    if(video.hlsInstance){
+                        video.hlsInstance.startLoad();
+                    }else{
+                        startHlsVideo(video);
+                    }
+                    video.play().catch(err2 => {
+                        console.warn("m3u8重试也失败：", err2);
+                        // 最后尝试切换到直连地址
+                        tryHlsDirectFallback(video);
+                    });
+                }else{
+                    // MP4 视频：可以安全调用 video.load()
+                    console.log("MP4播放重试...");
+                    video.load();
+                    video.play().catch(err2 => {
+                        console.warn("重试也失败：", err2);
+                        const msg = getPlayErrorMessage(err2, video, "视频播放失败");
+                        if(msg) showToast(msg);
+                    });
+                }
             }else{
                 const msg = getPlayErrorMessage(err, video, "视频播放失败");
                 if(msg) showToast(msg);
@@ -1684,6 +1721,58 @@ function toggleVideoPlay(video){
     }else{
         video.pause();
         if(video.hlsInstance) video.hlsInstance.stopLoad();
+    }
+}
+
+// m3u8 播放失败后尝试切换到直连地址
+function tryHlsDirectFallback(video){
+    const directUrl = video.dataset.altSrc;
+    if(!directUrl){
+        showToast("视频播放失败");
+        return;
+    }
+    console.log("尝试切换到直连地址:", directUrl);
+    // 销毁旧的 HLS 实例
+    if(video.hlsInstance){
+        try { video.hlsInstance.destroy(); } catch(e){}
+        video.hlsInstance = null;
+    }
+    delete video.dataset.hlsLoaded;
+    delete video.dataset.hlsStarted;
+    video.dataset.hlsStarted = "1";
+    video.dataset.src = directUrl;
+
+    if(video.canPlayType("application/vnd.apple.mpegurl")){
+        video.src = directUrl;
+        video.dataset.hlsLoaded = "1";
+        video.play().catch(() => showToast("视频播放失败"));
+    }else if(window.Hls && Hls.isSupported()){
+        const hls = new Hls({
+            enableWorker: true,
+            lowLatencyMode: true,
+            maxBufferLength: 30,
+            capLevelToPlayerSize: true,
+            storage: null,
+            autoStartLoad: true,
+            xhrSetup: makeHlsXhrSetup()
+        });
+        video.hlsInstance = hls;
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+            hls.loadSource(directUrl);
+        });
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            video.dataset.hlsLoaded = "1";
+            video.play().catch(() => showToast("视频播放失败"));
+        });
+        hls.on(Hls.Events.ERROR, (event, data) => {
+            if(data && data.fatal){
+                console.warn("直连HLS也失败：", data);
+                showToast("视频播放失败");
+            }
+        });
+    }else{
+        showToast("视频播放失败");
     }
 }
 
@@ -1954,6 +2043,17 @@ function startHlsVideo(video){
         });
     };
 
+    // 如果已经通过预加载完成了 manifest 解析，直接 startLoad 并播放
+    if (video.dataset.hlsManifestPreloaded) {
+        if(video.hlsInstance){
+            video.hlsInstance.startLoad();
+        }
+        video.dataset.hlsLoaded = "1";
+        playNow();
+        return;
+    }
+
+    // 如果之前已经完整加载过（暂停后恢复）
     if (video.dataset.hlsLoaded) {
         if(video.hlsInstance) video.hlsInstance.startLoad();
         playNow();
@@ -1965,13 +2065,19 @@ function startHlsVideo(video){
         video.dataset.hlsLoaded = "1";
         playNow();
     } else if (window.Hls && Hls.isSupported()) {
+        // 清理预加载可能遗留的 HLS 实例，避免冲突
+        if(video.hlsInstance){
+            try { video.hlsInstance.destroy(); } catch(e){}
+            video.hlsInstance = null;
+        }
         const hls = new Hls({
             enableWorker: true,
             lowLatencyMode: true,
             maxBufferLength: 30,
             capLevelToPlayerSize: true,
             storage: null,
-            autoStartLoad: false
+            autoStartLoad: false,
+            xhrSetup: makeHlsXhrSetup()
         });
         video.hlsInstance = hls;
         hls.attachMedia(video);
@@ -1986,7 +2092,13 @@ function startHlsVideo(video){
         hls.on(Hls.Events.ERROR, (event, data) => {
             if(data && data.fatal){
                 console.warn("HLS致命错误：", data);
-                showToast("m3u8加载失败");
+                const msg = getHlsErrorMessage(data, streamUrl);
+                showToast(msg);
+                // 尝试切换到直连地址
+                if(video.dataset.altSrc && !video.dataset.hlsFallbackTried){
+                    video.dataset.hlsFallbackTried = "1";
+                    tryHlsDirectFallback(video);
+                }
             }
         });
     } else {
@@ -2012,9 +2124,13 @@ function initHlsVideo(){
         }
         if(video.classList.contains("media-video")){
             video.addEventListener("play", ()=>{
-            if(!video.dataset.hlsLoaded) {
+            if(!video.dataset.hlsLoaded && !video.dataset.hlsManifestPreloaded) {
                 video.pause();
                 startHlsVideo(video);
+            } else if(video.hlsInstance && !video.dataset.hlsLoaded) {
+                // 预加载了 manifest 但还没 startLoad
+                video.hlsInstance.startLoad();
+                video.dataset.hlsLoaded = "1";
             } else if(video.hlsInstance) {
                 video.hlsInstance.startLoad();
             }
