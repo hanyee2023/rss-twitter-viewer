@@ -403,6 +403,22 @@ body{
     -webkit-line-clamp:999;
     max-height:none;
 }
+.title-translate-badge{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    font-size:11px;
+    font-weight:600;
+    color:#fff;
+    background:linear-gradient(135deg,#667eea,#764ba2);
+    padding:1px 7px;
+    border-radius:10px;
+    margin-right:5px;
+    vertical-align:middle;
+    line-height:1.5;
+    flex-shrink:0;
+    white-space:nowrap;
+}
 .title-toggle-btn{
     font-size:13px;
     color:#1d9bf0;
@@ -694,7 +710,7 @@ body{
 <header id="mainHeader">
 <div class="title-wrap">
   <h1 id="pageTitle">RSS媒体阅读器</h1>
-  <span class="beta-tag">4.3</span>
+  <span class="beta-tag">4.4</span>
 </div>
 </header>
 
@@ -720,6 +736,13 @@ body{
             <div class="add-feed-row">
                 <input id="feedName" placeholder="自定义订阅名称（可选）" style="flex:1;">
                 <button id="confirmAdd">添加</button>
+            </div>
+            <div style="font-size:12px;color:#888;line-height:1.6;margin-top:8px;padding:8px;background:rgba(0,0,0,0.03);border-radius:6px;">
+                <b>推特/X 订阅推荐格式：</b><br>
+                x2rss 服务（免登录免API）：<br>
+                <code style="word-break:break-all;">https://rss.gurify.com/用户名/rss</code><br>
+                例如：https://rss.gurify.com/elonmusk/rss<br>
+                <span style="color:#e74c3c;">注意：nitter.net 已宕机，xcancel.com 有反爬验证，均无法通过代理获取RSS。</span>
             </div>
         </div>
         <div class="keyword-block-section">
@@ -1599,19 +1622,32 @@ function restoreVideoFromMem(video){
     delete video.dataset.savedSrc;
 }
 
+function pauseOtherVideos(currentVideo){
+    document.querySelectorAll(".media-video, .media-video-mp4").forEach(v=>{
+        if(v !== currentVideo && !v.paused){
+            v.pause();
+            if(v.hlsInstance) v.hlsInstance.stopLoad();
+        }
+    });
+}
 
 function getVideoErrorMessage(video, fallback = "视频播放失败"){
     const err = video && video.error;
     if(!err) return fallback;
+    const isProxy = video.dataset.proxyVideo === "1";
     switch(err.code){
         case 1:
             return "视频播放已中断";
         case 2:
-            return "视频网络加载失败，可能是链接过期、跨域或网络超时";
+            // 网络错误：区分代理和直连
+            if(isProxy) return "网络加载失败：代理请求超时或代理服务不可用，请检查网络或稍后重试";
+            return "网络加载失败：链接过期、跨域限制或网络超时，请检查网络";
         case 3:
-            return "视频解码失败，当前浏览器可能不支持该格式";
+            return "视频解码失败：当前浏览器不支持该视频格式";
         case 4:
-            return "视频地址不可播放，可能是链接失效或资源类型不支持";
+            // 源错误：区分代理和直连
+            if(isProxy) return "视频地址不可播放：代理返回的内容无效或链接已失效";
+            return "视频地址不可播放：链接失效或资源类型不支持";
         default:
             return fallback;
     }
@@ -1626,36 +1662,47 @@ function getPlayErrorMessage(err, video, fallback = "视频播放失败"){
 function getHlsErrorMessage(data, streamUrl){
     const detail = String((data && data.details) || "");
     const type = String((data && data.type) || "");
-    const usingProxy = hostMatched(streamUrl);
+    const usingProxy = String(streamUrl || "").includes("/media-proxy");
     const sourceText = usingProxy ? "（代理源）" : "（直连源）";
-    if(/manifest/i.test(detail)) return `m3u8主文件加载失败${sourceText}，可能是链接失效或代理故障`;
-    if(/frag|segment/i.test(detail)) return `m3u8分片加载失败${sourceText}，可能是网络不稳定`;
-    if(/key/i.test(detail)) return `m3u8密钥加载失败${sourceText}`;
-    if(/buffer|media/i.test(type + detail)) return "m3u8视频解码失败，浏览器可能不支持该编码";
-    if(/network/i.test(type + detail)) return `m3u8网络加载失败${sourceText}，请检查网络`;
+    // 主文件加载失败：通常是代理故障或链接失效
+    if(/manifest/i.test(detail)) return `m3u8主文件加载失败${sourceText}：代理服务故障或视频链接已失效`;
+    // 分片加载失败：通常是网络不稳定
+    if(/frag|segment/i.test(detail)) return `m3u8分片加载失败${sourceText}：网络不稳定或代理响应超时`;
+    // 密钥加载失败：链接或代理问题
+    if(/key/i.test(detail)) return `m3u8密钥加载失败${sourceText}：代理请求异常`;
+    // 解码/缓冲失败：浏览器兼容性问题
+    if(/buffer|media/i.test(type + detail)) return "m3u8视频解码失败：浏览器可能不支持该编码格式";
+    // 网络错误
+    if(/network/i.test(type + detail)) return `m3u8网络加载失败${sourceText}：请检查网络连接`;
     return `m3u8加载失败${sourceText}`;
 }
 
 function toggleVideoPlay(video){
     if(video.classList.contains("media-video") && !video.dataset.hlsLoaded){
+        video.dataset.userAttempted = "1";
         startHlsVideo(video);
         return;
     }
     if(video.paused){
         video.dataset.userAttempted = "1";
-        video.preload = "auto";
+        pauseOtherVideos(video);
         video.play().catch(err => {
             console.warn("视频播放失败：", err);
-            const msg = getPlayErrorMessage(err, video, "视频播放失败");
-            if(msg) showToast(msg);
+            // 仅在用户主动点击播放后才提示错误
+            if(video.dataset.userAttempted === "1"){
+                const msg = getPlayErrorMessage(err, video, "视频播放失败");
+                if(msg) showToast(msg);
+            }
         });
     }else{
+        delete video.dataset.pendingPlay;
         video.pause();
         if(video.hlsInstance) video.hlsInstance.stopLoad();
     }
 }
 
 // 优化4：MP4 视频加载错误自动重试（切换 fallback 源）
+// 仅在用户主动点击播放后才提示错误
 function bindVideoErrorRetry(video){
     if(video.dataset.errorRetryBound) return;
     video.dataset.errorRetryBound = "1";
@@ -1663,10 +1710,13 @@ function bindVideoErrorRetry(video){
         // 只对 MP4 做自动 fallback 重试
         if(!video.classList.contains("media-video-mp4")) return;
         if(video.dataset.errorRetried) {
-            const msg = getVideoErrorMessage(video, "视频加载失败");
-            if(msg && !video.dataset.errorShown){
-                video.dataset.errorShown = "1";
-                showToast(msg);
+            // 仅在用户主动播放后才提示
+            if(video.dataset.userAttempted === "1"){
+                const msg = getVideoErrorMessage(video, "视频加载失败");
+                if(msg && !video.dataset.errorShown){
+                    video.dataset.errorShown = "1";
+                    showToast(msg);
+                }
             }
             return;
         }
@@ -1680,6 +1730,7 @@ function bindVideoErrorRetry(video){
     });
 }
 // 优化6：低网速检测 - waiting 频繁触发时提示
+// 仅在用户主动播放后才提示
 function bindSlowNetworkDetect(video){
     if(video.dataset.slowNetBound) return;
     video.dataset.slowNetBound = "1";
@@ -1689,6 +1740,8 @@ function bindSlowNetworkDetect(video){
 
     video.addEventListener("waiting", () => {
         if(slowWarned) return;
+        // 仅在用户主动播放后检测
+        if(video.dataset.userAttempted !== "1") return;
         const now = Date.now();
         // 只保留最近 10 秒内的 waiting 记录
         waitingTimes = waitingTimes.filter(t => now - t < 10000);
@@ -1912,16 +1965,34 @@ function bindCustomMediaControls(video){
 }
 
 function startHlsVideo(video){
-    const streamUrl = video.dataset.src;
+    const sources = [fullDecodeXml(video.dataset.src), fullDecodeXml(video.dataset.altSrc)].filter(Boolean);
+    const uniqueSources = [...new Set(sources)];
+    let sourceIndex = Number(video.dataset.hlsAttempt || 0);
+    const streamUrl = uniqueSources[sourceIndex] || uniqueSources[0];
     if(!streamUrl) return;
 
-    const playNow = () => {
+    pauseOtherVideos(video);
+    const manualSecondClick = video.dataset.proxyVideo === "1";
+
+    const playNow = (retry = true) => {
         video.play().catch(err => {
             console.warn("m3u8播放失败：", err);
-            if(err.name === "NotAllowedError"){
-                showToast("请再点一次播放");
+            if(retry && err && err.name !== "NotAllowedError"){
+                // 缓冲不足时自动重试：等待 canplay/loadeddata 或超时后重试
+                const retryPlay = ()=>{
+                    video.removeEventListener("canplay", retryPlay);
+                    video.removeEventListener("loadeddata", retryPlay);
+                    playNow(false);
+                };
+                video.addEventListener("canplay", retryPlay, {once:true});
+                video.addEventListener("loadeddata", retryPlay, {once:true});
+                setTimeout(()=>playNow(false), 450);
             }else{
-                showToast("视频播放失败");
+                // 仅在用户主动点击播放后才提示错误
+                if(video.dataset.userAttempted === "1"){
+                    const msg = getPlayErrorMessage(err, video, "m3u8播放失败");
+                    if(msg) showToast(msg);
+                }
             }
         });
     };
@@ -1932,18 +2003,19 @@ function startHlsVideo(video){
         return;
     }
 
-    if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        video.src = streamUrl;
-        video.dataset.hlsLoaded = "1";
-        playNow();
-    } else if (window.Hls && Hls.isSupported()) {
+    // Hls.js 优先（非 Safari 或 Safari 未声明原生支持时）
+    if (window.Hls && Hls.isSupported()) {
+        if(video.hlsInstance){
+            try{ video.hlsInstance.destroy(); }catch(e){}
+            video.hlsInstance = null;
+        }
         const hls = new Hls({
             enableWorker: true,
             lowLatencyMode: true,
             maxBufferLength: 30,
             capLevelToPlayerSize: true,
             storage: null,
-            autoStartLoad: false
+            autoStartLoad: true
         });
         video.hlsInstance = hls;
         hls.attachMedia(video);
@@ -1953,29 +2025,52 @@ function startHlsVideo(video){
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
             hls.startLoad();
             video.dataset.hlsLoaded = "1";
-            playNow();
+            // 代理视频采用两次点击模式：第一次仅加载 manifest，不自动播放
+            if(!manualSecondClick){
+                playNow();
+            }
         });
         hls.on(Hls.Events.ERROR, (event, data) => {
             if(data && data.fatal){
                 console.warn("HLS致命错误：", data);
-                const msg = getHlsErrorMessage(data, streamUrl);
-                showToast(msg);
-                // 代理源失败后，尝试切换到直连地址
-                if(video.dataset.altSrc && !video.dataset.hlsFallbackTried){
-                    video.dataset.hlsFallbackTried = "1";
-                    console.log("切换到直连地址:", video.dataset.altSrc);
-                    if(video.hlsInstance){
-                        try { video.hlsInstance.destroy(); } catch(e){}
-                        video.hlsInstance = null;
+                const nextIndex = sourceIndex + 1;
+                if(nextIndex < uniqueSources.length){
+                    // 有备用源，自动切换
+                    if(video.dataset.userAttempted === "1"){
+                        showToast(`${getHlsErrorMessage(data, streamUrl)}，正在尝试备用源`);
                     }
+                    video.dataset.hlsAttempt = String(nextIndex);
                     delete video.dataset.hlsLoaded;
-                    video.dataset.src = video.dataset.altSrc;
+                    try{ hls.destroy(); }catch(e){}
+                    video.hlsInstance = null;
                     startHlsVideo(video);
+                }else{
+                    // 无备用源：仅在用户主动播放后才提示错误
+                    if(video.dataset.userAttempted === "1"){
+                        showToast(getHlsErrorMessage(data, streamUrl));
+                    }
                 }
             }
         });
+    } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        // Safari 原生 HLS
+        video.src = streamUrl;
+        const markNativeLoaded = ()=>{
+            video.dataset.hlsLoaded = "1";
+            video.removeEventListener("loadedmetadata", markNativeLoaded);
+            video.removeEventListener("canplay", markNativeLoaded);
+        };
+        video.addEventListener("loadedmetadata", markNativeLoaded, {once:true});
+        video.addEventListener("canplay", markNativeLoaded, {once:true});
+        if(manualSecondClick){
+            video.load();
+        }else{
+            playNow();
+        }
     } else {
-        showToast("当前浏览器不支持m3u8播放");
+        if(video.dataset.userAttempted === "1"){
+            showToast("当前浏览器不支持m3u8播放");
+        }
     }
 }
 
@@ -2253,10 +2348,19 @@ async function renderSingleFeedFromSource(sourceUrl){
         const list = parseRSS(xmlText, feed ? feed.name : "未命名订阅", sourceUrl, feed ? feed.category : "img")
             .sort((a,b)=>new Date(b.date).getTime() - new Date(a.date).getTime());
         if(list.length === 0){
-            currentArticles = fallbackList;
-            articleBox.innerHTML = fallbackList.length ? "" : `<div class="empty-tip">该订阅暂未解析到内容</div>`;
+            // 解析为空，尝试缓存
+            const cache = getRssCache(sourceUrl);
+            if(cache && cache.items && cache.items.length > 0){
+                currentArticles = cache.items;
+                showToast("该订阅未解析到新内容，已显示缓存");
+            }else{
+                currentArticles = fallbackList;
+                articleBox.innerHTML = fallbackList.length ? "" : `<div class="empty-tip">该订阅暂未解析到内容</div>`;
+            }
         }else{
             currentArticles = list;
+            // 保存缓存
+            saveRssCache(sourceUrl, list);
             const merged = [...list, ...localCacheArticles.filter(item => item.sourceUrl.trim() !== String(sourceUrl).trim())]
                 .sort((a,b)=>new Date(b.date).getTime() - new Date(a.date).getTime())
                 .slice(0, ARTICLE_CACHE_LIMIT);
@@ -2266,8 +2370,16 @@ async function renderSingleFeedFromSource(sourceUrl){
         }
     }catch(err){
         console.warn("单订阅加载失败：", err);
-        currentArticles = fallbackList;
-        articleBox.innerHTML = fallbackList.length ? "" : `<div class="empty-tip">该订阅加载失败，且本地没有缓存内容</div>`;
+        const errDesc = describeRssError(err);
+        // 尝试使用 RSS 缓存
+        const cache = getRssCache(sourceUrl);
+        if(cache && cache.items && cache.items.length > 0){
+            currentArticles = cache.items;
+            showToast(`加载失败(已使用缓存)：${errDesc}`);
+        }else{
+            currentArticles = fallbackList;
+            articleBox.innerHTML = fallbackList.length ? "" : `<div class="empty-tip">该订阅加载失败：${errDesc}<br><br>如使用 Nitter 订阅，请改用 x2rss 格式：<br>https://rss.gurify.com/用户名/rss</div>`;
+        }
     }
     if(currentArticles.length > 0){
         renderPageNum = 1;
@@ -2342,6 +2454,165 @@ function renderCardList(list){
     return html;
 }
 
+// ===================== 标题自动翻译 =====================
+// 检测文本是否包含中文
+function containsChinese(text){
+    return /[\u4e00-\u9fff\u3400-\u4dbf]/.test(String(text || ""));
+}
+
+// 翻译缓存（localStorage）
+const TRANSLATE_CACHE_PREFIX = "tr_";
+const TRANSLATE_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7天
+
+function getTranslateCache(originalText){
+    try{
+        const key = TRANSLATE_CACHE_PREFIX + btoa(unescape(encodeURIComponent(originalText))).slice(0,100);
+        const raw = localStorage.getItem(key);
+        if(!raw) return null;
+        const data = JSON.parse(raw);
+        if(!data || !data.text) return null;
+        if(Date.now() - (data.time || 0) > TRANSLATE_CACHE_TTL) return null;
+        return data.text;
+    }catch(e){
+        return null;
+    }
+}
+
+function saveTranslateCache(originalText, translatedText){
+    try{
+        const key = TRANSLATE_CACHE_PREFIX + btoa(unescape(encodeURIComponent(originalText))).slice(0,100);
+        localStorage.setItem(key, JSON.stringify({
+            text: translatedText,
+            time: Date.now()
+        }));
+    }catch(e){
+        // 静默失败
+    }
+}
+
+// 调用翻译 API（免费、无需API Key）
+// 优先使用 Google Translate（翻译质量高、支持自动检测），CORS失败时回退到 MyMemory
+// Google Translate: 浏览器端可调用，无字符限制
+// MyMemory: 每个用户IP每天5000字符匿名额度，支持CORS
+async function translateTitle(text){
+    const cleanText = String(text || "").trim();
+    if(!cleanText || containsChinese(cleanText)) return null;
+
+    // 先查缓存
+    const cached = getTranslateCache(cleanText);
+    if(cached) return cached;
+
+    // 1. 优先尝试 Google Translate 免费端点
+    const googleResult = await tryGoogleTranslate(cleanText);
+    if(googleResult){
+        saveTranslateCache(cleanText, googleResult);
+        return googleResult;
+    }
+
+    // 2. 回退到 MyMemory API
+    const myMemoryResult = await tryMyMemoryTranslate(cleanText);
+    if(myMemoryResult){
+        saveTranslateCache(cleanText, myMemoryResult);
+        return myMemoryResult;
+    }
+
+    return null;
+}
+
+// Google Translate 免费端点
+async function tryGoogleTranslate(text){
+    try{
+        const url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=zh-CN&dt=t&q=" + encodeURIComponent(text.slice(0, 1800));
+        const res = await fetch(url, {
+            signal: AbortSignal.timeout(5000)
+        });
+        if(!res.ok) return null;
+        const data = await res.json();
+        // 响应格式: [[["译文","原文",...],...],...,["检测到的语言"]]
+        if(data && data[0] && Array.isArray(data[0])){
+            let translated = data[0].map(s => s[0] || "").join("");
+            translated = translated.trim();
+            if(translated && translated.toLowerCase() !== text.trim().toLowerCase()){
+                return translated;
+            }
+        }
+    }catch(e){
+        // CORS 失败或网络错误，静默回退
+    }
+    return null;
+}
+
+// MyMemory 翻译 API
+async function tryMyMemoryTranslate(text){
+    try{
+        // MyMemory 限制500字节，截断超长标题
+        const truncated = text.slice(0, 450);
+        const params = new URLSearchParams({
+            q: truncated,
+            langpair: "en|zh-CN"  // MyMemory 对 en->zh 支持最好
+        });
+        const res = await fetch(`https://api.mymemory.translated.net/get?${params}`, {
+            signal: AbortSignal.timeout(5000)
+        });
+        if(!res.ok) return null;
+        const data = await res.json();
+        if(data.responseStatus === 200 && data.responseData && data.responseData.translatedText){
+            let translated = data.responseData.translatedText;
+            // 过滤API返回的警告信息
+            if(/MYMEMORY|WARNING|QUERY LENGTH LIMIT/i.test(translated)) return null;
+            if(translated.trim().toLowerCase() === text.trim().toLowerCase()) return null;
+            return translated;
+        }
+    }catch(e){
+        // 网络错误或超时
+    }
+    return null;
+}
+
+// 批量为卡片标题添加翻译
+// 在卡片渲染后调用，异步翻译非中文标题
+async function translateCardTitles(container){
+    if(!container) container = document;
+    const titleEls = container.querySelectorAll(".card-title[data-need-translate='1']");
+    if(titleEls.length === 0) return;
+
+    // 并发翻译，但限制并发数为3避免API过载
+    const queue = Array.from(titleEls);
+    const CONCURRENCY = 3;
+
+    async function processOne(el){
+        const originalTitle = el.dataset.originalTitle || "";
+        if(!originalTitle) return;
+        const translated = await translateTitle(originalTitle);
+        if(translated){
+            el.innerHTML = `<span class="title-translate-badge">译文</span>${escapeHtml(translated)}`;
+            el.removeAttribute("data-need-translate");
+            // 重新检测展开按钮
+            const wrap = el.closest(".card-title-wrap");
+            if(wrap){
+                const toggleBtn = wrap.querySelector(".title-toggle-btn");
+                const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 22;
+                const needToggle = el.scrollHeight > lineHeight * 2 + 2;
+                if(toggleBtn){
+                    toggleBtn.style.display = needToggle ? "block" : "none";
+                    toggleBtn.innerText = "展开";
+                }
+            }
+        }else{
+            el.removeAttribute("data-need-translate");
+        }
+    }
+
+    async function worker(){
+        while(queue.length){
+            const el = queue.shift();
+            if(el) await processOne(el);
+        }
+    }
+
+    await Promise.all(Array.from({length: Math.min(CONCURRENCY, queue.length)}, worker));
+}
+
 function getPureText(str){
     if(!str) return "无标题";
     let div = document.createElement("div");
@@ -2391,7 +2662,8 @@ function buildCard(item, isFav = false){
     const preferProxy = hostMatched(item.videoUrl);
     const videoProxy = preferProxy ? getForceMediaProxyUrl(item.videoUrl, isFav) : "";
     const firstSrc = preferProxy ? videoProxy : videoDirect;
-    const altSrc = preferProxy ? videoDirect : "";
+    // altSrc 留空：直连 m3u8 因 CORS 限制无法在浏览器播放，回退到直连只会导致彻底失败
+    const altSrc = "";
     const proxyVideoAttr = preferProxy ? 'data-proxy-video="1"' : "";
     const videoFallbacks = preferProxy ? getMediaProxyCandidates(item.videoUrl, isFav).slice(1) : [];
     const videoFallbacksAttr = videoFallbacks.length > 0 ? `data-proxy-fallbacks="${escapeAttr(JSON.stringify(videoFallbacks))}"` : "";
@@ -2455,7 +2727,10 @@ function buildCard(item, isFav = false){
     }
 }
 
-    const titleRaw = escapeHtml(getPureText(item.title));
+    const titleText = getPureText(item.title);
+    const titleNeedsTranslate = !containsChinese(titleText) && titleText !== "无标题";
+    const titleRaw = escapeHtml(titleText);
+    const titleDataAttr = titleNeedsTranslate ? `data-need-translate="1" data-original-title="${escapeAttr(titleText)}"` : "";
     const isCollected = favList.some(f=>f.link === item.link);
     const favTxt = isCollected ? "已收藏" : "收藏";
     const favCls = isCollected ? "btn-fav collected" : "btn-fav";
@@ -2477,7 +2752,7 @@ function buildCard(item, isFav = false){
                 <div class="source-name-text">${sourceNameText}</div>
             </div>
             <div class="card-title-wrap">
-                <div class="card-title">${titleRaw}</div>
+                <div class="card-title" ${titleDataAttr}>${titleRaw}</div>
                 <button class="title-toggle-btn">展开</button>
             </div>
             ${mediaHtml}
@@ -2494,7 +2769,7 @@ function buildCard(item, isFav = false){
                 <div class="source-name-text">${sourceNameText}</div>
             </div>
             <div class="card-title-wrap">
-                <div class="card-title">${titleRaw}</div>
+                <div class="card-title" ${titleDataAttr}>${titleRaw}</div>
                 <button class="title-toggle-btn">展开</button>
             </div>
             ${mediaHtml}
@@ -2685,6 +2960,9 @@ function bindAllCardEvent(){
     document.querySelectorAll(".tweet-card").forEach(card => {
         readObserver.observe(card);
     });
+
+    // 异步翻译非中文标题
+    translateCardTitles();
 }
 
 let previewSwipeIndex = 0;
@@ -2784,10 +3062,55 @@ imgPreviewMask.addEventListener("click", function(e){
     }
 });
 
+// RSS 本地缓存：成功加载时保存，失败时回退到缓存
+const RSS_CACHE_PREFIX = "rss_cache_";
+const RSS_CACHE_TTL = 24 * 60 * 60 * 1000; // 24小时
+
+function saveRssCache(url, items){
+    try{
+        const key = RSS_CACHE_PREFIX + url;
+        localStorage.setItem(key, JSON.stringify({
+            items: items,
+            time: Date.now()
+        }));
+    }catch(e){
+        console.warn("RSS缓存保存失败:", e.message);
+    }
+}
+
+function getRssCache(url){
+    try{
+        const key = RSS_CACHE_PREFIX + url;
+        const raw = localStorage.getItem(key);
+        if(!raw) return null;
+        const data = JSON.parse(raw);
+        if(!data || !data.items) return null;
+        // 超过 TTL 的缓存仍然返回，但标记为过期
+        const age = Date.now() - (data.time || 0);
+        return { items: data.items, age: age, expired: age > RSS_CACHE_TTL };
+    }catch(e){
+        return null;
+    }
+}
+
+// 根据 HTTP 状态码和错误信息生成友好的错误提示
+function describeRssError(error){
+    const msg = String(error.message || error || "");
+    if(/520/.test(msg)) return "源站不可用(520)，服务可能已宕机";
+    if(/502/.test(msg)) return "代理请求失败(502)";
+    if(/403/.test(msg)) return "代理被拒绝(403)，域名不在白名单";
+    if(/代理返回了无效内容|非 RSS/.test(msg)) return "返回了网页而非RSS内容(可能被反爬拦截)";
+    if(/timeout|超时|abort/i.test(msg)) return "请求超时，网络较慢或源站无响应";
+    if(/fetch|network|ERR_/i.test(msg)) return "网络连接失败";
+    if(/格式不正确/.test(msg)) return "RSS链接格式不正确";
+    return msg;
+}
+
 async function loadAllRSS(){
     const queue = [...feedList];
     const allGroups = [];
     const failedFeeds = [];
+    const cachedFeeds = [];
     async function worker(){
         while(queue.length){
             const f = queue.shift();
@@ -2796,12 +3119,25 @@ async function loadAllRSS(){
                 if(!xmlText) {
                     allGroups.push([]);
                 }else{
-                    allGroups.push(parseRSS(xmlText, f.name, f.url, f.category));
+                    const items = parseRSS(xmlText, f.name, f.url, f.category);
+                    // 成功加载，保存缓存
+                    if(items && items.length > 0){
+                        saveRssCache(f.url, items);
+                    }
+                    allGroups.push(items);
                 }
             }catch(e){
                 console.warn(`订阅【${f.name}】拉取失败：`, e.message);
-                failedFeeds.push({name: f.name, url: f.url, error: e.message});
-                allGroups.push([]);
+                const errDesc = describeRssError(e);
+                failedFeeds.push({name: f.name, url: f.url, error: errDesc});
+                // 尝试使用本地缓存
+                const cache = getRssCache(f.url);
+                if(cache && cache.items && cache.items.length > 0){
+                    cachedFeeds.push({name: f.name, cached: true, expired: cache.expired});
+                    allGroups.push(cache.items);
+                }else{
+                    allGroups.push([]);
+                }
             }
         }
     }
@@ -2812,8 +3148,14 @@ async function loadAllRSS(){
     res.sort((a,b)=> new Date(b.date).getTime() - new Date(a.date).getTime());
     // 提示加载失败的订阅
     if(failedFeeds.length > 0){
-        const names = failedFeeds.map(f => f.name).join("、");
-        showToast(`以下订阅加载失败：${names}`);
+        const failedMsgs = failedFeeds.map(f => `【${f.name}】${f.error}`).join("\n");
+        if(cachedFeeds.length > 0){
+            const cachedNames = cachedFeeds.map(f => f.name).join("、");
+            showToast(`以下订阅加载失败(已使用缓存)：${cachedNames}`);
+        }else{
+            showToast(`以下订阅加载失败：${failedFeeds.map(f=>f.name).join("、")}`);
+        }
+        console.warn("RSS加载失败详情：\n" + failedMsgs);
     }
     return res;
 }
