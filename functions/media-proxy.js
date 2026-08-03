@@ -1,6 +1,6 @@
 const ALLOW_PROXY_HOSTS = [
   "twitter.com",
-   "x.com",
+  "x.com",
     "t.co",
     "twimg.com",
     "video.twimg.com",
