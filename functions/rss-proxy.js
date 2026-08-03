@@ -1,15 +1,19 @@
 const ALLOW_RSS_PROXY_HOSTS = [
   "twitter.com",
-  "x.com",
-  "t.co",
-  "twimg.com",
-  "video.twimg.com",
-  "pbs.twimg.com",
-  "abs.twimg.com",
-  "xcancel.com",
-  "nitter.net",
-  "xxxfollow.com",
-  "media.redgifs.com"
+   "x.com",
+    "t.co",
+    "twimg.com",
+    "video.twimg.com",
+    "pbs.twimg.com",
+    "abs.twimg.com",
+    "xcancel.com",
+    "nitter.net",
+    "xxxfollow.com",
+    "media.redgifs.com", 
+    "redd.it",
+    "770118.xyz",
+    "phe69",
+    "3go.fun"
 ];
 
 function normalizeHost(host) {
