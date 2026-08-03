@@ -864,7 +864,7 @@ const MEDIA_PROXY_ENDPOINTS = [
 // 这些域名的 RSS 或媒体资源默认走代理。需要新增国外或特殊域名时，加到这里即可。
 const FORCE_PROXY_HOSTS = [
     "twitter.com",
-    "x.com",
+     "x.com",
     "t.co",
     "twimg.com",
     "video.twimg.com",
@@ -2460,6 +2460,28 @@ function containsChinese(text){
     return /[\u4e00-\u9fff\u3400-\u4dbf]/.test(String(text || ""));
 }
 
+// 检测文字的源语言（基于 Unicode 字符范围）
+// 返回 MyMemory 兼容的语言代码
+function detectLanguage(text){
+    const str = String(text || "");
+    // 中文字符（含日文汉字）
+    if(/[\u4e00-\u9fff\u3400-\u4dbf]/.test(str)) return "zh";
+    // 日文平假名 \u3040-\u309f 片假名 \u30a0-\u30ff
+    if(/[\u3040-\u309f\u30a0-\u30ff]/.test(str)) return "ja";
+    // 韩文 Hangul \uac00-\ud7af
+    if(/[\uac00-\ud7af]/.test(str)) return "ko";
+    // 泰文 \u0e00-\u0e7f
+    if(/[\u0e00-\u0e7f]/.test(str)) return "th";
+    // 阿拉伯文 \u0600-\u06ff
+    if(/[\u0600-\u06ff]/.test(str)) return "ar";
+    // 俄文/西里尔文 \u0400-\u04ff
+    if(/[\u0400-\u04ff]/.test(str)) return "ru";
+    // 越南文（基于拉丁字母+特殊符号特征）
+    if(/[\u0100-\u024f\u1e00-\u1eff]/.test(str) && /[ăâđêôơưăắằẳẵặâấầẩẫậêếềểễệôốồổỗộơớờởỡợưứừửữự]/i.test(str)) return "vi";
+    // 默认按英文处理（涵盖英语及大部分拉丁字母语言）
+    return "en";
+}
+
 // 翻译缓存（localStorage）
 const TRANSLATE_CACHE_PREFIX = "tr_";
 const TRANSLATE_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7天
@@ -2543,13 +2565,41 @@ async function tryGoogleTranslate(text){
 }
 
 // MyMemory 翻译 API
+// 先尝试 源语言->zh-CN，如果失败则尝试 源语言->en 再 en->zh-CN 两步翻译
 async function tryMyMemoryTranslate(text){
     try{
-        // MyMemory 限制500字节，截断超长标题
         const truncated = text.slice(0, 450);
+        const sourceLang = detectLanguage(truncated);
+
+        // 策略1：直接源语言 -> 中文
+        const directResult = await myMemoryFetch(truncated, sourceLang, "zh-CN");
+        if(directResult) return directResult;
+
+        // 策略2：源语言 -> 英文 -> 中文（两步翻译，覆盖直译不支持的语言对）
+        if(sourceLang !== "en"){
+            const enResult = await myMemoryFetch(truncated, sourceLang, "en");
+            if(enResult && !containsChinese(enResult)){
+                const finalResult = await myMemoryFetch(enResult.slice(0, 450), "en", "zh-CN");
+                if(finalResult) return finalResult;
+            }
+        }
+
+        // 策略3：如果是混合文本（含拉丁字母），尝试用 en->zh-CN 兜底
+        if(sourceLang === "en"){
+            return await myMemoryFetch(truncated, "en", "zh-CN");
+        }
+    }catch(e){
+        // 网络错误或超时
+    }
+    return null;
+}
+
+// MyMemory 单次翻译请求
+async function myMemoryFetch(text, fromLang, toLang){
+    try{
         const params = new URLSearchParams({
-            q: truncated,
-            langpair: "en|zh-CN"  // MyMemory 对 en->zh 支持最好
+            q: text,
+            langpair: `${fromLang}|${toLang}`
         });
         const res = await fetch(`https://api.mymemory.translated.net/get?${params}`, {
             signal: AbortSignal.timeout(5000)
@@ -2560,11 +2610,14 @@ async function tryMyMemoryTranslate(text){
             let translated = data.responseData.translatedText;
             // 过滤API返回的警告信息
             if(/MYMEMORY|WARNING|QUERY LENGTH LIMIT/i.test(translated)) return null;
+            // 翻译结果和原文一样说明翻译失败
             if(translated.trim().toLowerCase() === text.trim().toLowerCase()) return null;
+            // 检查翻译结果是否包含目标语言字符
+            if(toLang === "zh-CN" && !containsChinese(translated)) return null;
             return translated;
         }
     }catch(e){
-        // 网络错误或超时
+        // 静默失败
     }
     return null;
 }
