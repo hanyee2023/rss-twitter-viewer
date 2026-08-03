@@ -116,7 +116,12 @@ export async function onRequest({ request }) {
   try {
     const fetchHeaders = new Headers();
     fetchHeaders.set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0.0.0 Safari/537.36");
-    fetchHeaders.set("Accept", "*/*");
+    // RSS/Atom 链接发送正确的 Accept 头，避免 nitter 返回 HTML 页面
+    if (/\/rss\b|\.rss\b|\/atom\b|\.xml\b/i.test(targetUrl)) {
+      fetchHeaders.set("Accept", "application/rss+xml,application/atom+xml,application/xml,text/xml;q=0.9,*/*;q=0.8");
+    } else {
+      fetchHeaders.set("Accept", "*/*");
+    }
     const range = request.headers.get("range");
     if (range) fetchHeaders.set("Range", range);
 
