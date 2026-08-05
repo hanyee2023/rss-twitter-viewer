@@ -269,6 +269,15 @@ body{
     font-size:15px;
 }
 #confirmAdd{background:#1d9bf0;color:#fff;border:none;padding:11px 16px;border-radius:8px;font-size:15px;min-width:70px;flex-shrink:0;}
+#confirmAddTwitter{background:#000;color:#fff;border:none;padding:11px 16px;border-radius:8px;font-size:15px;min-width:70px;flex-shrink:0;}
+.twitter-block-section{
+    border-top:2px solid #000;
+    margin:20px 12px 0;
+    padding-top:16px;
+}
+.twitter-hint{
+    font-size:12px;color:#888;margin:4px 0 0;line-height:1.5;
+}
 .add-feed-form{margin:0 12px;padding-bottom:10px;}
 .keyword-block-section{
     border-top:2px solid #000;
@@ -722,6 +731,14 @@ body{
                 <button id="confirmAdd">添加</button>
             </div>
         </div>
+        <div class="twitter-block-section">
+            <div class="keyword-block-title">添加 Twitter 订阅</div>
+            <div class="add-feed-row">
+                <input id="twitterUserInput" placeholder="输入 Twitter 用户名（如 op7418）">
+                <button id="confirmAddTwitter">添加</button>
+            </div>
+            <div class="twitter-hint">仅需用户名，无需 @ 符号。自动通过 Syndication API 获取推文，含图片和视频。</div>
+        </div>
         <div class="keyword-block-section">
             <div class="keyword-block-title">关键字屏蔽</div>
             <div class="add-feed-row">
@@ -854,7 +871,8 @@ const FORCE_PROXY_HOSTS = [
     "redd.it",
     "770118.xyz",
     "phe69",
-    "3go.fun"
+    "3go.fun",
+    "rsshub.app"
 ];
 
 function normalizeUrl(rawUrl) {
@@ -3409,6 +3427,44 @@ document.getElementById("confirmAdd").onclick = function(){
     document.getElementById("feedName").value = "";
     document.getElementById("feedUrl").value = "";
     showToast("订阅添加成功");
+    initLoadAllCache();
+    showPage(pageManage, "管理订阅");
+}
+
+// Twitter 订阅：通过 /twitter-rss?user=用户名 自动生成 RSS
+document.getElementById("confirmAddTwitter").onclick = function(){
+    let raw = document.getElementById("twitterUserInput").value.trim();
+    if (!raw) {
+        showToast("请输入 Twitter 用户名");
+        return;
+    }
+    // 去掉 @ 前缀，只保留用户名部分
+    let username = raw.replace(/^@+/, "").replace(/^https?:\/\/(x|twitter)\.com\//i, "").replace(/\/.*$/, "").trim();
+    // 只允许字母、数字、下划线
+    username = username.replace(/[^a-zA-Z0-9_]/g, "");
+    if (!username) {
+        showToast("用户名格式不正确");
+        return;
+    }
+
+    const twitterRssUrl = location.origin + "/twitter-rss?user=" + username;
+
+    if (feedList.some(item => item.url === twitterRssUrl)) {
+        showToast("该 Twitter 订阅已存在");
+        return;
+    }
+
+    feedList.push({
+        name: "@" + username,
+        category: "video",
+        url: twitterRssUrl
+    });
+    localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
+    lastRefreshTime = 0;
+    localStorage.removeItem(LAST_REFRESH_KEY);
+
+    document.getElementById("twitterUserInput").value = "";
+    showToast("Twitter 订阅添加成功：@" + username);
     initLoadAllCache();
     showPage(pageManage, "管理订阅");
 }
