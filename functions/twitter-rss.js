@@ -5,6 +5,10 @@
 
 const SYNDICATION_BASE = 'https://syndication.twitter.com/srv/timeline-profile/screen-name/';
 
+// RSS 条目数量上限：只输出最近的 N 条推文，不加载全部历史
+const DEFAULT_MAX_ITEMS = 20;
+const ABSOLUTE_MAX_ITEMS = 50;
+
 function corsHeaders(extra = {}) {
   return {
     'Access-Control-Allow-Origin': '*',
@@ -42,6 +46,13 @@ export async function onRequest({ request }) {
     .replace(/[^a-zA-Z0-9_]/g, '')
     .slice(0, 15);
 
+  // 可选 max 参数：控制返回条目数（默认 20，上限 50）
+  let maxItems = DEFAULT_MAX_ITEMS;
+  const maxParam = parseInt(url.searchParams.get('max'), 10);
+  if (maxParam > 0) {
+    maxItems = Math.min(maxParam, ABSOLUTE_MAX_ITEMS);
+  }
+
   if (!username) {
     return new Response('缺少 user 参数。用法: /twitter-rss?user=用户名', {
       status: 400,
@@ -77,13 +88,51 @@ export async function onRequest({ request }) {
       });
     }
 
-    const data = JSON.parse(match[1]);
+    // 清理 JSON 中的非法控制字符（推文文本可能含 \x00-\x1f）
+    const jsonStr = match[1].replace(/[\x00-\x1f]/g, function(ch) {
+      // 保留 \n \r \t，其余替换为空格
+      if (ch === '\n' || ch === '\r' || ch === '\t') return ch;
+      return ' ';
+    });
+    const data = JSON.parse(jsonStr);
     const entries = data?.props?.pageProps?.timeline?.entries || [];
+    const hasResults = data?.props?.pageProps?.contextProvider?.hasResults;
 
-    // 3. 生成 RSS 条目
+    // 用户无公开推文（私密账号、被冻结、无推文等）
+    if (!hasResults || entries.length === 0) {
+      const rss =
+        '<?xml version="1.0" encoding="UTF-8"?>\n' +
+        '<rss version="2.0">\n' +
+        '<channel>\n' +
+        '<title>@' + username + ' / Twitter</title>\n' +
+        '<link>https://x.com/' + username + '</link>\n' +
+        '<description>该用户暂无可获取的公开推文（可能为私密账号、被冻结或无推文）</description>\n' +
+        '<language>zh-CN</language>\n' +
+        '<lastBuildDate>' + new Date().toUTCString() + '</lastBuildDate>\n' +
+        '<item>\n' +
+        '<title>暂无内容</title>\n' +
+        '<description><![CDATA[<p>无法获取 @' + username + ' 的推文。可能原因：账号设为私密、被冻结或暂无公开推文。</p>]]></description>\n' +
+        '<pubDate>' + new Date().toUTCString() + '</pubDate>\n' +
+        '</item>\n' +
+        '</channel>\n' +
+        '</rss>';
+      return new Response(rss, {
+        status: 200,
+        headers: corsHeaders({
+          'Content-Type': 'application/rss+xml; charset=utf-8',
+          'Cache-Control': 'public, max-age=600',
+        }),
+      });
+    }
+
+    // 3. 生成 RSS 条目（只取最近 maxItems 条，跳过分页游标等非推文条目）
     const items = [];
     for (const entry of entries) {
+      // 达到上限后停止遍历，避免处理多余数据
+      if (items.length >= maxItems) break;
+
       const tweet = entry?.content?.tweet;
+      // 跳过分页游标（cursor）和非推文条目
       if (!tweet) continue;
 
       const tweetId = tweet.conversation_id_str || '';
@@ -151,7 +200,9 @@ export async function onRequest({ request }) {
       status: 200,
       headers: corsHeaders({
         'Content-Type': 'application/rss+xml; charset=utf-8',
-        'Cache-Control': 'public, max-age=600',
+        // 边缘缓存 10 分钟，过期后允许返回旧数据同时后台刷新
+        'Cache-Control': 'public, max-age=600, stale-while-revalidate=300',
+        'ETag': '"' + username + '-' + maxItems + '-' + Math.floor(Date.now() / 600000) + '"',
       }),
     });
   } catch (err) {
