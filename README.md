@@ -2,7 +2,7 @@
 
 一个单文件版本地 RSS 媒体阅读器，适合个人自用。页面直接在浏览器中运行，支持添加 RSS 订阅源、聚合展示图文/视频内容、收藏、搜索、已读隐藏、订阅导入导出，以及针对部分国外媒体资源的代理播放。
 
-当前版本：`Beta4.0`
+当前版本：`Beta4.5`
 
 ## 功能特点
 
@@ -81,27 +81,26 @@ const FORCE_PROXY_HOSTS = [
     "abs.twimg.com",
     "xcancel.com",
     "nitter.net",
+    "venexa.site",
+    "aguea.com",
+    "rsshub.app",
     "video.shturl."
 ];
 ```
 
 普通国内图片、MP4、m3u8 链接会优先由浏览器直接加载。匹配到上述域名的媒体链接会通过 `media-proxy` 代理。
 
+Twitter 订阅通过 Nitter 实例（asia.aguea.com）获取推文内容，媒体链接自动替换为 Twitter 官方 CDN 域名（`pbs.twimg.com`、`video.twimg.com`），通过代理加载以获得更快的速度。
+
 ## m3u8 播放说明
 
-m3u8 视频使用 HLS.js 播放。
+m3u8 视频使用 HLS.js 播放，已针对代理视频场景优化：
 
-为了减少流量和页面卡顿，m3u8 不会在页面加载时立即拉流，而是在用户点击播放后才初始化和加载。
-
-如果某些 m3u8 可以播放，某些提示加载失败，常见原因包括：
-
-- m3u8 内部分片地址是相对路径，代理没有改写为完整地址
-- 主 m3u8 文件能访问，但 `.ts` 或 `.m4s` 分片无法访问
-- 源站有防盗链限制，需要 Referer、User-Agent 或 Cookie
-- 代理没有正确返回 CORS 响应头
-- 代理没有正确处理 Range 请求
-- 视频编码不被当前浏览器支持
-- 该 m3u8 是直播流，没有固定总时长
+- 关闭低延迟模式（`lowLatencyMode: false`），使用标准点播缓冲策略
+- 缓冲长度提升至 60 秒（`maxBufferLength: 60`），最大 120 秒，减少长视频卡顿
+- 自适应码率从低级别开始（`startLevel: -1`），快速起播避免黑屏
+- 根据播放器尺寸自动限制最高分辨率（`capLevelToPlayerSize: true`）
+- 代理视频采用两次点击模式：第一次加载 manifest，第二次点击播放
 
 ## 性能优化
 
