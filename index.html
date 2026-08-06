@@ -737,7 +737,6 @@ body{
                 <input id="twitterUserInput" placeholder="输入 Twitter 用户名（如 op7418）">
                 <button id="confirmAddTwitter">添加</button>
             </div>
-            <div class="twitter-hint">仅需用户名，无需 @ 符号。自动通过 Syndication API 获取推文，含图片和视频。</div>
         </div>
         <div class="keyword-block-section">
             <div class="keyword-block-title">关键字屏蔽</div>
@@ -872,7 +871,9 @@ const FORCE_PROXY_HOSTS = [
     "770118.xyz",
     "phe69",
     "3go.fun",
-    "rsshub.app"
+    "rsshub.app",
+    "venexa.site",
+    "aguea.com"
 ];
 
 function normalizeUrl(rawUrl) {
@@ -2998,6 +2999,9 @@ function parseRSS(xml, sourceName, sourceUrl, cat){
         let txt = m[2];
         let titleRaw = (txt.match(/<title>([\s\S]*?)<\/title>/) || [])[1] || "无标题";
         titleRaw = fullDecodeXml(titleRaw);
+
+        // 过滤掉"暂无内容"等占位条目，不显示无更新的订阅
+        if(titleRaw === "暂无内容") continue;
 
         let link = "";
         const linkHref = txt.match(/<link[^>]*href="([^"]+)"/);
