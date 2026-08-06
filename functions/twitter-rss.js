@@ -1,6 +1,8 @@
 // Twitter 用户时间线 RSS 生成器
 // 多源回退架构：asia.aguea.com (Nitter) → Syndication API
-// 视频输出策略：将 m3u8 转换为中等码率 MP4（便于浏览器嗅探 + 加载流畅）
+// 视频输出策略：
+//   - Nitter 路径：直接输出原始 m3u8 URL，变体过滤在 media-proxy.js 中完成
+//   - Syndication API 路径：选择中等码率 MP4（约 720p），便于浏览器嗅探
 // 部署到 Cloudflare Pages 的 functions 目录即可使用
 // 订阅地址: /twitter-rss?user=用户名
 
@@ -65,75 +67,6 @@ function pickBestMp4(variants) {
     }
   }
   return best.url;
-}
-
-// 将 Twitter m3u8 URL 转换为直接 MP4 URL
-// Twitter CDN 在相同路径同时提供 m3u8 和 mp4 两种格式，只需替换扩展名
-function m3u8ToMp4(url) {
-  return url.replace(/\.m3u8(\?|&|#|$)/, '.mp4$1');
-}
-
-// 从 Twitter m3u8 URL 解析出最佳 MP4 URL
-// - 如果是媒体播放列表（URL 含 /vid/），直接转换扩展名即可
-// - 如果是主播放列表（URL 含 /pl/），需要获取内容并解析变体列表，
-//   选择中等码率的变体再转换为 MP4
-async function resolveTwitterVideoMp4(m3u8Url) {
-  // 媒体播放列表（含 /vid/）：直接转换，无需网络请求
-  if (m3u8Url.includes('/vid/')) {
-    return m3u8ToMp4(m3u8Url);
-  }
-
-  // 主播放列表（含 /pl/ 或其他格式）：获取并解析变体
-  try {
-    const res = await fetch(m3u8Url, {
-      headers: { 'User-Agent': FETCH_UA },
-      signal: AbortSignal.timeout(5000),
-    });
-    if (res.ok) {
-      const text = await res.text();
-      const variants = [];
-      const lines = text.split('\n');
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].includes('#EXT-X-STREAM-INF')) {
-          const bwMatch = lines[i].match(/BANDWIDTH=(\d+)/);
-          const nextLine = lines[i + 1] ? lines[i + 1].trim() : '';
-          if (nextLine && !nextLine.startsWith('#')) {
-            const variantUrl = nextLine.startsWith('http')
-              ? nextLine
-              : new URL(nextLine, m3u8Url).href;
-            variants.push({
-              bandwidth: bwMatch ? parseInt(bwMatch[1]) : 0,
-              url: variantUrl,
-            });
-          }
-        }
-      }
-
-      if (variants.length > 0) {
-        // 按码率升序排列
-        variants.sort((a, b) => a.bandwidth - b.bandwidth);
-
-        // 选择中等码率（目标 ~832000 bps，约 720p）
-        const targetBw = 832000;
-        let best = variants[Math.floor(variants.length / 2)];
-        let bestDiff = Infinity;
-        for (const v of variants) {
-          const diff = Math.abs(v.bandwidth - targetBw);
-          if (diff < bestDiff) {
-            bestDiff = diff;
-            best = v;
-          }
-        }
-
-        return m3u8ToMp4(best.url);
-      }
-    }
-  } catch (e) {
-    // 获取失败，回退到直接转换
-  }
-
-  // 回退：直接转换扩展名
-  return m3u8ToMp4(m3u8Url);
 }
 
 // 简单哈希函数，用于生成伪推文 ID
@@ -270,7 +203,7 @@ async function parseNitterHtml(html, username, maxItems, nitterBase) {
     // 提取视频
     // asia.aguea.com 的视频格式：<video poster="xxx.jpg" data-url="xxx.m3u8" data-autoload="false"></video>
     // 不使用 src 属性，而是用 data-url 存放 m3u8 链接，用 poster 存放预览图
-    // 输出时将 m3u8 转换为中等码率 MP4，便于浏览器嗅探和快速加载
+    // 直接输出原始 m3u8 URL，变体过滤（选择中等码率、保留音频轨道）在 media-proxy.js 中完成
     const videoRegex = /<video[^>]*\sdata-url="([^"]+)"[^>]*>/gi;
     const videoPosterRegex = /<video[^>]*\sposter="([^"]+)"[^>]*>/gi;
     const videoUrls = [];
@@ -313,24 +246,23 @@ async function parseNitterHtml(html, username, maxItems, nitterBase) {
       desc += '<img src="' + twimgUrl + '" />';
     }
 
-    // 添加视频（将 m3u8 转换为 MP4 格式，附带预览图）
-    // 转换为 MP4 后：
-    //   1. 手机浏览器可嗅探到 .mp4 直接视频链接
-    //   2. 避免主播放列表暴露多个变体 URL 导致嗅探器返回多个链接
-    //   3. 选择中等码率确保加载速度
+    // 添加视频（直接输出原始 m3u8 URL，变体过滤在 media-proxy.js 中完成）
+    // Twitter CDN 的视频以 fMP4 分段（.m4s）存储，音频和视频分离在不同播放列表中。
+    // 主播放列表包含多个变体（如 270p/360p/720p/1080p）和多个音频轨道。
+    // 这里直接输出原始 m3u8 URL，由 media-proxy.js 在代理时过滤变体：
+    //   - 保留中等码率视频变体（约 720p / 832kbps）
+    //   - 保留对应的音频轨道（避免视频无声音）
+    //   - 移除其他变体（避免浏览器嗅探器发现多个链接）
     for (let i = 0; i < videoUrls.length; i++) {
       const videoUrl = videoUrls[i];
       const posterUrl = videoPosters[i] || '';
       const cleanVideoUrl = videoUrl.replace(/&amp;/g, '&').replace(/https?:\/\/venexa\.site\//, 'https://video.twimg.com/');
       const cleanPosterUrl = posterUrl.replace(/&amp;/g, '&').replace(/https?:\/\/venexa\.site\//, 'https://pbs.twimg.com/');
 
-      // 将 m3u8 解析为中等码率的直接 MP4 URL
-      const mp4Url = await resolveTwitterVideoMp4(cleanVideoUrl);
-
       if (posterUrl) {
         desc += '<img src="' + cleanPosterUrl + '" />';
       }
-      desc += '<video src="' + mp4Url + '" controls></video>';
+      desc += '<video src="' + cleanVideoUrl + '" controls></video>';
     }
 
     items.push(
