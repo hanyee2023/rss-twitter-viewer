@@ -1,5 +1,6 @@
 // Twitter 用户时间线 RSS 生成器
 // 多源回退架构：asia.aguea.com (Nitter) → Syndication API
+// 视频输出策略：将 m3u8 转换为中等码率 MP4（便于浏览器嗅探 + 加载流畅）
 // 部署到 Cloudflare Pages 的 functions 目录即可使用
 // 订阅地址: /twitter-rss?user=用户名
 
@@ -41,12 +42,98 @@ function escapeHtml(text) {
     .replace(/>/g, '&gt;');
 }
 
-// 从视频变体列表中选择最高画质的 MP4
+// 从视频变体列表中选择中等码率的 MP4（平衡画质和加载速度）
+// 之前选最高码率导致高分辨率视频加载缓慢，
+// 现在选择最接近 832000bps（约 720p）的变体，确保流畅播放
 function pickBestMp4(variants) {
   const mp4s = variants
     .filter(v => v.content_type === 'video/mp4')
-    .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-  return mp4s.length > 0 ? mp4s[0].url : null;
+    .sort((a, b) => (a.bitrate || 0) - (b.bitrate || 0)); // 升序排列
+
+  if (mp4s.length === 0) return null;
+
+  // 目标码率：832000 bps（约 720p）
+  // 选择最接近目标码率的变体，避免最高码率导致缓冲缓慢
+  const targetBitrate = 832000;
+  let best = mp4s[0];
+  let bestDiff = Infinity;
+  for (const v of mp4s) {
+    const diff = Math.abs((v.bitrate || 0) - targetBitrate);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      best = v;
+    }
+  }
+  return best.url;
+}
+
+// 将 Twitter m3u8 URL 转换为直接 MP4 URL
+// Twitter CDN 在相同路径同时提供 m3u8 和 mp4 两种格式，只需替换扩展名
+function m3u8ToMp4(url) {
+  return url.replace(/\.m3u8(\?|&|#|$)/, '.mp4$1');
+}
+
+// 从 Twitter m3u8 URL 解析出最佳 MP4 URL
+// - 如果是媒体播放列表（URL 含 /vid/），直接转换扩展名即可
+// - 如果是主播放列表（URL 含 /pl/），需要获取内容并解析变体列表，
+//   选择中等码率的变体再转换为 MP4
+async function resolveTwitterVideoMp4(m3u8Url) {
+  // 媒体播放列表（含 /vid/）：直接转换，无需网络请求
+  if (m3u8Url.includes('/vid/')) {
+    return m3u8ToMp4(m3u8Url);
+  }
+
+  // 主播放列表（含 /pl/ 或其他格式）：获取并解析变体
+  try {
+    const res = await fetch(m3u8Url, {
+      headers: { 'User-Agent': FETCH_UA },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (res.ok) {
+      const text = await res.text();
+      const variants = [];
+      const lines = text.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].includes('#EXT-X-STREAM-INF')) {
+          const bwMatch = lines[i].match(/BANDWIDTH=(\d+)/);
+          const nextLine = lines[i + 1] ? lines[i + 1].trim() : '';
+          if (nextLine && !nextLine.startsWith('#')) {
+            const variantUrl = nextLine.startsWith('http')
+              ? nextLine
+              : new URL(nextLine, m3u8Url).href;
+            variants.push({
+              bandwidth: bwMatch ? parseInt(bwMatch[1]) : 0,
+              url: variantUrl,
+            });
+          }
+        }
+      }
+
+      if (variants.length > 0) {
+        // 按码率升序排列
+        variants.sort((a, b) => a.bandwidth - b.bandwidth);
+
+        // 选择中等码率（目标 ~832000 bps，约 720p）
+        const targetBw = 832000;
+        let best = variants[Math.floor(variants.length / 2)];
+        let bestDiff = Infinity;
+        for (const v of variants) {
+          const diff = Math.abs(v.bandwidth - targetBw);
+          if (diff < bestDiff) {
+            bestDiff = diff;
+            best = v;
+          }
+        }
+
+        return m3u8ToMp4(best.url);
+      }
+    }
+  } catch (e) {
+    // 获取失败，回退到直接转换
+  }
+
+  // 回退：直接转换扩展名
+  return m3u8ToMp4(m3u8Url);
 }
 
 // 简单哈希函数，用于生成伪推文 ID
@@ -87,7 +174,7 @@ async function fetchFromNitter(username, maxItems) {
         continue;
       }
 
-      const items = parseNitterHtml(html, username, maxItems, base);
+      const items = await parseNitterHtml(html, username, maxItems, base);
 
       if (items.length === 0) {
         return buildEmptyRss(username, '该用户暂无可获取的公开推文');
@@ -131,7 +218,7 @@ async function fetchFromNitter(username, maxItems) {
 //       </div>
 //     </div>
 //   </div>
-function parseNitterHtml(html, username, maxItems, nitterBase) {
+async function parseNitterHtml(html, username, maxItems, nitterBase) {
   const items = [];
 
   // 用 timeline-item 作为分隔，每个块包含一条推文
@@ -183,6 +270,7 @@ function parseNitterHtml(html, username, maxItems, nitterBase) {
     // 提取视频
     // asia.aguea.com 的视频格式：<video poster="xxx.jpg" data-url="xxx.m3u8" data-autoload="false"></video>
     // 不使用 src 属性，而是用 data-url 存放 m3u8 链接，用 poster 存放预览图
+    // 输出时将 m3u8 转换为中等码率 MP4，便于浏览器嗅探和快速加载
     const videoRegex = /<video[^>]*\sdata-url="([^"]+)"[^>]*>/gi;
     const videoPosterRegex = /<video[^>]*\sposter="([^"]+)"[^>]*>/gi;
     const videoUrls = [];
@@ -225,18 +313,24 @@ function parseNitterHtml(html, username, maxItems, nitterBase) {
       desc += '<img src="' + twimgUrl + '" />';
     }
 
-    // 添加视频（m3u8 格式，附带预览图）
-    // 视频和预览图分别替换为 video.twimg.com 和 pbs.twimg.com
+    // 添加视频（将 m3u8 转换为 MP4 格式，附带预览图）
+    // 转换为 MP4 后：
+    //   1. 手机浏览器可嗅探到 .mp4 直接视频链接
+    //   2. 避免主播放列表暴露多个变体 URL 导致嗅探器返回多个链接
+    //   3. 选择中等码率确保加载速度
     for (let i = 0; i < videoUrls.length; i++) {
       const videoUrl = videoUrls[i];
       const posterUrl = videoPosters[i] || '';
-      // 将 &amp; 还原为 &，确保 URL 可用
       const cleanVideoUrl = videoUrl.replace(/&amp;/g, '&').replace(/https?:\/\/venexa\.site\//, 'https://video.twimg.com/');
       const cleanPosterUrl = posterUrl.replace(/&amp;/g, '&').replace(/https?:\/\/venexa\.site\//, 'https://pbs.twimg.com/');
+
+      // 将 m3u8 解析为中等码率的直接 MP4 URL
+      const mp4Url = await resolveTwitterVideoMp4(cleanVideoUrl);
+
       if (posterUrl) {
         desc += '<img src="' + cleanPosterUrl + '" />';
       }
-      desc += '<video src="' + cleanVideoUrl + '" controls></video>';
+      desc += '<video src="' + mp4Url + '" controls></video>';
     }
 
     items.push(
