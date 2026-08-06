@@ -195,6 +195,9 @@ function parseNitterHtml(html, username, maxItems, nitterBase) {
       videoPosters.push(vidMatch[1]);
     }
 
+    // 过滤掉无媒体条目：只显示包含图片或视频的推文
+    if (imageUrls.length === 0 && videoUrls.length === 0) continue;
+
     // 生成伪推文 ID（asia.aguea.com 不提供推文状态链接）
     // 优先用第一张图片的文件名，其次用文本哈希
     let pseudoId = '';
