@@ -1,4 +1,4 @@
-// 第三轮测试：验证 carryfeed, zamantika, asia.aguea + 深入分析 syndication
+// 获取 asia.aguea.com 的完整 HTML 内容用于分析
 const FETCH_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
 function corsHeaders(extra = {}) {
@@ -8,37 +8,6 @@ function corsHeaders(extra = {}) {
     'Access-Control-Allow-Headers': '*',
     ...extra,
   };
-}
-
-async function testSource(name, url, headers) {
-  const result = { name, url, status: null, contentType: null, size: 0, snippet: '', error: null, flags: {} };
-  try {
-    const res = await fetch(url, {
-      headers: headers || { 'User-Agent': FETCH_UA, 'Accept': '*/*' },
-      signal: AbortSignal.timeout(10000),
-      redirect: 'follow',
-    });
-    result.status = res.status;
-    result.contentType = res.headers.get('content-type') || '';
-    result.finalUrl = res.url || url;
-    const text = await res.text();
-    result.size = text.length;
-    result.snippet = text.substring(0, 3000);
-    result.flags.hasRssTag = text.includes('<rss') || text.includes('<channel');
-    result.flags.hasItems = text.includes('<item>');
-    result.flags.hasJsonData = text.includes('"data"') && text.includes('"text"');
-    result.flags.hasTweetId = text.includes('status/') || /\d{15,20}/.test(text);
-    result.flags.hasTwimg = text.includes('twimg.com') || text.includes('pbs.twimg');
-    result.flags.hasVideo = text.includes('video') || text.includes('.mp4');
-    result.flags.hasCloudflare = text.includes('Just a moment') || text.includes('cf-challenge') || text.includes('Attention Required');
-    result.flags.hasNotfound = text.includes('not found') || text.includes('does not exist');
-    result.flags.isEmpty = text.length < 200;
-    result.flags.hasEntries = text.includes('entries');
-    result.flags.hasHasResults = text.includes('hasResults');
-  } catch (err) {
-    result.error = err.message;
-  }
-  return result;
 }
 
 export async function onRequest({ request }) {
@@ -51,43 +20,90 @@ export async function onRequest({ request }) {
     .replace(/[^a-zA-Z0-9_]/g, '')
     .slice(0, 15);
 
-  const htmlH = { 'Accept': 'text/html,application/xhtml+xml', 'User-Agent': FETCH_UA };
-  const rssH = { 'Accept': 'application/rss+xml,application/xml,text/xml;q=0.9,*/*;q=0.8', 'User-Agent': FETCH_UA };
-  const rssFeedlyH = { 'Accept': 'application/rss+xml,application/xml', 'User-Agent': 'Feedly/1.0 (+https://feedly.com)' };
+  const results = {};
 
-  const sources = [
-    // 三个新站点
-    { name: 'carryfeed HTML', url: 'https://carryfeed.com/' + username, headers: htmlH },
-    { name: 'carryfeed /rss', url: 'https://carryfeed.com/' + username + '/rss', headers: rssH },
-    { name: 'carryfeed /feed', url: 'https://carryfeed.com/' + username + '/feed', headers: rssH },
-    { name: 'zamantika HTML', url: 'https://zamantika.com/' + username, headers: htmlH },
-    { name: 'zamantika /rss', url: 'https://zamantika.com/' + username + '/rss', headers: rssH },
-    { name: 'zamantika /feed', url: 'https://zamantika.com/' + username + '/feed', headers: rssH },
-    { name: 'aguea HTML', url: 'https://asia.aguea.com/' + username, headers: htmlH },
-    { name: 'aguea /rss', url: 'https://asia.aguea.com/' + username + '/rss', headers: rssH },
-    { name: 'aguea /feed', url: 'https://asia.aguea.com/' + username + '/feed', headers: rssH },
+  // 1. 获取 aguea 完整 HTML
+  try {
+    const res = await fetch('https://asia.aguea.com/' + username, {
+      headers: { 'Accept': 'text/html', 'User-Agent': FETCH_UA },
+      signal: AbortSignal.timeout(10000),
+    });
+    results.agueaStatus = res.status;
+    results.agueaContentType = res.headers.get('content-type');
+    const html = await res.text();
+    results.agueaSize = html.length;
+    // 返回完整 HTML（截断到 15000 字符以避免太大）
+    results.agueaHtml = html.substring(0, 15000);
+    // 提取关键结构信息
+    results.agueaFlags = {
+      hasTwimg: html.includes('twimg.com'),
+      hasVideo: html.includes('.mp4') || html.includes('video'),
+      hasTweetText: html.includes('tweet') || html.includes('status'),
+      hasTweetId: /\d{15,20}/.test(html),
+      hasJsonLd: html.includes('application/ld+json'),
+      hasOgImage: html.includes('og:image'),
+      hasDataAttr: html.includes('data-'),
+      hasArticle: html.includes('<article'),
+      hasDivTweet: html.includes('tweet') || html.includes('post'),
+    };
+  } catch (err) {
+    results.agueaError = err.message;
+  }
 
-    // xcancel with feedly UA（第二轮已确认返回 RSS 但需要白名单）
-    { name: 'xcancel /rss feedly', url: 'https://xcancel.com/' + username + '/rss', headers: rssFeedlyH },
-
-    // Syndication fresh_Hunk（确认 entries 为空）
-    { name: 'syndication fresh_Hunk', url: 'https://syndication.twitter.com/srv/timeline-profile/screen-name/' + username, headers: htmlH },
-
-    // Syndication op7418 对照
-    { name: 'syndication op7418', url: 'https://syndication.twitter.com/srv/timeline-profile/screen-name/op7418', headers: htmlH },
-
-    // 测试更多用户是否也返回空
-    { name: 'syndication elonmusk', url: 'https://syndication.twitter.com/srv/timeline-profile/screen-name/elonmusk', headers: htmlH },
+  // 2. 测试 aguea 其他用户路径格式
+  const testPaths = [
+    'https://asia.aguea.com/' + username + '/rss',
+    'https://asia.aguea.com/' + username + '/feed',
+    'https://asia.aguea.com/' + username + '/atom',
+    'https://asia.aguea.com/rss/' + username,
+    'https://asia.aguea.com/feed/' + username,
+    'https://asia.aguea.com/api/' + username,
+    'https://asia.aguea.com/api/v1/user/' + username,
+    'https://asia.aguea.com/api/v2/user/' + username,
   ];
 
-  const results = await Promise.all(sources.map(s => testSource(s.name, s.url, s.headers)));
+  results.pathTests = [];
+  for (const p of testPaths) {
+    try {
+      const r = await fetch(p, {
+        headers: { 'Accept': '*/*', 'User-Agent': FETCH_UA },
+        signal: AbortSignal.timeout(5000),
+        redirect: 'follow',
+      });
+      const t = await r.text();
+      results.pathTests.push({
+        url: p,
+        status: r.status,
+        size: t.length,
+        snippet: t.substring(0, 500),
+        contentType: r.headers.get('content-type'),
+      });
+    } catch (e) {
+      results.pathTests.push({ url: p, error: e.message });
+    }
+  }
 
-  const json = JSON.stringify({
-    username,
-    testedAt: new Date().toISOString(),
-    results,
-  }, null, 2);
+  // 3. 获取 zamantika 完整 HTML（看是否有不同结果）
+  try {
+    const res = await fetch('https://zamantika.com/' + username, {
+      headers: { 'Accept': 'text/html', 'User-Agent': FETCH_UA },
+      signal: AbortSignal.timeout(10000),
+    });
+    results.zamantikaStatus = res.status;
+    const html = await res.text();
+    results.zamantikaSize = html.length;
+    results.zamantikaSnippet = html.substring(0, 3000);
+    results.zamantikaFlags = {
+      hasTwimg: html.includes('twimg.com'),
+      hasVideo: html.includes('.mp4') || html.includes('video'),
+      hasTweetId: /\d{15,20}/.test(html),
+      hasCloudflare: html.includes('Just a moment') || html.includes('cf-challenge'),
+    };
+  } catch (err) {
+    results.zamantikaError = err.message;
+  }
 
+  const json = JSON.stringify(results, null, 2);
   return new Response(json, {
     status: 200,
     headers: corsHeaders({
