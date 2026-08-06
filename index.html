@@ -703,7 +703,7 @@ body{
 <header id="mainHeader">
 <div class="title-wrap">
   <h1 id="pageTitle">RSS媒体阅读器</h1>
-  <span class="beta-tag">4.4</span>
+  <span class="beta-tag">4.5</span>
 </div>
 </header>
 
@@ -2007,9 +2007,16 @@ function startHlsVideo(video){
         }
         const hls = new Hls({
             enableWorker: true,
-            lowLatencyMode: true,
-            maxBufferLength: 30,
+            lowLatencyMode: false,
+            maxBufferLength: 60,
+            maxMaxBufferLength: 120,
+            maxBufferSize: 60 * 1000 * 1000,
+            maxBufferHole: 0.5,
+            startLevel: -1,
             capLevelToPlayerSize: true,
+            abrEwmaDefaultEstimate: 500000,
+            abrBandWidthFactor: 0.95,
+            abrBandWidthUpFactor: 0.7,
             storage: null,
             autoStartLoad: true
         });
