@@ -181,11 +181,18 @@ function parseNitterHtml(html, username, maxItems, nitterBase) {
     }
 
     // 提取视频
-    const videoRegex = /<video[^>]*src="([^"]+)"/gi;
+    // asia.aguea.com 的视频格式：<video poster="xxx.jpg" data-url="xxx.m3u8" data-autoload="false"></video>
+    // 不使用 src 属性，而是用 data-url 存放 m3u8 链接，用 poster 存放预览图
+    const videoRegex = /<video[^>]*\sdata-url="([^"]+)"[^>]*>/gi;
+    const videoPosterRegex = /<video[^>]*\sposter="([^"]+)"[^>]*>/gi;
     const videoUrls = [];
+    const videoPosters = [];
     let vidMatch;
     while ((vidMatch = videoRegex.exec(block)) !== null) {
       videoUrls.push(vidMatch[1]);
+    }
+    while ((vidMatch = videoPosterRegex.exec(block)) !== null) {
+      videoPosters.push(vidMatch[1]);
     }
 
     // 生成伪推文 ID（asia.aguea.com 不提供推文状态链接）
@@ -193,6 +200,10 @@ function parseNitterHtml(html, username, maxItems, nitterBase) {
     let pseudoId = '';
     if (imageUrls.length > 0) {
       const fnMatch = imageUrls[0].match(/\/media\/([^.]+)/);
+      if (fnMatch) pseudoId = fnMatch[1];
+    }
+    if (!pseudoId && videoUrls.length > 0) {
+      const fnMatch = videoUrls[0].match(/\/amplify_video\/([^/]+)/);
       if (fnMatch) pseudoId = fnMatch[1];
     }
     if (!pseudoId) {
@@ -209,9 +220,17 @@ function parseNitterHtml(html, username, maxItems, nitterBase) {
       desc += '<img src="' + imgUrl + '" />';
     }
 
-    // 添加视频
-    for (const videoUrl of videoUrls) {
-      desc += '<video src="' + videoUrl + '" controls></video>';
+    // 添加视频（m3u8 格式，附带预览图）
+    for (let i = 0; i < videoUrls.length; i++) {
+      const videoUrl = videoUrls[i];
+      const posterUrl = videoPosters[i] || '';
+      // 将 &amp; 还原为 &，确保 URL 可用
+      const cleanVideoUrl = videoUrl.replace(/&amp;/g, '&');
+      const cleanPosterUrl = posterUrl.replace(/&amp;/g, '&');
+      if (posterUrl) {
+        desc += '<img src="' + cleanPosterUrl + '" />';
+      }
+      desc += '<video src="' + cleanVideoUrl + '" controls></video>';
     }
 
     items.push(
