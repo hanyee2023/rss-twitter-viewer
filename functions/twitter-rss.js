@@ -215,18 +215,21 @@ function parseNitterHtml(html, username, maxItems, nitterBase) {
     // 构建描述 HTML
     let desc = '<p>' + escapeHtml(text) + '</p>';
 
-    // 添加图片（使用 venexa.site 原始 URL，需代理）
+    // 添加图片
+    // 将 venexa.site 替换为 pbs.twimg.com，通过官方 CDN 代理速度更快
     for (const imgUrl of imageUrls) {
-      desc += '<img src="' + imgUrl + '" />';
+      const twimgUrl = imgUrl.replace(/https?:\/\/venexa\.site\//, 'https://pbs.twimg.com/');
+      desc += '<img src="' + twimgUrl + '" />';
     }
 
     // 添加视频（m3u8 格式，附带预览图）
+    // 视频和预览图分别替换为 video.twimg.com 和 pbs.twimg.com
     for (let i = 0; i < videoUrls.length; i++) {
       const videoUrl = videoUrls[i];
       const posterUrl = videoPosters[i] || '';
       // 将 &amp; 还原为 &，确保 URL 可用
-      const cleanVideoUrl = videoUrl.replace(/&amp;/g, '&');
-      const cleanPosterUrl = posterUrl.replace(/&amp;/g, '&');
+      const cleanVideoUrl = videoUrl.replace(/&amp;/g, '&').replace(/https?:\/\/venexa\.site\//, 'https://video.twimg.com/');
+      const cleanPosterUrl = posterUrl.replace(/&amp;/g, '&').replace(/https?:\/\/venexa\.site\//, 'https://pbs.twimg.com/');
       if (posterUrl) {
         desc += '<img src="' + cleanPosterUrl + '" />';
       }
