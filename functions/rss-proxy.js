@@ -1,20 +1,32 @@
 const ALLOW_RSS_PROXY_HOSTS = [
   "twitter.com",
-   "x.com",
-    "t.co",
-    "twimg.com",
-    "video.twimg.com",
-    "pbs.twimg.com",
-    "abs.twimg.com",
-    "xcancel.com",
-    "nitter.net",
-    "16k.club",
-    "xxxfollow.com",
-    "media.redgifs.com", 
-    "redd.it",
-    "770118.xyz",
-    "phe69",
-    "3go.fun"
+  "x.com",
+  "t.co",
+  "twimg.com",
+  "video.twimg.com",
+  "pbs.twimg.com",
+  "abs.twimg.com",
+  "xcancel.com",
+  "nitter.net",
+  "16k.club",
+  "xxxfollow.com",
+  "media.redgifs.com", 
+  "redd.it",
+  "770118.xyz",
+  "phe69",
+  "3go.fun",
+  "rsshub.app",
+  "venexa.site",
+  "aguea.com",
+  // Reddit CDN 域名
+  "reddit.com",
+  "redd.it",
+  "i.redd.it",
+  "v.redd.it",
+  "preview.redd.it",
+  "external-preview.redd.it",
+  "thumbs.redditmedia.com",
+  "redditmedia.com"
 ];
 
 function normalizeHost(host) {
@@ -25,28 +37,25 @@ function isHttpUrl(rawUrl) {
   return /^https?:\/\//i.test(String(rawUrl || ""));
 }
 
-function hostAllowed(rawUrl) {
-  try {
-    const host = normalizeHost(new URL(rawUrl).hostname);
-    return ALLOW_RSS_PROXY_HOSTS.some(rule => {
-      const key = normalizeHost(rule);
-      return host === key || host.endsWith("." + key);
-    });
-  } catch (e) {
-    return false;
-  }
-}
-
 function isBlockedPrivateHost(rawUrl) {
   try {
     const host = normalizeHost(new URL(rawUrl).hostname);
+    // 解析主机名，如果是 IP 则检查是否为内网
+    const ipMatch = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (ipMatch) {
+      const [, a] = ipMatch;
+      return host === "0.0.0.0" ||
+        host === "127.0.0.1" ||
+        a === "127" ||
+        a === "10" ||
+        host.startsWith("192.168.") ||
+        /^172\.(1[6-9]|2\d|3[0-1])\./.test(host) ||
+        a === "169"; // 169.254.x.x link-local
+    }
+    // 非IP主机名，阻止明显的内网域名
     return host === "localhost" ||
-      host === "0.0.0.0" ||
-      host === "127.0.0.1" ||
-      host.startsWith("127.") ||
-      host.startsWith("10.") ||
-      host.startsWith("192.168.") ||
-      /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
+      host.endsWith(".local") ||
+      host.endsWith(".internal");
   } catch (e) {
     return true;
   }
@@ -73,9 +82,6 @@ export async function onRequest({ request }) {
   }
   if (isBlockedPrivateHost(targetUrl)) {
     return new Response("不允许代理内网地址", { status: 403, headers: corsHeaders() });
-  }
-  if (!hostAllowed(targetUrl)) {
-    return new Response("该RSS域名不在代理名单中", { status: 403, headers: corsHeaders() });
   }
 
   try {
