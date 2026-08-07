@@ -151,7 +151,21 @@ function parseRedlibHtml(html, subreddit, maxItems, redlibBase) {
   const items = [];
 
   // 用 class="post" 分隔每个帖子块
-  const postBlocks = html.split(/(?=<div class="post(?:\s|")/i);
+  // 使用 indexOf 代替正则前瞻断言，避免 Cloudflare Worker 编译器兼容性问题
+  const postBlocks = [];
+  let searchPos = 0;
+  const marker = '<div class="post';
+  let idx = html.indexOf(marker);
+  while (idx !== -1) {
+    const nextIdx = html.indexOf(marker, idx + 1);
+    if (nextIdx !== -1) {
+      postBlocks.push(html.substring(idx, nextIdx));
+    } else {
+      postBlocks.push(html.substring(idx));
+    }
+    searchPos = nextIdx;
+    idx = nextIdx;
+  }
 
   for (const block of postBlocks) {
     if (items.length >= maxItems) break;
