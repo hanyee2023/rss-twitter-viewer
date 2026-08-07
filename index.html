@@ -727,14 +727,14 @@ body{
                 <input id="feedUrl" placeholder="粘贴标准RSS订阅链接">
             </div>
             <div class="add-feed-row">
-                <input id="feedName" placeholder="自定义订阅名称（可选）" style="flex:1;">
+                <input id="feedName" placeholder="自定义订阅名称" style="flex:1;">
                 <button id="confirmAdd">添加</button>
             </div>
         </div>
         <div class="twitter-block-section">
             <div class="keyword-block-title">添加 Twitter 订阅</div>
             <div class="add-feed-row">
-                <input id="twitterUserInput" placeholder="输入 Twitter 用户名（如 op7418）">
+                <input id="twitterUserInput" placeholder="输入 Twitter 用户名">
                 <button id="confirmAddTwitter">添加</button>
             </div>
         </div>
@@ -865,6 +865,7 @@ const FORCE_PROXY_HOSTS = [
     "abs.twimg.com",
     "xcancel.com",
     "nitter.net",
+    "16k.club",
     "xxxfollow.com",
     "media.redgifs.com", 
     "redd.it",
@@ -2381,7 +2382,7 @@ async function renderSingleFeedFromSource(sourceUrl){
             showToast(`加载失败(已使用缓存)：${errDesc}`);
         }else{
             currentArticles = fallbackList;
-            articleBox.innerHTML = fallbackList.length ? "" : `<div class="empty-tip">该订阅加载失败：${errDesc}<br><br>如使用 Nitter 订阅，请改用 x2rss 格式：<br>https://rss.gurify.com/用户名/rss</div>`;
+            articleBox.innerHTML = fallbackList.length ? "" : `<div class="empty-tip">该订阅加载失败：${errDesc}<br><br></div>`;
         }
     }
     if(currentArticles.length > 0){
