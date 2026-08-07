@@ -273,8 +273,7 @@ body{
     background:#1d9bf0;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:15px;min-width:70px;flex-shrink:0;cursor:pointer;
 }
 #addKeywordBtn{background:#1d9bf0;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:15px;min-width:70px;flex-shrink:0;cursor:pointer;}
-.twitter-block-section,
-.reddit-block-section{
+.twitter-block-section{
     border-top:2px solid #4CAF50;
     margin:20px 12px 0;
     padding-top:16px;
@@ -742,13 +741,6 @@ body{
                 <button id="confirmAddTwitter">添加</button>
             </div>
         </div>
-        <div class="twitter-block-section">
-            <div class="keyword-block-title">添加 Reddit 订阅</div>
-            <div class="add-feed-row">
-                <input id="redditSubInput" placeholder="输入子版块名称">
-                <button id="confirmAddReddit">添加</button>
-            </div>
-        </div>
         <div class="keyword-block-section">
             <div class="keyword-block-title">关键字屏蔽</div>
             <div class="add-feed-row">
@@ -885,18 +877,7 @@ const FORCE_PROXY_HOSTS = [
     "3go.fun",
     "rsshub.app",
     "venexa.site",
-    "aguea.com",
-    // Reddit CDN 域名（Redlib 输出的媒体 URL 指向这些域名）
-    "reddit.com",
-    "i.redd.it",
-    "v.redd.it",
-    "preview.redd.it",
-    "external-preview.redd.it",
-    "thumbs.redditmedia.com",
-    "redditmedia.com",
-    "s.redditmedia.com",
-    "o.redditmedia.com",
-    "redditstatic.com"
+    "aguea.com"
 ];
 
 function normalizeUrl(rawUrl) {
@@ -3529,45 +3510,6 @@ document.getElementById("confirmAddTwitter").onclick = function(){
 
     document.getElementById("twitterUserInput").value = "";
     showToast("Twitter 订阅添加成功：@" + username);
-    initLoadAllCache();
-    showPage(pageManage, "管理订阅");
-}
-
-// Reddit 订阅：通过 /reddit-rss?sub=子版块 自动生成 RSS
-// NSFW 内容已在服务端通过 cookie (show_nsfw=on) 自动启用
-document.getElementById("confirmAddReddit").onclick = function(){
-    let raw = document.getElementById("redditSubInput").value.trim();
-    if (!raw) {
-        showToast("请输入子版块名称");
-        return;
-    }
-    // 去掉 r/ 前缀，支持 r/gifs、/r/gifs、gifs 等格式
-    let subreddit = raw.replace(/^\/?r\//i, "").replace(/^https?:\/\/[^/]+\/r\//i, "").replace(/\/.*$/, "").trim();
-    // 只允许字母、数字、下划线、加号（多版块）
-    subreddit = subreddit.replace(/[^a-zA-Z0-9_+]/g, "");
-    if (!subreddit) {
-        showToast("子版块名称格式不正确");
-        return;
-    }
-
-    const redditRssUrl = location.origin + "/reddit-rss?sub=" + subreddit;
-
-    if (feedList.some(item => item.url === redditRssUrl)) {
-        showToast("该 Reddit 订阅已存在");
-        return;
-    }
-
-    feedList.push({
-        name: "r/" + subreddit,
-        category: "video",
-        url: redditRssUrl
-    });
-    localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
-    lastRefreshTime = 0;
-    localStorage.removeItem(LAST_REFRESH_KEY);
-
-    document.getElementById("redditSubInput").value = "";
-    showToast("Reddit 订阅添加成功：r/" + subreddit);
     initLoadAllCache();
     showPage(pageManage, "管理订阅");
 }
