@@ -17,16 +17,7 @@ const ALLOW_RSS_PROXY_HOSTS = [
   "3go.fun",
   "rsshub.app",
   "venexa.site",
-  "aguea.com",
-  // Reddit CDN 域名
-  "reddit.com",
-  "redd.it",
-  "i.redd.it",
-  "v.redd.it",
-  "preview.redd.it",
-  "external-preview.redd.it",
-  "thumbs.redditmedia.com",
-  "redditmedia.com"
+  "aguea.com"
 ];
 
 function normalizeHost(host) {
