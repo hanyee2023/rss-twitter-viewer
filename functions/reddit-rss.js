@@ -1,15 +1,21 @@
 // Reddit 子版块 RSS 生成器
-// 通过 Redlib 实例获取 Reddit 内容，解析 HTML 提取媒体帖子
-// NSFW 内容通过 cookie (show_nsfw=on) 启用
-// 视频输出策略：Redlib 已解析出直接 MP4 URL，可直接内嵌播放
+// 方案 A（首选）：Reddit JSON API（.json 端点），提供直接媒体 URL（含 MP4）
+// 方案 B（回退）：Reddit 原生 RSS（.rss 端点），解析 XML 提取媒体
+// 方案 C（末选）：Redlib 实例解析 HTML
+// NSFW 内容：JSON API 默认包含 NSFW 帖子
 // 订阅地址: /reddit-rss?sub=子版块名称
 // 可选参数: sort=hot|new|top|rising (默认 hot)
 
 const DEFAULT_MAX_ITEMS = 20;
 const ABSOLUTE_MAX_ITEMS = 50;
 
-// Redlib 实例列表（按优先级排序，排除 SFW-only 实例如 safereddit.com）
-// 这些实例未开启 SFW_ONLY，配合 show_nsfw cookie 可获取 NSFW 内容
+const FETCH_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+const FETCH_TIMEOUT = 12000;
+
+// Reddit 域名列表（按优先级，某个域名被限流时自动切换）
+const REDDIT_DOMAINS = ['https://www.reddit.com', 'https://old.reddit.com'];
+
+// Redlib 实例列表（回退方案，排除 SFW-only 实例如 safereddit.com）
 const REDLIB_INSTANCES = [
   'https://redlib.catsarch.com',
   'https://redlib.r4fo.com',
@@ -21,13 +27,6 @@ const REDLIB_INSTANCES = [
   'https://redlib.privadency.com',
 ];
 
-const FETCH_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
-const FETCH_TIMEOUT = 10000;
-
-// NSFW cookie：显示 NSFW 内容且不模糊，使用 card 布局确保媒体直接展示
-// show_nsfw=on  → 显示 NSFW 帖子（默认 off，NSFW 帖子会被完全隐藏）
-// blur_nsfw=off → 不模糊 NSFW 媒体（默认 on，图片/视频会打码）
-// layout=card   → 卡片布局，媒体直接嵌入列表页（非卡片布局只显示缩略图）
 const NSFW_COOKIE = 'show_nsfw=on; blur_nsfw=off; layout=card';
 
 function corsHeaders(extra = {}) {
@@ -65,8 +64,403 @@ function decodeHtml(text) {
     .replace(/&nbsp;/g, ' ');
 }
 
-// ─── 从 Redlib 实例获取子版块页面并解析 ──────────────────────────
+// ─── 方案 A：Reddit JSON API ──────────────────────────────────
+// Reddit 提供 .json 端点，返回结构化 JSON 数据
+// URL 格式：https://www.reddit.com/r/{subreddit}/{sort}.json?limit={n}
+// 优势：
+//   - 直接提供 MP4 视频链接（fallback_url）
+//   - 直接提供图片 URL
+//   - 提供缩略图和预览图
+//   - 结构化数据，无需解析 HTML/XML
+async function fetchFromRedditJson(subreddit, maxItems, sort) {
+  const errors = [];
+
+  for (const base of REDDIT_DOMAINS) {
+    try {
+      const url = `${base}/r/${subreddit}/${sort}.json?limit=${maxItems}&raw_json=1`;
+      const res = await fetch(url, {
+        headers: {
+          'User-Agent': FETCH_UA,
+          'Accept': 'application/json,text/json,*/*;q=0.8',
+        },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT),
+        redirect: 'follow',
+      });
+
+      if (!res.ok) {
+        errors.push(`${base}: HTTP ${res.status}`);
+        continue;
+      }
+
+      const jsonText = await res.text();
+
+      // 检测 Reddit 限流页面（返回 200 但内容不是 JSON）
+      if (jsonText.includes('Whoa there, pardner') || jsonText.includes('slow down')) {
+        errors.push(`${base}: rate limited`);
+        continue;
+      }
+
+      let data;
+      try {
+        data = JSON.parse(jsonText);
+      } catch (e) {
+        errors.push(`${base}: JSON parse failed`);
+        continue;
+      }
+
+      // Reddit JSON 结构：{ data: { children: [ { data: { ... } }, ... ] } }
+      if (!data || !data.data || !Array.isArray(data.data.children)) {
+        errors.push(`${base}: unexpected structure`);
+        continue;
+      }
+
+      const items = parseRedditJson(data, maxItems);
+
+      if (items.length === 0) {
+        // 成功获取数据但没有媒体帖子
+        return { rss: buildEmptyRss(subreddit, '该子版块暂无可获取的媒体帖子'), errors };
+      }
+
+      return { rss: buildRssXml(subreddit, items, 'via Reddit JSON'), errors };
+    } catch (e) {
+      errors.push(`${base}: ${e.message || 'fetch error'}`);
+      continue;
+    }
+  }
+
+  return { rss: null, errors };
+}
+
+// ─── 解析 Reddit JSON API 响应 ────────────────────────────────
+function parseRedditJson(data, maxItems) {
+  const items = [];
+  const children = data.data.children;
+
+  for (const child of children) {
+    if (items.length >= maxItems) break;
+
+    const post = child.data;
+    if (!post) continue;
+
+    // 跳过纯文本帖
+    if (post.is_self) continue;
+
+    const title = post.title || '';
+    const permalink = post.permalink
+      ? 'https://www.reddit.com' + post.permalink
+      : '';
+    const postUrl = post.url || '';
+    const createdUtc = post.created_utc || 0;
+    const pubDate = createdUtc > 0
+      ? new Date(createdUtc * 1000).toUTCString()
+      : new Date().toUTCString();
+
+    let desc = '<p>' + escapeHtml(title) + '</p>';
+    let hasMedia = false;
+
+    // ── 1. Reddit 托管视频（v.redd.it）──
+    // secure_media.reddit_video.fallback_url 是直接 MP4 链接
+    if (post.is_video && post.secure_media && post.secure_media.reddit_video) {
+      const videoUrl = post.secure_media.reddit_video.fallback_url;
+      if (videoUrl) {
+        // 尝试获取缩略图作为封面
+        const posterUrl = getThumbnailUrl(post);
+        if (posterUrl) desc += '<img src="' + posterUrl + '" />';
+        desc += '<video src="' + videoUrl + '" controls></video>';
+        hasMedia = true;
+      }
+    }
+
+    // ── 2. 预览中的视频（GIF 转 MP4 等）──
+    if (!hasMedia && post.preview && post.preview.reddit_video_preview) {
+      const videoUrl = post.preview.reddit_video_preview.fallback_url;
+      if (videoUrl) {
+        const posterUrl = getPreviewImageUrl(post);
+        if (posterUrl) desc += '<img src="' + posterUrl + '" />';
+        desc += '<video src="' + videoUrl + '" controls></video>';
+        hasMedia = true;
+      }
+    }
+
+    // ── 3. 图片帖（i.redd.it, preview.redd.it 等）──
+    if (!hasMedia) {
+      const postHint = post.post_hint || '';
+      if (postHint === 'image' || /\.(jpg|jpeg|png|gif|webp)$/i.test(postUrl)) {
+        if (postUrl && postUrl.startsWith('http')) {
+          desc += '<img src="' + postUrl + '" />';
+          hasMedia = true;
+        }
+      }
+    }
+
+    // ── 4. 预览图片（适用于图库帖和链接帖）──
+    if (!hasMedia && post.preview && Array.isArray(post.preview.images) && post.preview.images.length > 0) {
+      const previewImg = post.preview.images[0];
+      // source.url 是高分辨率图片
+      let imgUrl = previewImg.source && previewImg.source.url;
+      // 如果有 resolutions，选择中等分辨率
+      if (!imgUrl && previewImg.resolutions && previewImg.resolutions.length > 0) {
+        const midIdx = Math.floor(previewImg.resolutions.length / 2);
+        imgUrl = previewImg.resolutions[midIdx].url;
+      }
+      if (imgUrl) {
+        // Reddit 预览 URL 中 & 被编码为 &amp;，需要解码
+        imgUrl = decodeHtml(imgUrl);
+        desc += '<img src="' + imgUrl + '" />';
+        hasMedia = true;
+      }
+    }
+
+    // ── 5. 外部视频/GIF（redgifs, imgur 等）──
+    if (!hasMedia) {
+      const lowerUrl = postUrl.toLowerCase();
+      if (lowerUrl.includes('redgifs.com') || lowerUrl.includes('imgur.com')) {
+        desc += '<a href="' + postUrl + '">' + escapeHtml(postUrl) + '</a>';
+        hasMedia = true;
+      }
+    }
+
+    // ── 6. 缩略图兜底（适用于有缩略图但未被上面匹配的帖子）──
+    if (!hasMedia) {
+      const thumbUrl = getThumbnailUrl(post);
+      if (thumbUrl) {
+        desc += '<img src="' + thumbUrl + '" />';
+        hasMedia = true;
+      }
+    }
+
+    // 跳过无媒体帖子
+    if (!hasMedia) continue;
+
+    items.push(
+      '<item>\n' +
+      '<title>' + escapeXml(title) + '</title>\n' +
+      '<link>' + escapeXml(permalink || postUrl) + '</link>\n' +
+      '<description><![CDATA[' + desc + ']]></description>\n' +
+      '<pubDate>' + pubDate + '</pubDate>\n' +
+      '<guid isPermaLink="true">' + escapeXml(permalink || postUrl) + '</guid>\n' +
+      '</item>'
+    );
+  }
+
+  return items;
+}
+
+// 获取缩略图 URL（排除 "self", "default", "nsfw", "image" 等非 URL 值）
+function getThumbnailUrl(post) {
+  const thumb = post.thumbnail;
+  if (!thumb) return null;
+  if (thumb === 'self' || thumb === 'default' || thumb === 'nsfw' || thumb === 'image' || thumb === 'spoiler') {
+    return null;
+  }
+  if (thumb.startsWith('http')) return thumb;
+  return null;
+}
+
+// 获取预览图片 URL
+function getPreviewImageUrl(post) {
+  if (!post.preview || !Array.isArray(post.preview.images) || post.preview.images.length === 0) {
+    return null;
+  }
+  const img = post.preview.images[0];
+  if (img.source && img.source.url) {
+    return decodeHtml(img.source.url);
+  }
+  if (img.resolutions && img.resolutions.length > 0) {
+    return decodeHtml(img.resolutions[Math.floor(img.resolutions.length / 2)].url);
+  }
+  return null;
+}
+
+// ─── 方案 B：Reddit 原生 RSS（回退）──────────────────────────
+async function fetchFromRedditRss(subreddit, maxItems, sort) {
+  const errors = [];
+
+  for (const base of REDDIT_DOMAINS) {
+    try {
+      const url = `${base}/r/${subreddit}/${sort}.rss?limit=${maxItems}`;
+      const res = await fetch(url, {
+        headers: {
+          'User-Agent': FETCH_UA,
+          'Accept': 'application/rss+xml,application/xml,text/xml;q=0.9,*/*;q=0.8',
+        },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT),
+        redirect: 'follow',
+      });
+
+      if (!res.ok) {
+        errors.push(`${base}: HTTP ${res.status}`);
+        continue;
+      }
+
+      const xmlText = await res.text();
+
+      if (!xmlText.includes('<item') && !xmlText.includes('<entry')) {
+        errors.push(`${base}: no items in RSS`);
+        continue;
+      }
+
+      const items = parseRedditRss(xmlText, maxItems);
+
+      if (items.length === 0) {
+        return { rss: buildEmptyRss(subreddit, '该子版块暂无可获取的媒体帖子'), errors };
+      }
+
+      return { rss: buildRssXml(subreddit, items, 'via Reddit RSS'), errors };
+    } catch (e) {
+      errors.push(`${base}: ${e.message || 'fetch error'}`);
+      continue;
+    }
+  }
+
+  return { rss: null, errors };
+}
+
+// ─── 解析 Reddit 原生 RSS XML ─────────────────────────────────
+function parseRedditRss(xmlText, maxItems) {
+  const items = [];
+  const itemBlocks = splitXmlItems(xmlText);
+
+  for (const block of itemBlocks) {
+    if (items.length >= maxItems) break;
+
+    const titleMatch = block.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    if (!titleMatch) continue;
+    const title = decodeHtml(titleMatch[1].trim());
+
+    const linkMatch = block.match(/<link[^>]*>([\s\S]*?)<\/link>/i)
+      || block.match(/<link[^>]*href="([^"]+)"/i);
+    const link = linkMatch ? (linkMatch[1] || '').trim() : '';
+
+    const dateMatch = block.match(/<pubDate[^>]*>([\s\S]*?)<\/pubDate>/i)
+      || block.match(/<published[^>]*>([\s\S]*?)<\/published>/i)
+      || block.match(/<updated[^>]*>([\s\S]*?)<\/updated>/i);
+    let pubDate = '';
+    if (dateMatch) {
+      const parsed = new Date(dateMatch[1].trim());
+      if (!isNaN(parsed.getTime())) {
+        pubDate = parsed.toUTCString();
+      }
+    }
+    if (!pubDate) pubDate = new Date().toUTCString();
+
+    let desc = '<p>' + escapeHtml(title) + '</p>';
+    let hasMedia = false;
+
+    // 提取 content:encoded
+    const contentMatch = block.match(/<content:encoded[^>]*>([\s\S]*?)<\/content:encoded>/i)
+      || block.match(/<content[^>]*>([\s\S]*?)<\/content>/i);
+
+    if (contentMatch) {
+      // 先解码 HTML 实体，确保能匹配到 <img> 等标签
+      const content = decodeHtml(contentMatch[1]);
+
+      // 提取图片
+      const imgRegex = /<img[^>]+src="([^"]+)"/gi;
+      let imgMatch;
+      while ((imgMatch = imgRegex.exec(content)) !== null) {
+        const imgUrl = imgMatch[1];
+        if (imgUrl.includes('redditmedia.com') && imgUrl.includes('sprite')) continue;
+        if (imgUrl.includes('redditstatic.com')) continue;
+        desc += '<img src="' + imgUrl + '" />';
+        hasMedia = true;
+      }
+
+      // 提取视频链接
+      const videoLinkRegex = /<a[^>]*href="(https?:\/\/v\.redd\.it\/[^"]+)"/gi;
+      let vidMatch;
+      while ((vidMatch = videoLinkRegex.exec(content)) !== null) {
+        desc += '<video src="' + vidMatch[1] + '" controls></video>';
+        hasMedia = true;
+      }
+
+      // 提取外部链接
+      const extVideoRegex = /<a[^>]*href="(https?:\/\/(?:www\.)?(?:redgifs|imgur)\.com\/[^"]+)"/gi;
+      let extMatch;
+      while ((extMatch = extVideoRegex.exec(content)) !== null) {
+        desc += '<a href="' + extMatch[1] + '">' + extMatch[1] + '</a>';
+        hasMedia = true;
+      }
+    }
+
+    // media:thumbnail 兜底
+    if (!hasMedia) {
+      const thumbMatch = block.match(/<media:thumbnail[^>]*url="([^"]+)"/i)
+        || block.match(/<media:content[^>]*url="([^"]+)"/i);
+      if (thumbMatch) {
+        desc += '<img src="' + thumbMatch[1] + '" />';
+        hasMedia = true;
+      }
+    }
+
+    // enclosure 兜底
+    if (!hasMedia) {
+      const encMatch = block.match(/<enclosure[^>]*url="([^"]+)"/i);
+      if (encMatch) {
+        const encUrl = encMatch[1];
+        const encType = block.match(/<enclosure[^>]*type="([^"]+)"/i);
+        if (encType && /video/i.test(encType[1])) {
+          desc += '<video src="' + encUrl + '" controls></video>';
+        } else {
+          desc += '<img src="' + encUrl + '" />';
+        }
+        hasMedia = true;
+      }
+    }
+
+    if (!hasMedia) continue;
+
+    items.push(
+      '<item>\n' +
+      '<title>' + escapeXml(title) + '</title>\n' +
+      '<link>' + escapeXml(link) + '</link>\n' +
+      '<description><![CDATA[' + desc + ']]></description>\n' +
+      '<pubDate>' + pubDate + '</pubDate>\n' +
+      '<guid isPermaLink="true">' + escapeXml(link) + '</guid>\n' +
+      '</item>'
+    );
+  }
+
+  return items;
+}
+
+// 分割 XML 中的 <item> 或 <entry> 块
+function splitXmlItems(xmlText) {
+  const blocks = [];
+
+  let startTag = '<item';
+  let endTag = '</item>';
+  let pos = 0;
+  while (true) {
+    const start = xmlText.indexOf(startTag, pos);
+    if (start === -1) break;
+    const end = xmlText.indexOf(endTag, start);
+    if (end === -1) break;
+    blocks.push(xmlText.substring(start, end + endTag.length));
+    pos = end + endTag.length;
+  }
+
+  if (blocks.length === 0) {
+    startTag = '<entry';
+    endTag = '</entry>';
+    pos = 0;
+    while (true) {
+      const start = xmlText.indexOf(startTag, pos);
+      if (start === -1) break;
+      const end = xmlText.indexOf(endTag, start);
+      if (end === -1) break;
+      blocks.push(xmlText.substring(start, end + endTag.length));
+      pos = end + endTag.length;
+    }
+  }
+
+  return blocks;
+}
+
+// ─── 方案 C：Redlib 实例（末选）──────────────────────────────
 async function fetchFromRedlib(subreddit, maxItems, sort) {
+  const errors = [];
+
   for (const base of REDLIB_INSTANCES) {
     try {
       const url = `${base}/r/${subreddit}/${sort}`;
@@ -80,80 +474,50 @@ async function fetchFromRedlib(subreddit, maxItems, sort) {
         redirect: 'follow',
       });
 
-      if (!res.ok) continue;
+      if (!res.ok) {
+        errors.push(`${base}: HTTP ${res.status}`);
+        continue;
+      }
 
       const html = await res.text();
 
-      // 检测 Cloudflare 验证页面
-      if (html.includes('Just a moment') || html.includes('cf-challenge')) continue;
-
-      // 检测 NSFW 被实例级屏蔽（SFW_ONLY=on 的实例会显示此消息）
+      if (html.includes('Just a moment') || html.includes('cf-challenge')) {
+        errors.push(`${base}: Cloudflare challenge`);
+        continue;
+      }
       if (html.includes('All posts are hidden because they are NSFW')) {
-        continue; // 该实例屏蔽了 NSFW，尝试下一个
+        errors.push(`${base}: NSFW hidden`);
+        continue;
       }
-
-      // 检测子版块不存在或无帖子
       if (html.includes('No posts were found') && !html.includes('post_title')) {
-        return buildEmptyRss(subreddit, '该子版块不存在或暂无帖子');
+        return { rss: buildEmptyRss(subreddit, '该子版块不存在或暂无帖子'), errors };
       }
-
-      // 检测是否有帖子
-      if (!html.includes('post_title')) continue;
+      if (!html.includes('post_title')) {
+        errors.push(`${base}: no post_title found`);
+        continue;
+      }
 
       const items = parseRedlibHtml(html, subreddit, maxItems, base);
 
       if (items.length === 0) {
-        return buildEmptyRss(subreddit, '该子版块暂无可获取的媒体帖子（可能全是纯文本帖）');
+        return { rss: buildEmptyRss(subreddit, '该子版块暂无可获取的媒体帖子'), errors };
       }
 
-      return buildRssXml(subreddit, items, 'via Redlib');
+      return { rss: buildRssXml(subreddit, items, 'via Redlib'), errors };
     } catch (e) {
+      errors.push(`${base}: ${e.message || 'fetch error'}`);
       continue;
     }
   }
-  return null;
+
+  return { rss: null, errors };
 }
 
-// ─── 解析 Redlib HTML，提取帖子标题、媒体内容 ───────────────────
-// Redlib 的帖子列表页 HTML 结构（card 布局）：
-//   <div class="post" id="POST_ID">
-//     <p class="post_header">
-//       <a class="post_subreddit" href="/r/SUB">r/SUB</a>
-//       <span class="created" title="TIMESTAMP">REL_TIME</span>
-//     </p>
-//     <h2 class="post_title"><a href="PERMALINK">TITLE</a></h2>
-//     <!-- 图片帖 -->
-//     <div class="post_media_content">
-//       <a class="post_media_image" href="IMAGE_URL">
-//         <img src="IMAGE_URL" /> 或 <svg><image href="IMAGE_URL"/></svg>
-//       </a>
-//     </div>
-//     <!-- 视频帖（非 HLS） -->
-//     <div class="post_media_content">
-//       <video class="post_media_video" src="MP4_URL" poster="POSTER_URL" controls>
-//     </div>
-//     <!-- 视频帖（HLS 模式） -->
-//     <div class="post_media_content">
-//       <video class="post_media_video" poster="POSTER_URL" controls>
-//         <source src="HLS_URL" type="application/vnd.apple.mpegurl" />
-//         <source src="MP4_URL" type="video/mp4" />
-//       </video>
-//     </div>
-//     <!-- 图库帖 / 链接帖：只显示缩略图 -->
-//     <a class="post_thumbnail" href="...">
-//       <svg><image href="THUMBNAIL_URL"/></svg>
-//     </a>
-//   </div>
-//
-// Redlib 已从 Reddit DASH 清单中解析出直接 MP4 URL，无需额外处理
-// 媒体 URL 均为 Reddit CDN 绝对地址（如 https://i.redd.it/xxx.jpg）
+// ─── 解析 Redlib HTML ──────────────────────────────────────────
 function parseRedlibHtml(html, subreddit, maxItems, redlibBase) {
   const items = [];
 
-  // 用 class="post" 分隔每个帖子块
-  // 使用 indexOf 代替正则前瞻断言，避免 Cloudflare Worker 编译器兼容性问题
   const postBlocks = [];
-  let searchPos = 0;
   const marker = '<div class="post';
   let idx = html.indexOf(marker);
   while (idx !== -1) {
@@ -163,33 +527,25 @@ function parseRedlibHtml(html, subreddit, maxItems, redlibBase) {
     } else {
       postBlocks.push(html.substring(idx));
     }
-    searchPos = nextIdx;
     idx = nextIdx;
   }
 
   for (const block of postBlocks) {
     if (items.length >= maxItems) break;
-
-    // 跳过非帖子块（如 stickied 公告等也包含 post_title，保留处理）
     if (!block.includes('post_title')) continue;
 
-    // 提取标题和永久链接
-    // <h2 class="post_title"><a href="/r/SUB/comments/ID/title/">标题文本</a></h2>
     const titleMatch = block.match(/<h2 class="post_title"[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
     if (!titleMatch) continue;
 
     const permalink = titleMatch[1];
-    // 清理标题中的 HTML 标签（如 flair、NSFW 标记等）
     const title = decodeHtml(titleMatch[2]
-      .replace(/<a[^>]*>[\s\S]*?<\/a>/gi, '') // 移除 flair 链接
-      .replace(/<small[^>]*>[\s\S]*?<\/small>/gi, '') // 移除 NSFW/Spoiler 标记
+      .replace(/<a[^>]*>[\s\S]*?<\/a>/gi, '')
+      .replace(/<small[^>]*>[\s\S]*?<\/small>/gi, '')
       .replace(/<[^>]+>/g, '')
       .trim());
 
     if (!title) continue;
 
-    // 提取日期
-    // <span class="created" title="TIMESTAMP">REL_TIME</span>
     const dateMatch = block.match(/<span class="created"[^>]*title="([^"]+)"[^>]*>([^<]+)<\/span>/i);
     let pubDate = '';
     if (dateMatch) {
@@ -197,13 +553,10 @@ function parseRedlibHtml(html, subreddit, maxItems, redlibBase) {
     }
     if (!pubDate) pubDate = new Date().toUTCString();
 
-    // 提取媒体内容
     let desc = '<p>' + escapeHtml(title) + '</p>';
     let hasMedia = false;
 
-    // ── 1. 视频（非 HLS 模式）──
-    // <video class="post_media_video" src="MP4_URL" poster="POSTER_URL" ...>
-    // Redlib 已解析出直接 MP4 URL，可直接用于浏览器播放
+    // 视频提取
     const videoTagMatch = block.match(/<video[^>]*class="post_media_video"[^>]*>/i);
     if (videoTagMatch) {
       const videoTag = videoTagMatch[0];
@@ -211,70 +564,57 @@ function parseRedlibHtml(html, subreddit, maxItems, redlibBase) {
       const posterMatch = videoTag.match(/\sposter="([^"]+)"/i);
 
       if (srcMatch) {
-        // 非 HLS 模式：video 标签直接包含 src
         const videoUrl = srcMatch[1];
         const posterUrl = posterMatch ? posterMatch[1] : '';
-
-        if (posterUrl) {
-          desc += '<img src="' + posterUrl + '" />';
-        }
+        if (posterUrl) desc += '<img src="' + posterUrl + '" />';
         desc += '<video src="' + videoUrl + '" controls></video>';
         hasMedia = true;
       } else {
-        // HLS 模式：video 标签无 src，通过 <source> 标签提供
-        // 提取 type="video/mp4" 的 source（跳过 HLS source）
-        const sourceTags = block.matchAll(/<source[^>]*>/gi);
-        for (const sourceMatch of sourceTags) {
-          const sourceTag = sourceMatch[0];
-          if (/type=["']video\/mp4["']/i.test(sourceTag)) {
-            const mp4SrcMatch = sourceTag.match(/\ssrc="([^"]+)"/i);
-            if (mp4SrcMatch) {
-              const videoUrl = mp4SrcMatch[1];
-              const posterUrl = posterMatch ? posterMatch[1] : '';
-
-              if (posterUrl) {
-                desc += '<img src="' + posterUrl + '" />';
+        const videoEndIdx = block.indexOf('</video>', videoTagMatch.index);
+        const videoBlock = videoEndIdx !== -1
+          ? block.substring(videoTagMatch.index, videoEndIdx)
+          : block.substring(videoTagMatch.index);
+        const sourceTags = videoBlock.match(/<source[^>]*>/gi);
+        if (sourceTags) {
+          for (const sourceTag of sourceTags) {
+            if (/type=["']video\/mp4["']/i.test(sourceTag)) {
+              const mp4SrcMatch = sourceTag.match(/\ssrc="([^"]+)"/i);
+              if (mp4SrcMatch) {
+                const videoUrl = mp4SrcMatch[1];
+                const posterUrl = posterMatch ? posterMatch[1] : '';
+                if (posterUrl) desc += '<img src="' + posterUrl + '" />';
+                desc += '<video src="' + videoUrl + '" controls></video>';
+                hasMedia = true;
+                break;
               }
-              desc += '<video src="' + videoUrl + '" controls></video>';
-              hasMedia = true;
-              break;
             }
           }
         }
       }
     }
 
-    // ── 2. 图片帖 ──
-    // <a class="post_media_image" href="FULL_IMAGE_URL">
-    //   <img src="IMAGE_URL" /> 或 <svg><image href="IMAGE_URL"/></svg>
-    // </a>
+    // 图片帖
     if (!hasMedia) {
       const imageMatch = block.match(/<a[^>]*class="[^"]*post_media_image[^"]*"[^>]*href="([^"]+)"/i);
       if (imageMatch) {
-        const imageUrl = imageMatch[1];
-        desc += '<img src="' + imageUrl + '" />';
+        desc += '<img src="' + imageMatch[1] + '" />';
         hasMedia = true;
       }
     }
 
-    // ── 3. 图库帖：列表页只显示缩略图 ──
-    // 图库帖在列表页不展开，只显示 post_thumbnail
-    // 提取缩略图 URL 作为预览图
+    // 图库帖缩略图
     if (!hasMedia) {
       if (block.includes('post_thumbnail') && !block.includes('no_thumbnail')) {
         const thumbMatch = block.match(/<a[^>]*class="[^"]*post_thumbnail[^"]*"[^>]*>[\s\S]*?<image[^>]*href="([^"]+)"/i);
         if (thumbMatch) {
-          const thumbUrl = thumbMatch[1];
-          desc += '<img src="' + thumbUrl + '" />';
+          desc += '<img src="' + thumbMatch[1] + '" />';
           hasMedia = true;
         }
       }
     }
 
-    // 跳过无媒体帖子（纯文本帖、无缩略图的链接帖）
     if (!hasMedia) continue;
 
-    // 构建帖子链接（指向 Reddit 原始页面）
     const redditLink = permalink.startsWith('http')
       ? permalink
       : 'https://www.reddit.com' + permalink;
@@ -293,57 +633,29 @@ function parseRedlibHtml(html, subreddit, maxItems, redlibBase) {
   return items;
 }
 
-// ─── 日期解析 ──────────────────────────────────────────────────
-// Redlib 的 title 属性通常包含完整时间戳，rel_time 包含相对时间
-// 支持的格式：
-//   title: ISO 日期、Unix 时间戳、自定义格式
-//   rel_time: "2 hours ago", "1 day ago", "3 minutes ago", "just now"
 function parseRedlibDate(titleAttr, relTime) {
-  // 优先使用 title 属性中的完整时间戳
   if (titleAttr) {
-    // 尝试直接解析（ISO 格式或 JavaScript 可识别的格式）
     const parsed = new Date(titleAttr);
-    if (!isNaN(parsed.getTime())) {
-      return parsed.toUTCString();
-    }
+    if (!isNaN(parsed.getTime())) return parsed.toUTCString();
 
-    // 尝试 Unix 时间戳（秒或毫秒）
     const ts = parseFloat(titleAttr);
     if (!isNaN(ts) && ts > 0) {
       const date = new Date(ts > 1e12 ? ts : ts * 1000);
-      if (!isNaN(date.getTime())) {
-        return date.toUTCString();
-      }
+      if (!isNaN(date.getTime())) return date.toUTCString();
     }
   }
 
-  // 回退到相对时间解析
   if (relTime) {
     const now = new Date();
-
     const hoursMatch = relTime.match(/(\d+)\s*hour/i);
-    if (hoursMatch) {
-      return new Date(now.getTime() - parseInt(hoursMatch[1]) * 3600000).toUTCString();
-    }
-
+    if (hoursMatch) return new Date(now.getTime() - parseInt(hoursMatch[1]) * 3600000).toUTCString();
     const daysMatch = relTime.match(/(\d+)\s*day/i);
-    if (daysMatch) {
-      return new Date(now.getTime() - parseInt(daysMatch[1]) * 86400000).toUTCString();
-    }
-
+    if (daysMatch) return new Date(now.getTime() - parseInt(daysMatch[1]) * 86400000).toUTCString();
     const minMatch = relTime.match(/(\d+)\s*minute/i);
-    if (minMatch) {
-      return new Date(now.getTime() - parseInt(minMatch[1]) * 60000).toUTCString();
-    }
-
+    if (minMatch) return new Date(now.getTime() - parseInt(minMatch[1]) * 60000).toUTCString();
     const secMatch = relTime.match(/(\d+)\s*second/i);
-    if (secMatch) {
-      return new Date(now.getTime() - parseInt(secMatch[1]) * 1000).toUTCString();
-    }
-
-    if (/just now/i.test(relTime)) {
-      return now.toUTCString();
-    }
+    if (secMatch) return new Date(now.getTime() - parseInt(secMatch[1]) * 1000).toUTCString();
+    if (/just now/i.test(relTime)) return now.toUTCString();
   }
 
   return '';
@@ -366,7 +678,24 @@ function buildRssXml(subreddit, items, source) {
   );
 }
 
-function buildEmptyRss(subreddit, reason) {
+function buildEmptyRss(subreddit, reason, errorDetails) {
+  let itemsXml = '';
+
+  // 如果有错误详情，生成一条诊断条目，让用户在前端看到错误信息
+  if (errorDetails && errorDetails.length > 0) {
+    const errorSummary = errorDetails.slice(0, 5).join('; ');
+    const desc = '<p>Reddit RSS 获取失败</p><p>已尝试的数据源及错误：</p><p>' 
+      + escapeHtml(errorSummary) + '</p><p>可能原因：Reddit 限制了 Cloudflare Workers 的访问，请稍后重试。</p>';
+    itemsXml = 
+      '<item>\n' +
+      '<title>Reddit RSS 获取失败 - r/' + escapeXml(subreddit) + '</title>\n' +
+      '<link>https://www.reddit.com/r/' + escapeXml(subreddit) + '</link>\n' +
+      '<description><![CDATA[' + desc + ']]></description>\n' +
+      '<pubDate>' + new Date().toUTCString() + '</pubDate>\n' +
+      '<guid isPermaLink="false">reddit-error-' + subreddit + '-' + Date.now() + '</guid>\n' +
+      '</item>\n';
+  }
+
   return (
     '<?xml version="1.0" encoding="UTF-8"?>\n' +
     '<rss version="2.0">\n' +
@@ -376,12 +705,13 @@ function buildEmptyRss(subreddit, reason) {
     '<description>' + escapeXml(reason) + '</description>\n' +
     '<language>en</language>\n' +
     '<lastBuildDate>' + new Date().toUTCString() + '</lastBuildDate>\n' +
+    itemsXml +
     '</channel>\n' +
     '</rss>'
   );
 }
 
-// ─── 主入口 ────────────────────────────────────────────────────
+// ─── 主入口：多源回退 ──────────────────────────────────────────
 export async function onRequest({ request }) {
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders() });
@@ -391,9 +721,9 @@ export async function onRequest({ request }) {
 
   // 解析子版块名称：支持 r/gifs、/r/gifs、gifs 等格式
   let subreddit = (url.searchParams.get('sub') || '')
-    .replace(/^\/?r\//i, '')  // 去掉 r/ 前缀
-    .replace(/^https?:\/\/[^/]+\/r\//i, '')  // 去掉完整 URL 前缀
-    .replace(/[^a-zA-Z0-9_+]/g, '')  // 只保留字母、数字、下划线、加号（多版块）
+    .replace(/^\/?r\//i, '')
+    .replace(/^https?:\/\/[^/]+\/r\//i, '')
+    .replace(/[^a-zA-Z0-9_+]/g, '')
     .slice(0, 100);
 
   // 排序方式：hot（默认）、new、top、rising、controversial
@@ -414,12 +744,30 @@ export async function onRequest({ request }) {
     });
   }
 
-  // 尝试从 Redlib 实例获取内容
-  let rss = await fetchFromRedlib(subreddit, maxItems, sort);
+  // 方案 A：Reddit JSON API（首选，提供直接 MP4 链接）
+  let result = await fetchFromRedditJson(subreddit, maxItems, sort);
+  let allErrors = result.errors || [];
 
-  // 所有实例均不可用
+  // 方案 B：Reddit 原生 RSS（回退）
+  if (!result.rss) {
+    result = await fetchFromRedditRss(subreddit, maxItems, sort);
+    allErrors = allErrors.concat(result.errors || []);
+  }
+
+  // 方案 C：Redlib 实例（末选）
+  if (!result.rss) {
+    result = await fetchFromRedlib(subreddit, maxItems, sort);
+    allErrors = allErrors.concat(result.errors || []);
+  }
+
+  // 所有方案都失败
+  let rss = result.rss;
   if (!rss) {
-    rss = buildEmptyRss(subreddit, '所有 Redlib 实例均不可用，可能是网络问题或实例维护中，请稍后重试');
+    rss = buildEmptyRss(
+      subreddit,
+      '所有数据源均不可用',
+      allErrors
+    );
   }
 
   return new Response(rss, {
