@@ -260,20 +260,22 @@ body{
 .feed-btn-group button:hover{color:#000;background:#f0f0f0;}
 
 .add-feed-row{display:flex;flex-wrap:wrap;gap:10px;margin:15px 12px;}
-.add-feed-row input,.add-feed-row select{
+.add-feed-row input{
     flex:1;
     min-width:140px;
-    padding:10px;
+    padding:8px 12px;
     border:1px solid #ddd;
     border-radius:8px;
     font-size:15px;
+    box-sizing:border-box;
 }
-#confirmAdd{background:#1d9bf0;color:#fff;border:none;padding:11px 16px;border-radius:8px;font-size:15px;min-width:70px;flex-shrink:0;}
-#confirmAddTwitter{background:#1d9bf0;color:#fff;border:none;padding:11px 16px;border-radius:8px;font-size:15px;min-width:70px;flex-shrink:0;}
-#confirmAddReddit{background:#1d9bf0;color:#fff;border:none;padding:11px 16px;border-radius:8px;font-size:15px;min-width:70px;flex-shrink:0;}
+.add-feed-row button{
+    background:#1d9bf0;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:15px;min-width:70px;flex-shrink:0;cursor:pointer;
+}
+#addKeywordBtn{background:#1d9bf0;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:15px;min-width:70px;flex-shrink:0;cursor:pointer;}
 .twitter-block-section,
 .reddit-block-section{
-    border-top:2px solid #000;
+    border-top:2px solid #4CAF50;
     margin:20px 12px 0;
     padding-top:16px;
 }
@@ -282,7 +284,7 @@ body{
 }
 .add-feed-form{margin:0 12px;padding-bottom:10px;}
 .keyword-block-section{
-    border-top:2px solid #000;
+    border-top:2px solid #4CAF50;
     margin:20px 12px 0;
     padding-top:16px;
 }
@@ -744,12 +746,6 @@ body{
             <div class="keyword-block-title">添加 Reddit 订阅</div>
             <div class="add-feed-row">
                 <input id="redditSubInput" placeholder="输入子版块名称">
-                <select id="redditSortSelect" style="flex:0 0 auto;min-width:90px;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:14px;">
-                    <option value="hot">热门</option>
-                    <option value="new">最新</option>
-                    <option value="top">最佳</option>
-                    <option value="rising">上升</option>
-                </select>
                 <button id="confirmAddReddit">添加</button>
             </div>
         </div>
@@ -2427,7 +2423,7 @@ async function renderSingleFeedFromSource(sourceUrl){
             showToast(`加载失败(已使用缓存)：${errDesc}`);
         }else{
             currentArticles = fallbackList;
-            articleBox.innerHTML = fallbackList.length ? "" : `<div class="empty-tip">该订阅加载失败：${errDesc}<br></div>`;
+            articleBox.innerHTML = fallbackList.length ? "" : `<div class="empty-tip">该订阅加载失败：${errDesc}</div>`;
         }
     }
     if(currentArticles.length > 0){
@@ -2631,9 +2627,19 @@ function buildCard(item, isFav = false){
     const avatarSvg = avatarIconSvg(avatarIndex);
     const dateText = formatCardDate(item.date);
 
+    // 分享链接：优先使用原始媒体 URL（不带代理），方便分享、查看和下载
+    // 视频帖用视频 URL，图片帖用第一张图片 URL，无媒体则用文章链接
+    let shareUrl = itemLink;
+    if (item.videoUrl) {
+        shareUrl = cleanMediaUrl(item.videoUrl);
+    } else if (item.media && item.media.imgs && item.media.imgs.length > 0) {
+        shareUrl = cleanMediaUrl(item.media.imgs[0]);
+    }
+    const shareUrlAttr = escapeAttr(shareUrl);
+
     if(isFav){
         return `
-        <div class="tweet-card" data-link="${itemLinkAttr}" data-source-url="${sourceUrlAttr}">
+        <div class="tweet-card" data-link="${itemLinkAttr}" data-source-url="${sourceUrlAttr}" data-share-url="${shareUrlAttr}">
             <div class="card-top">
                 <div class="card-avatar" style="background:${avatarStyle}">${avatarSvg}</div>
                 <div class="source-name-text">${sourceNameText}</div>
@@ -2650,7 +2656,7 @@ function buildCard(item, isFav = false){
         </div>`;
     }else{
         return `
-        <div class="tweet-card" data-link="${itemLinkAttr}" data-source-url="${sourceUrlAttr}">
+        <div class="tweet-card" data-link="${itemLinkAttr}" data-source-url="${sourceUrlAttr}" data-share-url="${shareUrlAttr}">
             <div class="card-top">
                 <div class="card-avatar" style="background:${avatarStyle}">${avatarSvg}</div>
                 <div class="source-name-text">${sourceNameText}</div>
@@ -2779,7 +2785,8 @@ function bindAllCardEvent(){
         btn.onclick = async function(e){
             e.stopPropagation();
             const cardDom = this.closest(".tweet-card");
-            const link = cardDom.dataset.link;
+            // 优先使用原始媒体链接（不带代理），方便分享、查看和下载
+            const link = cardDom.dataset.shareUrl || cardDom.dataset.link;
             try{
                 await navigator.clipboard.writeText(link);
                 showToast("链接已复制");
@@ -3543,8 +3550,7 @@ document.getElementById("confirmAddReddit").onclick = function(){
         return;
     }
 
-    const sort = document.getElementById("redditSortSelect").value || "hot";
-    const redditRssUrl = location.origin + "/reddit-rss?sub=" + subreddit + "&sort=" + sort;
+    const redditRssUrl = location.origin + "/reddit-rss?sub=" + subreddit;
 
     if (feedList.some(item => item.url === redditRssUrl)) {
         showToast("该 Reddit 订阅已存在");
