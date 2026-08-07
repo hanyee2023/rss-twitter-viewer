@@ -270,6 +270,7 @@ body{
 }
 #confirmAdd{background:#1d9bf0;color:#fff;border:none;padding:11px 16px;border-radius:8px;font-size:15px;min-width:70px;flex-shrink:0;}
 #confirmAddTwitter{background:#1d9bf0;color:#fff;border:none;padding:11px 16px;border-radius:8px;font-size:15px;min-width:70px;flex-shrink:0;}
+#confirmAddReddit{background:#1d9bf0;color:#fff;border:none;padding:11px 16px;border-radius:8px;font-size:15px;min-width:70px;flex-shrink:0;}
 .twitter-block-section{
     border-top:2px solid #000;
     margin:20px 12px 0;
@@ -738,6 +739,19 @@ body{
                 <button id="confirmAddTwitter">添加</button>
             </div>
         </div>
+        <div class="twitter-block-section">
+            <div class="keyword-block-title">添加 Reddit 订阅</div>
+            <div class="add-feed-row">
+                <input id="redditSubInput" placeholder="输入子版块名称">
+                <select id="redditSortSelect" style="flex:0 0 auto;min-width:90px;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:14px;">
+                    <option value="hot">热门</option>
+                    <option value="new">最新</option>
+                    <option value="top">最佳</option>
+                    <option value="rising">上升</option>
+                </select>
+                <button id="confirmAddReddit">添加</button>
+            </div>
+        </div>
         <div class="keyword-block-section">
             <div class="keyword-block-title">关键字屏蔽</div>
             <div class="add-feed-row">
@@ -857,7 +871,7 @@ const MEDIA_PROXY_ENDPOINTS = [
 // 这些域名的 RSS 或媒体资源默认走代理。需要新增国外或特殊域名时，加到这里即可。
 const FORCE_PROXY_HOSTS = [
     "twitter.com",
-   "x.com",
+    "x.com",
     "t.co",
     "twimg.com",
     "video.twimg.com",
@@ -874,7 +888,18 @@ const FORCE_PROXY_HOSTS = [
     "3go.fun",
     "rsshub.app",
     "venexa.site",
-    "aguea.com"
+    "aguea.com",
+    // Reddit CDN 域名（Redlib 输出的媒体 URL 指向这些域名）
+    "reddit.com",
+    "i.redd.it",
+    "v.redd.it",
+    "preview.redd.it",
+    "external-preview.redd.it",
+    "thumbs.redditmedia.com",
+    "redditmedia.com",
+    "s.redditmedia.com",
+    "o.redditmedia.com",
+    "redditstatic.com"
 ];
 
 function normalizeUrl(rawUrl) {
@@ -2006,6 +2031,8 @@ function startHlsVideo(video){
             try{ video.hlsInstance.destroy(); }catch(e){}
             video.hlsInstance = null;
         }
+        // 代理视频走 Cloudflare 中转，带宽有限，使用更保守的配置
+        const isProxyVid = video.dataset.proxyVideo === "1";
         const hls = new Hls({
             enableWorker: true,
             lowLatencyMode: false,
@@ -2013,9 +2040,11 @@ function startHlsVideo(video){
             maxMaxBufferLength: 120,
             maxBufferSize: 60 * 1000 * 1000,
             maxBufferHole: 0.5,
-            startLevel: -1,
+            // 代理视频从最低码率起步，快速起播避免黑屏；非代理视频自动选择
+            startLevel: isProxyVid ? 0 : -1,
             capLevelToPlayerSize: true,
-            abrEwmaDefaultEstimate: 500000,
+            // 代理视频初始带宽估计偏保守，避免起步选太高码率
+            abrEwmaDefaultEstimate: isProxyVid ? 300000 : 500000,
             abrBandWidthFactor: 0.95,
             abrBandWidthUpFactor: 0.7,
             storage: null,
@@ -2027,6 +2056,21 @@ function startHlsVideo(video){
             hls.loadSource(streamUrl);
         });
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            // 代理视频限制最高码率级别为 720p，避免 1080p/1760p 通过代理加载缓慢
+            if(isProxyVid && hls.levels && hls.levels.length > 0){
+                const maxLevel = hls.levels.length - 1;
+                let restrictedMax = maxLevel;
+                for(let i = 0; i <= maxLevel; i++){
+                    const h = hls.levels[i].height || 0;
+                    if(h > 720){ restrictedMax = i - 1; break; }
+                }
+                if(restrictedMax < maxLevel && restrictedMax >= 0){
+                    hls.currentLevel = 0;
+                    // 限制自动码率切换不超过 720p
+                    // 通过设置 autoLevelCapping 实现
+                    hls.autoLevelCapping = restrictedMax;
+                }
+            }
             hls.startLoad();
             video.dataset.hlsLoaded = "1";
             // 代理视频采用两次点击模式：第一次仅加载 manifest，不自动播放
@@ -2382,7 +2426,7 @@ async function renderSingleFeedFromSource(sourceUrl){
             showToast(`加载失败(已使用缓存)：${errDesc}`);
         }else{
             currentArticles = fallbackList;
-            articleBox.innerHTML = fallbackList.length ? "" : `<div class="empty-tip">该订阅加载失败：${errDesc}<br><br></div>`;
+            articleBox.innerHTML = fallbackList.length ? "" : `<div class="empty-tip">该订阅加载失败：${errDesc}<br></div>`;
         }
     }
     if(currentArticles.length > 0){
@@ -3477,6 +3521,46 @@ document.getElementById("confirmAddTwitter").onclick = function(){
 
     document.getElementById("twitterUserInput").value = "";
     showToast("Twitter 订阅添加成功：@" + username);
+    initLoadAllCache();
+    showPage(pageManage, "管理订阅");
+}
+
+// Reddit 订阅：通过 /reddit-rss?sub=子版块 自动生成 RSS
+// NSFW 内容已在服务端通过 cookie (show_nsfw=on) 自动启用
+document.getElementById("confirmAddReddit").onclick = function(){
+    let raw = document.getElementById("redditSubInput").value.trim();
+    if (!raw) {
+        showToast("请输入子版块名称");
+        return;
+    }
+    // 去掉 r/ 前缀，支持 r/gifs、/r/gifs、gifs 等格式
+    let subreddit = raw.replace(/^\/?r\//i, "").replace(/^https?:\/\/[^/]+\/r\//i, "").replace(/\/.*$/, "").trim();
+    // 只允许字母、数字、下划线、加号（多版块）
+    subreddit = subreddit.replace(/[^a-zA-Z0-9_+]/g, "");
+    if (!subreddit) {
+        showToast("子版块名称格式不正确");
+        return;
+    }
+
+    const sort = document.getElementById("redditSortSelect").value || "hot";
+    const redditRssUrl = location.origin + "/reddit-rss?sub=" + subreddit + "&sort=" + sort;
+
+    if (feedList.some(item => item.url === redditRssUrl)) {
+        showToast("该 Reddit 订阅已存在");
+        return;
+    }
+
+    feedList.push({
+        name: "r/" + subreddit,
+        category: "video",
+        url: redditRssUrl
+    });
+    localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
+    lastRefreshTime = 0;
+    localStorage.removeItem(LAST_REFRESH_KEY);
+
+    document.getElementById("redditSubInput").value = "";
+    showToast("Reddit 订阅添加成功：r/" + subreddit);
     initLoadAllCache();
     showPage(pageManage, "管理订阅");
 }
