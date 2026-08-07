@@ -3106,7 +3106,7 @@ function parseRSS(xml, sourceName, sourceUrl, cat){
         while ((regMatch = playerUrlReg.exec(fullText)) !== null) {
             addM3u8(regMatch[1]);
         }
-        const m3u8AttrReg = /(?:src|data-src|href)=["']([^"']+\.m3u8(?:\?[^"']*)?)["']/gi;
+        const m3u8AttrReg = /(?:src|data-src|href|url)=["']([^"']+\.m3u8(?:\?[^"']*)?)["']/gi;
         while((regMatch = m3u8AttrReg.exec(fullText)) !== null){
             addM3u8(regMatch[1]);
         }
@@ -3116,7 +3116,7 @@ function parseRSS(xml, sourceName, sourceUrl, cat){
         }
         getUrlCandidates(fullText, ".m3u8").forEach(addM3u8);
 
-        const videoAttrReg = /(?:src|data-src|href)=["']([^"']+\.mp4(?:\?[^"']*)?)["']/gi;
+        const videoAttrReg = /(?:src|data-src|href|url)=["']([^"']+\.mp4(?:\?[^"']*)?)["']/gi;
         while((regMatch = videoAttrReg.exec(fullText)) !== null){
             addMp4(regMatch[1]);
         }
