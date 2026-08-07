@@ -17,19 +17,7 @@ const ALLOW_PROXY_HOSTS = [
   "3go.fun",
   "rsshub.app",
   "venexa.site",
-  "aguea.com",
-  // Reddit CDN 域名（Redlib 输出的媒体 URL 指向这些域名）
-  "reddit.com",
-  "redd.it",
-  "i.redd.it",
-  "v.redd.it",
-  "preview.redd.it",
-  "external-preview.redd.it",
-  "thumbs.redditmedia.com",
-  "redditmedia.com",
-  "s.redditmedia.com",
-  "o.redditmedia.com",
-  "redditstatic.com"
+  "aguea.com"
 ];
 
 function normalizeHost(host) {
