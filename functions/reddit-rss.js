@@ -6,8 +6,8 @@
 // 订阅地址: /reddit-rss?sub=子版块名称
 // 可选参数: sort=hot|new|top|rising (默认 hot)
 
-const DEFAULT_MAX_ITEMS = 20;
-const ABSOLUTE_MAX_ITEMS = 50;
+const DEFAULT_MAX_ITEMS = 30;
+const ABSOLUTE_MAX_ITEMS = 30;
 
 const FETCH_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const FETCH_TIMEOUT = 12000;
@@ -158,31 +158,74 @@ function parseRedditJson(data, maxItems) {
     let desc = '<p>' + escapeHtml(title) + '</p>';
     let hasMedia = false;
 
-    // ── 1. Reddit 托管视频（v.redd.it）──
-    // secure_media.reddit_video.fallback_url 是直接 MP4 链接
-    if (post.is_video && post.secure_media && post.secure_media.reddit_video) {
-      const videoUrl = post.secure_media.reddit_video.fallback_url;
-      if (videoUrl) {
-        // 尝试获取缩略图作为封面
-        const posterUrl = getThumbnailUrl(post);
-        if (posterUrl) desc += '<img src="' + posterUrl + '" />';
-        desc += '<video src="' + videoUrl + '" controls></video>';
-        hasMedia = true;
+    // 获取视频 URL：检查 secure_media、media、preview 三种来源
+    let videoUrl = null;
+    let videoPosterUrl = null;
+
+    // 1a. secure_media.reddit_video（HTTPS 视频）
+    if (post.secure_media && post.secure_media.reddit_video) {
+      videoUrl = post.secure_media.reddit_video.fallback_url;
+    }
+    // 1b. media.reddit_video（非 HTTPS 视频，某些帖子只有这个字段）
+    if (!videoUrl && post.media && post.media.reddit_video) {
+      videoUrl = post.media.reddit_video.fallback_url;
+    }
+    // 1c. preview.reddit_video_preview（GIF 转视频、跨站视频预览）
+    if (!videoUrl && post.preview && post.preview.reddit_video_preview) {
+      videoUrl = post.preview.reddit_video_preview.fallback_url;
+    }
+
+    if (videoUrl) {
+      // 获取封面图
+      videoPosterUrl = getPreviewImageUrl(post) || getThumbnailUrl(post);
+      if (videoPosterUrl) desc += '<img src="' + videoPosterUrl + '" />';
+      // 输出 <video> 标签，同时输出纯文本 URL 方便前端提取
+      desc += '<video src="' + videoUrl + '" controls></video>';
+      desc += '<p>' + videoUrl + '</p>';
+      hasMedia = true;
+    }
+
+    // ── 2. Gallery 图库帖（多张图片）──
+    // Reddit 图库帖：post.is_gallery = true
+    // 图片信息在 post.gallery_data.items[].media_id
+    // URL 在 post.media_metadata[media_id].s.u
+    if (!hasMedia && post.is_gallery && post.gallery_data && post.media_metadata) {
+      const galleryItems = post.gallery_data.items || [];
+      const metadata = post.media_metadata;
+      let galleryImgCount = 0;
+
+      for (const galleryItem of galleryItems) {
+        if (galleryImgCount >= 10) break; // 最多 10 张图
+        const mediaId = galleryItem.media_id;
+        if (!mediaId || !metadata[mediaId]) continue;
+
+        const meta = metadata[mediaId];
+        let imgUrl = null;
+
+        // s.u 是图片 URL（需要解码 HTML 实体）
+        if (meta.s && meta.s.u) {
+          imgUrl = decodeHtml(meta.s.u);
+        } else if (meta.p && meta.p.length > 0) {
+          // p 是预览尺寸数组，取最大尺寸
+          imgUrl = decodeHtml(meta.p[meta.p.length - 1].u);
+        }
+
+        if (imgUrl && imgUrl.startsWith('http')) {
+          // 跳过 GIF 类型（由视频处理逻辑负责）
+          if (meta.e === 'AnimatedImage' && meta.s && meta.s.mp4) {
+            // 动图，输出 MP4
+            desc += '<video src="' + meta.s.mp4 + '" controls></video>';
+            desc += '<p>' + meta.s.mp4 + '</p>';
+          } else {
+            desc += '<img src="' + imgUrl + '" />';
+          }
+          hasMedia = true;
+          galleryImgCount++;
+        }
       }
     }
 
-    // ── 2. 预览中的视频（GIF 转 MP4 等）──
-    if (!hasMedia && post.preview && post.preview.reddit_video_preview) {
-      const videoUrl = post.preview.reddit_video_preview.fallback_url;
-      if (videoUrl) {
-        const posterUrl = getPreviewImageUrl(post);
-        if (posterUrl) desc += '<img src="' + posterUrl + '" />';
-        desc += '<video src="' + videoUrl + '" controls></video>';
-        hasMedia = true;
-      }
-    }
-
-    // ── 3. 图片帖（i.redd.it, preview.redd.it 等）──
+    // ── 3. 单张图片帖（i.redd.it, preview.redd.it 等）──
     if (!hasMedia) {
       const postHint = post.post_hint || '';
       if (postHint === 'image' || /\.(jpg|jpeg|png|gif|webp)$/i.test(postUrl)) {
@@ -193,18 +236,15 @@ function parseRedditJson(data, maxItems) {
       }
     }
 
-    // ── 4. 预览图片（适用于图库帖和链接帖）──
+    // ── 4. 预览图片（适用于链接帖等）──
     if (!hasMedia && post.preview && Array.isArray(post.preview.images) && post.preview.images.length > 0) {
       const previewImg = post.preview.images[0];
-      // source.url 是高分辨率图片
       let imgUrl = previewImg.source && previewImg.source.url;
-      // 如果有 resolutions，选择中等分辨率
       if (!imgUrl && previewImg.resolutions && previewImg.resolutions.length > 0) {
         const midIdx = Math.floor(previewImg.resolutions.length / 2);
         imgUrl = previewImg.resolutions[midIdx].url;
       }
       if (imgUrl) {
-        // Reddit 预览 URL 中 & 被编码为 &amp;，需要解码
         imgUrl = decodeHtml(imgUrl);
         desc += '<img src="' + imgUrl + '" />';
         hasMedia = true;
@@ -216,11 +256,12 @@ function parseRedditJson(data, maxItems) {
       const lowerUrl = postUrl.toLowerCase();
       if (lowerUrl.includes('redgifs.com') || lowerUrl.includes('imgur.com')) {
         desc += '<a href="' + postUrl + '">' + escapeHtml(postUrl) + '</a>';
+        desc += '<p>' + postUrl + '</p>';
         hasMedia = true;
       }
     }
 
-    // ── 6. 缩略图兜底（适用于有缩略图但未被上面匹配的帖子）──
+    // ── 6. 缩略图兜底 ──
     if (!hasMedia) {
       const thumbUrl = getThumbnailUrl(post);
       if (thumbUrl) {
@@ -711,7 +752,7 @@ function buildEmptyRss(subreddit, reason, errorDetails) {
   );
 }
 
-// ─── 主入口：多源回退 ──────────────────────────────────────────
+// ─── 主入口：多源回退 + 8小时缓存 ────────────────────────────
 export async function onRequest({ request }) {
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders() });
@@ -726,7 +767,7 @@ export async function onRequest({ request }) {
     .replace(/[^a-zA-Z0-9_+]/g, '')
     .slice(0, 100);
 
-  // 排序方式：hot（默认）、new、top、rising、controversial
+  // 排序方式：hot（默认）
   const sort = (url.searchParams.get('sort') || 'hot')
     .replace(/[^a-z]/g, '')
     .slice(0, 20);
@@ -742,6 +783,26 @@ export async function onRequest({ request }) {
       status: 400,
       headers: corsHeaders({ 'Content-Type': 'text/plain; charset=utf-8' }),
     });
+  }
+
+  // ── 8小时边缘缓存（Cloudflare Cache API）──
+  // 使用 caches.default 在 Cloudflare 边缘节点缓存响应
+  // 避免每次前端请求都打 Reddit API
+  const cacheKey = new Request(`https://reddit-rss-cache.internal/${subreddit}/${sort}/${maxItems}`, { method: 'GET' });
+
+  try {
+    const cached = await caches.default.match(cacheKey);
+    if (cached) {
+      // 返回缓存的响应，添加 X-Cache: HIT 标记
+      const cachedHeaders = new Headers(cached.headers);
+      cachedHeaders.set('X-Cache', 'HIT');
+      return new Response(cached.body, {
+        status: cached.status,
+        headers: cachedHeaders,
+      });
+    }
+  } catch (e) {
+    // Cache API 不可用时继续正常请求
   }
 
   // 方案 A：Reddit JSON API（首选，提供直接 MP4 链接）
@@ -770,12 +831,25 @@ export async function onRequest({ request }) {
     );
   }
 
-  return new Response(rss, {
+  const response = new Response(rss, {
     status: 200,
     headers: corsHeaders({
       'Content-Type': 'application/rss+xml; charset=utf-8',
-      'Cache-Control': 'public, max-age=300, stale-while-revalidate=300',
-      'ETag': '"' + subreddit + '-' + sort + '-' + maxItems + '-' + Math.floor(Date.now() / 300000) + '"',
+      'Cache-Control': 'public, max-age=28800, stale-while-revalidate=28800',
+      'X-Cache': 'MISS',
+      'ETag': '"' + subreddit + '-' + sort + '-' + maxItems + '-' + Math.floor(Date.now() / 28800000) + '"',
     }),
   });
+
+  // 将成功响应存入边缘缓存（8小时 = 28800秒）
+  // 只缓存包含实际内容的响应（不缓存错误诊断条目）
+  try {
+    if (result.rss && rss.includes('<item>')) {
+      await caches.default.put(cacheKey, response.clone());
+    }
+  } catch (e) {
+    // 缓存写入失败时忽略
+  }
+
+  return response;
 }
