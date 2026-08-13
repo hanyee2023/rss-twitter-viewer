@@ -993,12 +993,20 @@ function getRSSProxyCandidates(rssUrl) {
     return RSS_PROXY_ENDPOINTS.map(endpoint => buildProxyUrl(endpoint, rssUrl));
 }
 
+// 代理视频画质：默认 480p（降一档，流畅优先），收藏内容用 720p，分享用 high（最高）。
+// 仅对命中代理名单的域名生效，直连媒体不走这些参数。
+function getProxyUrlWithQ(rawUrl, q, isFav = false) {
+    const url = cleanMediaUrl(rawUrl);
+    if (!isHttpUrl(url) || !hostMatched(url)) return url;
+    const params = { raw: "1", q: q };
+    return buildProxyUrl(MEDIA_PROXY_ENDPOINTS[0], url, params);
+}
+
 function getMediaProxyCandidates(rawUrl, isFav = false) {
     const url = cleanMediaUrl(rawUrl);
     if (!isHttpUrl(url)) return [];
     if (!hostMatched(url)) return [];
-    const params = { raw: "1" };
-    if (isFav) params.cache = "long";
+    const params = { raw: "1", q: isFav ? "720" : "480" };
     return MEDIA_PROXY_ENDPOINTS.map(endpoint => buildProxyUrl(endpoint, url, params));
 }
 
@@ -1006,8 +1014,7 @@ function getProxyUrl(rawUrl, isFav = false) {
     const url = cleanMediaUrl(rawUrl);
     if (!isHttpUrl(url)) return url;
     if (!hostMatched(url)) return url;
-    const params = { raw: "1" };
-    if (isFav) params.cache = "long";
+    const params = { raw: "1", q: isFav ? "720" : "480" };
     return buildProxyUrl(MEDIA_PROXY_ENDPOINTS[0], url, params);
 }
 
@@ -1015,8 +1022,7 @@ function getForceMediaProxyUrl(rawUrl, isFav = false) {
     const url = cleanMediaUrl(rawUrl);
     if (!isHttpUrl(url)) return url;
     if (!hostMatched(url)) return url;
-    const params = { raw: "1" };
-    if (isFav) params.cache = "long";
+    const params = { raw: "1", q: isFav ? "720" : "480" };
     return buildProxyUrl(MEDIA_PROXY_ENDPOINTS[0], url, params);
 }
 
@@ -2648,10 +2654,13 @@ function buildCard(item, isFav = false){
     const avatarSvg = avatarIconSvg(avatarIndex);
     const dateText = formatCardDate(item.date);
 
-    // 分享链接：优先使用原始媒体 URL（不带代理），方便分享、查看和下载
-    // 视频帖用视频 URL，图片帖用第一张图片 URL，无媒体则用文章链接
+    // 分享链接：
+    //  - 代理视频：用 q=high 的代理链接，既保持最高画质，又让被墙地区也能打开/下载
+    //  - 其余（直连视频/图片/文章）：保持原始 URL（不走代理，按原逻辑）
     let shareUrl = itemLink;
-    if (item.videoUrl) {
+    if (item.videoUrl && hostMatched(cleanMediaUrl(item.videoUrl))) {
+        shareUrl = getProxyUrlWithQ(item.videoUrl, "high");
+    } else if (item.videoUrl) {
         shareUrl = cleanMediaUrl(item.videoUrl);
     } else if (item.media && item.media.imgs && item.media.imgs.length > 0) {
         shareUrl = cleanMediaUrl(item.media.imgs[0]);
