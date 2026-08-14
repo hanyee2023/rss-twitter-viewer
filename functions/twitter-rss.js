@@ -84,6 +84,51 @@ function simpleHash(str) {
 
 // ─── URL 解码工具 ──────────────────────────────────────────────
 
+// 从 MP4 URL 候选列表中选择低码率视频
+// 优先 480p，没有 480p 才退到 720p，避免高分辨率 MP4 通过代理加载缓慢
+// Twitter MP4 URL 中包含分辨率信息，如 /vid/avc1/640x480/xxx.mp4、/vid/avc1/1280x720/xxx.mp4
+function pickBestResolutionMp4(urls) {
+  if (!urls || urls.length === 0) return '';
+  if (urls.length === 1) return urls[0];
+
+  // 解析每个 URL 的分辨率
+  const parsed = urls.map(url => {
+    const resMatch = url.match(/\/(\d{3,4})x(\d{3,4})\//i);
+    if (resMatch) {
+      const w = parseInt(resMatch[1]);
+      const h = parseInt(resMatch[2]);
+      return { url, shortSide: Math.min(w, h), hasRes: true };
+    }
+    return { url, shortSide: 0, hasRes: false };
+  });
+
+  // 优先选 480p（短边最接近 480 且不超过 720）
+  // 480p 的常见分辨率：640x480、480x854（竖屏）、480x360
+  const candidates480 = parsed.filter(p => p.hasRes && p.shortSide >= 400 && p.shortSide <= 540);
+  if (candidates480.length > 0) {
+    // 在 480p 范围内选最接近 480 的
+    candidates480.sort((a, b) => Math.abs(a.shortSide - 480) - Math.abs(b.shortSide - 480));
+    return candidates480[0].url;
+  }
+
+  // 没有 480p，选 720p 范围内的（短边 600~800）
+  const candidates720 = parsed.filter(p => p.hasRes && p.shortSide >= 600 && p.shortSide <= 800);
+  if (candidates720.length > 0) {
+    candidates720.sort((a, b) => Math.abs(a.shortSide - 720) - Math.abs(b.shortSide - 720));
+    return candidates720[0].url;
+  }
+
+  // 都没有，选分辨率最低的（避免高分辨率大文件）
+  const withRes = parsed.filter(p => p.hasRes);
+  if (withRes.length > 0) {
+    withRes.sort((a, b) => a.shortSide - b.shortSide);
+    return withRes[0].url;
+  }
+
+  // 无分辨率信息，返回第一个
+  return urls[0];
+}
+
 // 从 Nitter 代理 URL 中提取原始 Twitter CDN URL
 // 代理格式1: https://cdn.xcancel.com/pic/哈希/pbs.twimg.com%2Fprofile_images%2F...
 // 代理格式2: https://cdn.xcancel.com/video/哈希/https%3A%2F%2Fvideo.twimg.com%2F...
@@ -297,46 +342,90 @@ async function parseNitterHtml(html, username, maxItems, nitterBase) {
       if (originalUrl) imageUrls.push(originalUrl);
     }
 
-    // 提取视频
-    // 优先级 1: <source src="代理URL" type="video/mp4"> （MP4 直链）
-    // 优先级 2: <a class="video-download" href="代理URL"> （下载链接，通常也是 MP4）
-    // 优先级 3: <video data-url="代理URL"> （m3u8 流）
+    // 提取视频和对应的 poster（预览图）
+    // Nitter 视频渲染有多种模式（取决于实例配置 proxyVideos/hlsPlayback/mp4Playback）：
+    //   模式1: <video poster="thumb" controls><source src="mp4" type="video/mp4"></video>
+    //   模式2: <video poster="thumb" data-url="m3u8" data-autoload="false"> + video-overlay
+    //   模式3（播放被禁用）: <img src="thumb" loading="lazy"> + video-download 链接
+    //   模式4: <video poster="thumb" ...> + <a class="video-download" href="mp4">
+    // poster 可能在 <video> 标签上，也可能作为单独 <img> 标签在 attachment 内
     const videoUrls = [];
     const videoPosters = [];
 
-    // 提取 video 标签的 poster
-    const videoPosterRegex = /<video[^>]*\sposter="([^"]+)"[^>]*>/gi;
-    let vidMatch;
-    while ((vidMatch = videoPosterRegex.exec(block)) !== null) {
-      videoPosters.push(decodeNitterProxyUrl(vidMatch[1]));
-    }
+    // 用 attachment 容器分割，逐块提取视频 URL 和 poster
+    // 每个 <div class="attachment"> 包含一个视频/图片及其缩略图
+    const attachmentBlocks = block.split(/(?=<div class="attachment")/i);
 
-    // 优先：MP4 <source> 标签
-    const sourceRegex = /<source[^>]*\ssrc="([^"]+)"[^>]*>/gi;
-    while ((vidMatch = sourceRegex.exec(block)) !== null) {
-      const mp4Url = decodeNitterProxyUrl(vidMatch[1]);
-      if (mp4Url && /\.mp4/i.test(mp4Url)) {
-        videoUrls.push(mp4Url);
+    for (const attBlock of attachmentBlocks) {
+      if (!attBlock.includes('attachment')) continue;
+
+      let videoUrl = '';
+      let posterUrl = '';
+
+      // 提取 video 标签上的 poster
+      const videoTagMatch = attBlock.match(/<video[^>]*\sposter="([^"]+)"[^>]*>/i);
+      if (videoTagMatch) {
+        posterUrl = decodeNitterProxyUrl(videoTagMatch[1]);
       }
-    }
 
-    // 如果没有 <source>，尝试 video-download 链接（通常是 MP4 直链）
-    if (videoUrls.length === 0) {
-      const downloadRegex = /<a[^>]*class="video-download"[^>]*href="([^"]+)"/gi;
-      while ((vidMatch = downloadRegex.exec(block)) !== null) {
-        const dlUrl = decodeNitterProxyUrl(vidMatch[1]);
-        if (dlUrl && /\.mp4/i.test(dlUrl)) {
-          videoUrls.push(dlUrl);
+      // 如果 video 标签没有 poster，查找 attachment 内的 <img> 标签
+      // （模式3：播放被禁用时，Nitter 用 <img src="thumb"> 显示缩略图）
+      if (!posterUrl) {
+        const attImgMatch = attBlock.match(/<img[^>]*\ssrc="([^"]+)"[^>]*>/i);
+        if (attImgMatch) {
+          posterUrl = decodeNitterProxyUrl(attImgMatch[1]);
         }
       }
-    }
 
-    // 如果仍没有视频，尝试 m3u8 data-url（部分实例如 asia.aguea.com 使用此格式）
-    if (videoUrls.length === 0) {
-      const dataUrlRegex = /<video[^>]*\sdata-url="([^"]+)"[^>]*>/gi;
-      while ((vidMatch = dataUrlRegex.exec(block)) !== null) {
-        const m3u8Url = decodeNitterProxyUrl(vidMatch[1]);
-        if (m3u8Url) videoUrls.push(m3u8Url);
+      // 提取视频 URL
+      // 收集 attachment 块内所有 MP4 URL（<source> 标签 + video-download 链接）
+      // Nitter 源码中 <source> 取最高分辨率，video-download 取最高码率，两者可能不同
+      // 我们选择分辨率最接近 720p 的 MP4，平衡画质和加载速度
+      const mp4Candidates = [];
+
+      // <source> 标签
+      const sourceMatch = attBlock.match(/<source[^>]*\ssrc="([^"]+)"[^>]*>/i);
+      if (sourceMatch) {
+        const mp4Url = decodeNitterProxyUrl(sourceMatch[1]);
+        if (mp4Url && /\.mp4/i.test(mp4Url)) {
+          mp4Candidates.push(mp4Url);
+        }
+      }
+
+      // video-download 链接
+      const downloadRegex = /<a[^>]*class="video-download"[^>]*href="([^"]+)"/gi;
+      let dlMatch;
+      while ((dlMatch = downloadRegex.exec(attBlock)) !== null) {
+        const dlUrl = decodeNitterProxyUrl(dlMatch[1]);
+        if (dlUrl && /\.mp4/i.test(dlUrl) && !mp4Candidates.includes(dlUrl)) {
+          mp4Candidates.push(dlUrl);
+        }
+      }
+
+      // 从候选中选择最接近 720p 的 MP4
+      // Twitter MP4 URL 中包含分辨率信息，如 /vid/avc1/1280x720/xxx.mp4
+      if (mp4Candidates.length > 0) {
+        videoUrl = pickBestResolutionMp4(mp4Candidates);
+      }
+
+      // 如果没有 MP4，尝试 m3u8 data-url（部分实例如 asia.aguea.com 使用此格式）
+      if (!videoUrl) {
+        const dataUrlMatch = attBlock.match(/<video[^>]*\sdata-url="([^"]+)"[^>]*>/i);
+        if (dataUrlMatch) {
+          const m3u8Url = decodeNitterProxyUrl(dataUrlMatch[1]);
+          if (m3u8Url) videoUrl = m3u8Url;
+        }
+      }
+
+      // 只有提取到视频 URL 才算视频条目（避免把纯图片 attachment 误认为视频）
+      if (videoUrl) {
+        videoUrls.push(videoUrl);
+        videoPosters.push(posterUrl || '');
+      } else if (posterUrl) {
+        // 有 poster 但没有视频 URL：可能视频不可用，把 poster 当作普通图片
+        if (!imageUrls.includes(posterUrl)) {
+          imageUrls.push(posterUrl);
+        }
       }
     }
 
@@ -376,11 +465,21 @@ async function parseNitterHtml(html, username, maxItems, nitterBase) {
     // 添加视频
     // MP4 视频：直接输出原始 video.twimg.com URL，由阅读器的 media-proxy 代理
     // m3u8 视频：输出原始 m3u8 URL，由 media-proxy 做变体过滤
+    // 添加视频
+    // MP4 视频：直接输出原始 video.twimg.com URL，由阅读器的 media-proxy 代理
+    // m3u8 视频：输出原始 m3u8 URL，由 media-proxy 做变体过滤
+    // poster 作为 <img> 输出在 <video> 前面，前端 parseRSS 会把它提取到 imgs 中作为视频封面
+    const usedPosterUrls = new Set();
     for (let i = 0; i < videoUrls.length; i++) {
       const videoUrl = videoUrls[i];
-      const posterUrl = videoPosters[i] || (imageUrls.length > 0 ? imageUrls[0] : '');
+      let posterUrl = videoPosters[i] || (imageUrls.length > 0 ? imageUrls[0] : '');
 
+      // 避免重复输出已经在图片列表中显示过的 poster
+      if (posterUrl && usedPosterUrls.has(posterUrl)) {
+        posterUrl = '';
+      }
       if (posterUrl) {
+        usedPosterUrls.add(posterUrl);
         desc += '<img src="' + escapeHtml(posterUrl) + '" />';
       }
       desc += '<video src="' + escapeHtml(videoUrl) + '" controls></video>';
