@@ -2644,7 +2644,9 @@ function buildCard(item, isFav = false){
             if (item.isM3u8Video === true) {
     // M3U8视频，保留原有标记，仅给HLS调用
     const imgs = [...new Set(item.media.imgs || [])];
-    const posterImg = imgs.length > 0 ? imgs[0] : "";
+    // 优先使用 videoPoster（从 <video poster="..."> 属性提取的视频缩略图）
+    // 回退到 imgs[0]（兼容旧格式 RSS）
+    const posterImg = item.videoPoster || (imgs.length > 0 ? imgs[0] : "");
     const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
     const posterDirect = posterImg ? cleanMediaUrl(posterImg) : "";
     let posterAttr = posterProxy ? `poster="${escapeAttr(posterProxy)}"` : "";
@@ -2667,7 +2669,9 @@ function buildCard(item, isFav = false){
 }else if(item.videoUrl){
     // MP4视频：单独class media-video-mp4，完全脱离HLS逻辑
     const imgs = [...new Set(item.media.imgs || [])];
-    const posterImg = imgs.length > 0 ? imgs[0] : "";
+    // 优先使用 videoPoster（从 <video poster="..."> 属性提取的视频缩略图）
+    // 回退到 imgs[0]（兼容旧格式 RSS）
+    const posterImg = item.videoPoster || (imgs.length > 0 ? imgs[0] : "");
     const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
     const posterDirect = posterImg ? cleanMediaUrl(posterImg) : "";
     let posterAttr = posterProxy ? `poster="${escapeAttr(posterProxy)}"` : "";
@@ -3258,6 +3262,18 @@ function parseRSS(xml, sourceName, sourceUrl, cat){
             isM3u8Video = false;
         }
 
+        // 提取视频 poster（预览图）
+        // 优先从 <video poster="..."> 属性提取
+        // 回退到 imgs[0]（兼容旧格式 RSS，poster 作为 <img> 输出在 <video> 前面）
+        let videoPoster = "";
+        if(finalVideoUrl){
+            const posterReg = /<video[^>]*\sposter="([^"]+)"[^>]*>/i;
+            const posterMatch = desc.match(posterReg);
+            if(posterMatch){
+                videoPoster = cleanMediaUrl(posterMatch[1]);
+            }
+        }
+
         const imgAttrReg = /(?:src|data-src|href)=["']([^"']+\.(jpg|jpeg|png|gif|webp)(?:\?[^"']*)?)["']/gi;
         let imgsRaw = [];
         let imgMatch;
@@ -3279,6 +3295,7 @@ function parseRSS(xml, sourceName, sourceUrl, cat){
                 videos: []
             },
             videoUrl: finalVideoUrl,
+            videoPoster: videoPoster,
             iframe: iframeCode,
             sourceName,
             sourceUrl,
