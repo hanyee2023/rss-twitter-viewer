@@ -90,6 +90,11 @@ body{
 .video-poster-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1d1d1d,#2e2e2e);z-index:2;}
 .video-poster-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .3s ease;}
 .video-poster-img.loaded{opacity:1;}
+.video-poster-fallback{display:none;width:64px;height:64px;color:rgba(255,255,255,.55);}
+.video-poster-fallback svg{width:100%;height:100%;}
+.recycled-ph{background:#f0f0f0;border-radius:10px;}
+.video-poster-overlay.poster-failed .video-poster-fallback{display:block;}
+.video-poster-overlay.poster-failed .video-poster-img{display:none;}
 .video-single-wrap.playing .video-poster-overlay{display:none;}
 .video-single-wrap:fullscreen{
     width:100vw;
@@ -720,7 +725,7 @@ body{
 <header id="mainHeader">
 <div class="title-wrap">
   <h1 id="pageTitle">RSS媒体阅读器</h1>
-  <span class="beta-tag">4.6</span>
+  <span class="beta-tag">4.5</span>
 </div>
 </header>
 
@@ -773,19 +778,19 @@ body{
     </div>
     <div class="page-proxy" id="pageProxy">
         <div class="proxy-section">
-            <div class="proxy-section-title">RSS 代理</div>
+            <div class="proxy-section-title">RSS 代理（提取 / 分析内容）</div>
             <div class="proxy-list" id="proxyRssList"></div>
             <div class="proxy-add">
-                <input id="proxyRssInput" placeholder="输入域名">
+                <input id="proxyRssInput" placeholder="输入域名，如 htumeng.com">
                 <button id="proxyRssAdd">添加</button>
             </div>
         </div>
         <div class="proxy-sep"></div>
         <div class="proxy-section">
-            <div class="proxy-section-title">媒体代理</div>
+            <div class="proxy-section-title">媒体代理（图片 / 视频播放）</div>
             <div class="proxy-list" id="proxyMediaList"></div>
             <div class="proxy-add">
-                <input id="proxyMediaInput" placeholder="输入域名">
+                <input id="proxyMediaInput" placeholder="输入域名，如 htumeng.com">
                 <button id="proxyMediaAdd">添加</button>
             </div>
         </div>
@@ -1764,11 +1769,8 @@ function initVideoObserver(){
         entries.forEach(item=>{
             const video = item.target;
             if(item.isIntersecting){
-                // 优化1：智能预加载 - 进入视口时加载元数据（封面+时长，很小）
-                if(video.preload !== "auto" && !video.dataset.userAttempted){
-                    video.preload = "metadata";
-                }
-                // 优化5：内存优化恢复 - 滑回视口时恢复之前释放的视频
+                // 封面图已在卡片渲染时通过 src 直接加载，无需在此触发；
+                // 仅在滑回视口时恢复此前为释放内存而清空的视频源（如需）
                 if(video.dataset.savedTime && !video.src){
                     restoreVideoFromMem(video);
                 }
@@ -1781,15 +1783,15 @@ function initVideoObserver(){
                 tryReleaseVideoMemory(video);
             }
         })
-    }, {threshold:0.01});
+    }, {threshold:0.01, rootMargin:"300px 0"});
 }
 
 // 优化5：尝试释放视频内存（长视频+播放较多时）
 function tryReleaseVideoMemory(video){
     // 只对 MP4 视频做，HLS 已经 stopLoad 了
     if(!video.classList.contains("media-video-mp4")) return;
-    // 播放超过 30 秒才释放（短视频没必要）
-    if(!video.currentTime || video.currentTime < 30) return;
+    // 播放超过 60 秒才释放（短视频没必要，避免划回黑屏/重载）
+    if(!video.currentTime || video.currentTime < 60) return;
     // 没有 src 就不用释放了
     if(!video.src) return;
 
@@ -2410,6 +2412,7 @@ function showPage(targetDom, titleText) {
     if (lastPageTitle === "RSS媒体阅读器") {
         markReadByScroll();
         homeScrollTop = mainWrap.scrollTop;
+        restoreAllRecycled();   // 先恢复回收卡，确保缓存的是完整内容（不丢媒体/_item）
         homeArticleHtml = articleBox.innerHTML;
         homeIsCached = true;
         homeCachedFilterSourceUrl = filterSourceUrl;
@@ -2789,8 +2792,14 @@ function renderPagedList(reset = false){
     const nextCount = Math.min(renderPageNum * PAGE_SIZE, currentArticles.length);
     const appendList = currentArticles.slice(renderedArticleCount, nextCount);
     if(appendList.length > 0){
+        const oldCount = renderedArticleCount;
         articleBox.insertAdjacentHTML("beforeend", renderCardList(appendList));
         renderedArticleCount = nextCount;
+        // D：为新增卡片挂 _item 引用，供缓冲回收重建使用
+        const allCards = articleBox.querySelectorAll('.tweet-card');
+        for(let i = oldCount; i < allCards.length; i++){
+            allCards[i]._item = appendList[i - oldCount];
+        }
     }
     const remain = currentArticles.length - renderedArticleCount;
     articleBox.insertAdjacentHTML("beforeend", remain > 0
@@ -2799,6 +2808,7 @@ function renderPagedList(reset = false){
     bindAllCardEvent();
     bindVideoPauseObserver();
     initHlsVideo();
+    // initRecycleTrigger();  // 已关闭：回退到稳定版（上午“快”的版本不含回收）；如需“深刷不卡”可取消此行注释
 }
 function bindScrollLoadMore(){
     if(scrollObserver) scrollObserver.disconnect();
@@ -2831,6 +2841,86 @@ function renderCardList(list){
     let html = "";
     list.forEach(item => html += buildCard(item, false));
     return html;
+}
+
+// ===== D：基于状态的缓冲回收（已读/未收藏/未播放/离屏远 优先回收）=====
+let recycleObserver = null;
+let _recycleTriggerBound = false;
+function ensureRecycleObserver(){
+    if(recycleObserver) return;
+    recycleObserver = new IntersectionObserver((entries)=>{
+        entries.forEach(en=>{
+            const card = en.target;
+            if(en.isIntersecting && card.dataset.recycled === "1"){
+                restoreRecycledCard(card);
+            }
+        });
+    }, {rootMargin:"400px 0px"});
+}
+function recycleOffscreenCards(){
+    if(lastPageTitle !== "RSS媒体阅读器") return;
+    if(!articleBox) return;
+    const vh = window.innerHeight || document.documentElement.clientHeight || 800;
+    const cards = articleBox.querySelectorAll('.tweet-card:not([data-recycled="1"])');
+    cards.forEach(card=>{
+        const link = card.dataset.link;
+        if(!link) return;
+        if(!readLinkSet.has(link)) return;                             // 未读不回收
+        if(favList.some(f=>f.link === link)) return;                   // 已收藏不回收
+        if(card.querySelector('.media-video.is-playing, .media-video-mp4.is-playing')) return; // 播放中不回收
+        const rect = card.getBoundingClientRect();
+        if(rect.bottom > -0.1*vh && rect.top < 1.5*vh) return;         // 视口附近不回收
+        doRecycleCard(card);
+    });
+}
+function doRecycleCard(card){
+    const item = card._item;
+    if(!item) return;
+    const h = card.offsetHeight || 0;
+    card.dataset.recycled = "1";
+    card.dataset.recycledH = String(h);
+    try { card.dataset.itemjson = JSON.stringify(item); } catch(e){}
+    // 释放媒体资源（视频/图片从 DOM 移除后浏览器自动回收，这里主动切断视频源）
+    card.querySelectorAll('video').forEach(v=>{ try{ v.removeAttribute('src'); v.load(); }catch(e){} });
+    card.innerHTML = `<div class="recycled-ph" style="height:${h}px"></div>`;
+    ensureRecycleObserver();
+    recycleObserver.observe(card);
+}
+function restoreRecycledCard(card){
+    let item = card._item;
+    if(!item && card.dataset.itemjson){
+        try { item = JSON.parse(card.dataset.itemjson); } catch(e){}
+    }
+    if(!item) return;
+    const fresh = document.createElement("div");
+    fresh.innerHTML = buildCard(item, false);
+    const newCard = fresh.firstElementChild;
+    if(!newCard) return;
+    newCard._item = item;
+    try { newCard.dataset.itemjson = JSON.stringify(item); } catch(e){}
+    if(recycleObserver) recycleObserver.unobserve(card);
+    card.replaceWith(newCard);
+    // 重建后重新绑定事件与视频（函数内部均有防重复/清理逻辑）
+    bindAllCardEvent();
+    initHlsVideo();
+    bindVideoPauseObserver();
+}
+function initRecycleTrigger(){
+    if(_recycleTriggerBound) return;
+    _recycleTriggerBound = true;
+    let t = null;
+    const onScroll = ()=>{
+        if(t) clearTimeout(t);
+        t = setTimeout(recycleOffscreenCards, 1200);
+    };
+    const mw = document.querySelector('.main-wrap');
+    if(mw) mw.addEventListener('scroll', onScroll, {passive:true});
+    window.addEventListener('scroll', onScroll, {passive:true});
+    setInterval(recycleOffscreenCards, 8000);
+}
+function restoreAllRecycled(){
+    if(!articleBox) return;
+    articleBox.querySelectorAll('[data-recycled="1"]').forEach(c=>restoreRecycledCard(c));
 }
 
 function getPureText(str){
@@ -2870,8 +2960,10 @@ function posterOverlayHtml(posterProxy, posterDirect, posterFallbacksArr){
     const fbAttr = (posterFallbacksArr && posterFallbacksArr.length) ? `data-fallbacks='${escapeAttr(JSON.stringify(posterFallbacksArr))}'` : "";
     const src = posterProxy || posterDirect;
     const directAttr = posterDirect ? `data-direct="${escapeAttr(posterDirect)}"` : "";
+    const fbIcon = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`;
     return `<div class="video-poster-overlay">
-        <img class="video-poster-img" src="${escapeAttr(src)}" ${directAttr} ${fbAttr} onload="this.classList.add('loaded')" onerror="handleVideoPosterError(this)">
+        <img class="video-poster-img" src="${escapeAttr(src)}" ${directAttr} ${fbAttr} referrerpolicy="no-referrer" decoding="async" onload="this.classList.add('loaded')" onerror="handleVideoPosterError(this)">
+        <div class="video-poster-fallback">${fbIcon}</div>
     </div>`;
 }
 
@@ -2892,6 +2984,8 @@ function handleVideoPosterError(img){
         img.src = direct;
         return;
     }
+    const ov = img.closest(".video-poster-overlay");
+    if(ov) ov.classList.add("poster-failed");
     img.style.display = "none";
 }
 
