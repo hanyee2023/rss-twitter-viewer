@@ -85,8 +85,11 @@ function simpleHash(str) {
 // ─── URL 解码工具 ──────────────────────────────────────────────
 
 // 从 MP4 URL 候选列表中选择低码率视频
-// 优先 480p，没有 480p 才退到 720p，避免高分辨率 MP4 通过代理加载缓慢
+// 策略：优先选短边最接近 480 的 MP4（平衡画质和加载速度）
+// 如果没有 480p 附近的选择，退而求其次选短边最小的（文件最小）
 // Twitter MP4 URL 中包含分辨率信息，如 /vid/avc1/640x480/xxx.mp4、/vid/avc1/1280x720/xxx.mp4
+// 注意：480x270 的短边是 270（横屏视频），480x854 的短边是 480（竖屏视频）
+// 因此 480p 筛选不能只看短边，需要综合考虑
 function pickBestResolutionMp4(urls) {
   if (!urls || urls.length === 0) return '';
   if (urls.length === 1) return urls[0];
@@ -97,28 +100,25 @@ function pickBestResolutionMp4(urls) {
     if (resMatch) {
       const w = parseInt(resMatch[1]);
       const h = parseInt(resMatch[2]);
-      return { url, shortSide: Math.min(w, h), hasRes: true };
+      // longSide 用于判断画质等级，shortSide 用于判断文件大小
+      return { url, w, h, shortSide: Math.min(w, h), longSide: Math.max(w, h), hasRes: true };
     }
-    return { url, shortSide: 0, hasRes: false };
+    return { url, w: 0, h: 0, shortSide: 0, longSide: 0, hasRes: false };
   });
 
-  // 优先选 480p（短边最接近 480 且不超过 720）
-  // 480p 的常见分辨率：640x480、480x854（竖屏）、480x360
-  const candidates480 = parsed.filter(p => p.hasRes && p.shortSide >= 400 && p.shortSide <= 540);
-  if (candidates480.length > 0) {
-    // 在 480p 范围内选最接近 480 的
-    candidates480.sort((a, b) => Math.abs(a.shortSide - 480) - Math.abs(b.shortSide - 480));
-    return candidates480[0].url;
+  // 策略1：优先选 longSide 在 480-720 范围内的（480p 或 720p 级别）
+  // 480x270 → longSide=480 ✓
+  // 640x480 → longSide=640 ✓
+  // 1280x720 → longSide=1280 ✗ (太大了)
+  // 1284x720 → longSide=1284 ✗
+  const candidatesMid = parsed.filter(p => p.hasRes && p.longSide >= 400 && p.longSide <= 900);
+  if (candidatesMid.length > 0) {
+    // 在中等画质中选 longSide 最小的（最接近 480p）
+    candidatesMid.sort((a, b) => a.longSide - b.longSide);
+    return candidatesMid[0].url;
   }
 
-  // 没有 480p，选 720p 范围内的（短边 600~800）
-  const candidates720 = parsed.filter(p => p.hasRes && p.shortSide >= 600 && p.shortSide <= 800);
-  if (candidates720.length > 0) {
-    candidates720.sort((a, b) => Math.abs(a.shortSide - 720) - Math.abs(b.shortSide - 720));
-    return candidates720[0].url;
-  }
-
-  // 都没有，选分辨率最低的（避免高分辨率大文件）
+  // 策略2：没有中等画质，选 shortSide 最小的（文件最小）
   const withRes = parsed.filter(p => p.hasRes);
   if (withRes.length > 0) {
     withRes.sort((a, b) => a.shortSide - b.shortSide);
@@ -357,7 +357,9 @@ async function parseNitterHtml(html, username, maxItems, nitterBase) {
     const attachmentBlocks = block.split(/(?=<div class="attachment")/i);
 
     for (const attBlock of attachmentBlocks) {
-      if (!attBlock.includes('attachment')) continue;
+      // 精确匹配 <div class="attachment"> 或 <div class="attachment ...">
+      // 避免匹配到 <div class="attachments">（容器），后者不包含单个媒体项
+      if (!/<div class="attachment["\s>]/i.test(attBlock)) continue;
 
       let videoUrl = '';
       let posterUrl = '';
@@ -370,8 +372,9 @@ async function parseNitterHtml(html, username, maxItems, nitterBase) {
 
       // 如果 video 标签没有 poster，查找 attachment 内的 <img> 标签
       // （模式3：播放被禁用时，Nitter 用 <img src="thumb"> 显示缩略图）
+      // 排除 avatar 图片（class 包含 "avatar"），避免把头像误当作视频缩略图
       if (!posterUrl) {
-        const attImgMatch = attBlock.match(/<img[^>]*\ssrc="([^"]+)"[^>]*>/i);
+        const attImgMatch = attBlock.match(/<img(?![^>]*class="[^"]*avatar[^"]*")[^>]*\ssrc="([^"]+)"[^>]*>/i);
         if (attImgMatch) {
           posterUrl = decodeNitterProxyUrl(attImgMatch[1]);
         }
@@ -458,31 +461,28 @@ async function parseNitterHtml(html, username, maxItems, nitterBase) {
     let desc = '<p>' + escapeHtml(text) + '</p>';
 
     // 添加图片（使用原始 pbs.twimg.com URL，通过 media-proxy 代理播放）
+    // 排除视频 poster（已在 <video poster="..."> 中输出，避免前端 imgs[0] 取到 poster 而非普通图片）
+    const usedPosterUrls = new Set();
+
+    // 先收集视频 poster URL，后面输出图片时跳过
+    for (let i = 0; i < videoUrls.length; i++) {
+      if (videoPosters[i]) usedPosterUrls.add(videoPosters[i]);
+    }
+
     for (const imgUrl of imageUrls) {
+      if (usedPosterUrls.has(imgUrl)) continue;
       desc += '<img src="' + escapeHtml(imgUrl) + '" />';
     }
 
     // 添加视频
     // MP4 视频：直接输出原始 video.twimg.com URL，由阅读器的 media-proxy 代理
     // m3u8 视频：输出原始 m3u8 URL，由 media-proxy 做变体过滤
-    // 添加视频
-    // MP4 视频：直接输出原始 video.twimg.com URL，由阅读器的 media-proxy 代理
-    // m3u8 视频：输出原始 m3u8 URL，由 media-proxy 做变体过滤
-    // poster 作为 <img> 输出在 <video> 前面，前端 parseRSS 会把它提取到 imgs 中作为视频封面
-    const usedPosterUrls = new Set();
+    // poster 放在 <video poster="..."> 属性中，前端 parseRSS 会优先从该属性提取视频封面
     for (let i = 0; i < videoUrls.length; i++) {
       const videoUrl = videoUrls[i];
-      let posterUrl = videoPosters[i] || (imageUrls.length > 0 ? imageUrls[0] : '');
-
-      // 避免重复输出已经在图片列表中显示过的 poster
-      if (posterUrl && usedPosterUrls.has(posterUrl)) {
-        posterUrl = '';
-      }
-      if (posterUrl) {
-        usedPosterUrls.add(posterUrl);
-        desc += '<img src="' + escapeHtml(posterUrl) + '" />';
-      }
-      desc += '<video src="' + escapeHtml(videoUrl) + '" controls></video>';
+      const posterUrl = videoPosters[i] || '';
+      const posterAttr = posterUrl ? ` poster="${escapeHtml(posterUrl)}"` : '';
+      desc += `<video src="${escapeHtml(videoUrl)}"${posterAttr} controls></video>`;
     }
 
     items.push(
