@@ -90,8 +90,6 @@ body{
 .video-poster-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1d1d1d,#2e2e2e);z-index:2;}
 .video-poster-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .3s ease;}
 .video-poster-img.loaded{opacity:1;}
-.video-play-badge{position:relative;z-index:3;width:56px;height:56px;border-radius:50%;background:rgba(0,0,0,.45);color:#fff;display:flex;align-items:center;justify-content:center;}
-.video-play-badge svg{width:24px;height:24px;margin-left:3px;}
 .video-single-wrap.playing .video-poster-overlay{display:none;}
 .video-single-wrap:fullscreen{
     width:100vw;
@@ -791,9 +789,13 @@ body{
                 <button id="proxyMediaAdd">添加</button>
             </div>
         </div>
-        <div class="proxy-token">
-            <label>管理令牌（与 Cloudflare 环境变量 PROXY_ADMIN_TOKEN 一致）</label>
-            <input id="proxyTokenInput" type="password" placeholder="未设置则无法保存">
+        <div class="proxy-sep"></div>
+        <div class="proxy-section">
+            <div class="proxy-section-title">管理令牌</div>
+            <div class="proxy-token">
+                <label>与 Cloudflare 环境变量 PROXY_ADMIN_TOKEN 一致</label>
+                <input id="proxyTokenInput" type="password" placeholder="未设置则无法保存">
+            </div>
         </div>
         <div class="proxy-actions">
             <button id="proxySave">保存并同步</button>
@@ -847,7 +849,7 @@ body{
 <style>
 .page-proxy{padding:14px 12px 40px;}
 .proxy-section{margin-bottom:6px;}
-.proxy-section-title{font-weight:600;margin-bottom:10px;font-size:15px;color:#222;}
+.proxy-section-title{font-weight:700;margin-bottom:10px;font-size:17px;color:#111;}
 .proxy-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;min-height:28px;}
 .proxy-chip{display:inline-flex;align-items:center;gap:4px;background:#eef3ff;color:#234;border:1px solid #cdddff;border-radius:999px;padding:4px 10px;font-size:13px;}
 .proxy-chip.builtin{background:#f3f3f3;color:#888;border-color:#ddd;}
@@ -2518,31 +2520,24 @@ function makeProxyItems(hosts, type) {
 }
 function renderProxyList(container, items, type) {
     container.innerHTML = "";
-    items.forEach(item => {
+    const list = items.filter(i => !i.builtin);
+    list.forEach(item => {
         const chip = document.createElement("span");
-        chip.className = "proxy-chip" + (item.builtin ? " builtin" : "");
+        chip.className = "proxy-chip";
         const label = document.createElement("span");
         label.textContent = item.host;
         chip.appendChild(label);
-        if (!item.builtin) {
-            const x = document.createElement("span");
-            x.className = "proxy-chip-x";
-            x.textContent = "×";
-            x.onclick = () => {
-                proxyWorking[type] = proxyWorking[type].filter(i => i.host !== item.host);
-                renderProxyList(container, proxyWorking[type], type);
-            };
-            chip.appendChild(x);
-        } else {
-            const lock = document.createElement("span");
-            lock.className = "proxy-chip-lock";
-            lock.textContent = "🔒";
-            lock.title = "内置默认域名，不可删除";
-            chip.appendChild(lock);
-        }
+        const x = document.createElement("span");
+        x.className = "proxy-chip-x";
+        x.textContent = "×";
+        x.onclick = () => {
+            proxyWorking[type] = proxyWorking[type].filter(i => i.host !== item.host);
+            renderProxyList(container, proxyWorking[type], type);
+        };
+        chip.appendChild(x);
         container.appendChild(chip);
     });
-    if (items.length === 0) {
+    if (list.length === 0) {
         const empty = document.createElement("span");
         empty.className = "proxy-empty";
         empty.textContent = "（暂无）";
@@ -2877,7 +2872,6 @@ function posterOverlayHtml(posterProxy, posterDirect, posterFallbacksArr){
     const directAttr = posterDirect ? `data-direct="${escapeAttr(posterDirect)}"` : "";
     return `<div class="video-poster-overlay">
         <img class="video-poster-img" src="${escapeAttr(src)}" ${directAttr} ${fbAttr} onload="this.classList.add('loaded')" onerror="handleVideoPosterError(this)">
-        <div class="video-play-badge">${playIconSvg()}</div>
     </div>`;
 }
 
