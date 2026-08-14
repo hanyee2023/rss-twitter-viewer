@@ -23,7 +23,7 @@ const BUILTIN_MEDIA_HOSTS = [
   "venexa.site",
   "aguea.com",
   "htumeng.com",
-  "6642p.com",
+  "642p.com",
   "tutu1.space"
 ];
 
