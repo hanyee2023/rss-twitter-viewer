@@ -1,4 +1,9 @@
-const ALLOW_PROXY_HOSTS = [
+// 媒体代理：图片 / 视频 / m3u8 等资源的跨域转发。
+// 仅对“生效媒体名单”内的域名提供服务（其余返回 403），避免被当开放代理滥用。
+// 生效名单 = 内置默认(BUILTIN_MEDIA_HOSTS) ∪ KV 用户名单(proxy_media_user)。
+// KV 读取失败时回退到内置默认，保证核心域名永远可用。
+
+const BUILTIN_MEDIA_HOSTS = [
   "twitter.com",
   "x.com",
   "t.co",
@@ -7,7 +12,7 @@ const ALLOW_PROXY_HOSTS = [
   "pbs.twimg.com",
   "abs.twimg.com",
   "xcancel.com",
-  "nitter.net",
+  "niter.net",
   "16k.club",
   "xxxfollow.com",
   "media.redgifs.com",
@@ -17,8 +22,11 @@ const ALLOW_PROXY_HOSTS = [
   "3go.fun",
   "rsshub.app",
   "venexa.site",
-  "aguea.com"
+  "aguea.com",
+  "htumeng.com"
 ];
+
+const KV_MEDIA_KEY = "proxy_media_user";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
@@ -26,13 +34,32 @@ function normalizeHost(host) {
   return String(host || "").toLowerCase().replace(/\.+$/, "");
 }
 
-function hostAllowed(rawUrl) {
+// 读出 KV 用户名单，与内置默认合并成一个 Set（用于匹配）
+async function getMediaAllowSet(env) {
+  const set = new Set(BUILTIN_MEDIA_HOSTS.map(normalizeHost));
+  const kv = env && env.RSS_CACHE;
+  if (kv) {
+    try {
+      const v = await kv.get(KV_MEDIA_KEY);
+      if (v) {
+        const arr = JSON.parse(v);
+        if (Array.isArray(arr)) arr.forEach(h => set.add(normalizeHost(h)));
+      }
+    } catch (e) {
+      // 读失败就只用内置默认，不阻断核心功能
+    }
+  }
+  return set;
+}
+
+function hostInSet(rawUrl, allowSet) {
   try {
     const host = normalizeHost(new URL(rawUrl).hostname);
-    return ALLOW_PROXY_HOSTS.some(rule => {
-      const key = normalizeHost(rule);
-      return host === key || host.endsWith("." + key);
-    });
+    if (allowSet.has(host)) return true;
+    for (const key of allowSet) {
+      if (host.endsWith("." + key)) return true;
+    }
+    return false;
   } catch (e) {
     return false;
   }
@@ -72,12 +99,12 @@ function resolveM3u8Url(line, baseUrl) {
   }
 }
 
-function rewriteUriAttributes(line, baseUrl, requestUrl) {
+function rewriteUriAttributes(line, baseUrl, requestUrl, allowSet) {
   const pp = passthroughParams(requestUrl);
   return line.replace(/URI="([^"]+)"/gi, (match, uri) => {
     try {
       const resolved = new URL(uri, baseUrl).toString();
-      if (!hostAllowed(resolved)) return match;
+      if (!hostInSet(resolved, allowSet)) return match;
       return `URI="${buildProxyUrl(requestUrl, resolved, pp)}"`;
     } catch (e) {
       return match;
@@ -85,7 +112,7 @@ function rewriteUriAttributes(line, baseUrl, requestUrl) {
   });
 }
 
-function rewriteM3u8Text(text, baseUrl, requestUrl) {
+function rewriteM3u8Text(text, baseUrl, requestUrl, allowSet) {
   const pp = passthroughParams(requestUrl);
   return String(text || "")
     .split(/\r?\n/)
@@ -93,12 +120,12 @@ function rewriteM3u8Text(text, baseUrl, requestUrl) {
       const trimmed = line.trim();
       if (!trimmed) return line;
       if (trimmed.startsWith("#") && /URI="/i.test(trimmed)) {
-        return rewriteUriAttributes(line, baseUrl, requestUrl);
+        return rewriteUriAttributes(line, baseUrl, requestUrl, allowSet);
       }
       if (trimmed.startsWith("#")) return line;
 
       const resolved = resolveM3u8Url(trimmed, baseUrl);
-      if (!isHttpUrl(resolved) || !hostAllowed(resolved)) return line;
+      if (!isHttpUrl(resolved) || !hostInSet(resolved, allowSet)) return line;
       return buildProxyUrl(requestUrl, resolved, pp);
     })
     .join("\n");
@@ -121,12 +148,12 @@ function groupIdOf(entry) {
   return m ? m[1] : null;
 }
 
-function filterMasterPlaylist(text, baseUrl, requestUrl, targetBitrate = 832000) {
+function filterMasterPlaylist(text, baseUrl, requestUrl, targetBitrate = 832000, allowSet) {
   const lines = String(text || "").split(/\r?\n/);
 
   const hasStreamInf = lines.some(l => l.trim().startsWith("#EXT-X-STREAM-INF"));
   if (!hasStreamInf) {
-    return rewriteM3u8Text(text, baseUrl, requestUrl);
+    return rewriteM3u8Text(text, baseUrl, requestUrl, allowSet);
   }
 
   const headerLines = [];
@@ -160,7 +187,7 @@ function filterMasterPlaylist(text, baseUrl, requestUrl, targetBitrate = 832000)
   }
 
   if (variants.length === 0) {
-    return rewriteM3u8Text(text, baseUrl, requestUrl);
+    return rewriteM3u8Text(text, baseUrl, requestUrl, allowSet);
   }
 
   // 过滤掉纯音频变体（CODECS 只含 mp4a，无视频编码）
@@ -207,18 +234,18 @@ function filterMasterPlaylist(text, baseUrl, requestUrl, targetBitrate = 832000)
     const gid = groupIdOf(entry);
 
     if (isAudio && audioGroups.has(gid)) {
-      result.push(rewriteUriAttributes(entry, baseUrl, requestUrl));
+      result.push(rewriteUriAttributes(entry, baseUrl, requestUrl, allowSet));
     } else if (isSubs && subsGroups.has(gid)) {
-      result.push(rewriteUriAttributes(entry, baseUrl, requestUrl));
+      result.push(rewriteUriAttributes(entry, baseUrl, requestUrl, allowSet));
     } else if (!isAudio && !isSubs) {
-      result.push(rewriteUriAttributes(entry, baseUrl, requestUrl));
+      result.push(rewriteUriAttributes(entry, baseUrl, requestUrl, allowSet));
     }
   }
 
   for (const v of selected) {
     result.push(v.streamInf);
     const resolvedUrl = resolveM3u8Url(v.url.trim(), baseUrl);
-    const proxiedUrl = (isHttpUrl(resolvedUrl) && hostAllowed(resolvedUrl))
+    const proxiedUrl = (isHttpUrl(resolvedUrl) && hostInSet(resolvedUrl, allowSet))
       ? buildProxyUrl(requestUrl, resolvedUrl, passthroughParams(requestUrl))
       : v.url;
     result.push(proxiedUrl);
@@ -243,7 +270,7 @@ function corsHeaders(extra = {}) {
   };
 }
 
-export async function onRequest({ request }) {
+export async function onRequest({ request, env }) {
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders() });
   }
@@ -255,7 +282,10 @@ export async function onRequest({ request }) {
   if (!targetUrl || !isHttpUrl(targetUrl)) {
     return new Response("缺少或非法url参数", { status: 400, headers: corsHeaders() });
   }
-  if (!hostAllowed(targetUrl)) {
+
+  // 合并内置默认 + KV 用户名单，作为本次请求的生效名单
+  const allowSet = await getMediaAllowSet(env);
+  if (!hostInSet(targetUrl, allowSet)) {
     return new Response("该媒体域名不在代理名单中", { status: 403, headers: corsHeaders() });
   }
 
@@ -281,11 +311,11 @@ export async function onRequest({ request }) {
       let processed;
       if (q === "high") {
         // 分享/高画质：全量改写，保留所有变体，HLS.js 自选最高
-        processed = rewriteM3u8Text(text, baseUrl, request.url);
+        processed = rewriteM3u8Text(text, baseUrl, request.url, allowSet);
       } else {
         // 普通/收藏：保留“目标档 + 更低档”阶梯，低档起播、自动升档
         const target = q === "720" ? 832000 : 500000;
-        processed = filterMasterPlaylist(text, baseUrl, request.url, target);
+        processed = filterMasterPlaylist(text, baseUrl, request.url, target, allowSet);
       }
 
       return new Response(processed, {
