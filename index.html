@@ -87,6 +87,12 @@ body{
     background:#000;
     height: auto;
 }
+.video-poster-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1d1d1d,#2e2e2e);z-index:2;}
+.video-poster-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .3s ease;}
+.video-poster-img.loaded{opacity:1;}
+.video-play-badge{position:relative;z-index:3;width:56px;height:56px;border-radius:50%;background:rgba(0,0,0,.45);color:#fff;display:flex;align-items:center;justify-content:center;}
+.video-play-badge svg{width:24px;height:24px;margin-left:3px;}
+.video-single-wrap.playing .video-poster-overlay{display:none;}
 .video-single-wrap:fullscreen{
     width:100vw;
     height:100vh;
@@ -160,11 +166,19 @@ body{
     overflow-y: auto;
     overflow-x: hidden;
 }
-.page-home,.page-manage,.page-add,.page-fav,.page-search{display:none;}
+.main-wrap::-webkit-scrollbar{width:6px;height:6px;}
+.main-wrap::-webkit-scrollbar-track{background:transparent;}
+.main-wrap::-webkit-scrollbar-thumb{background:#d6d6d6;border-radius:3px;}
+.main-wrap::-webkit-scrollbar-thumb:hover{background:#bcbcbc;}
+*{scrollbar-width:thin;scrollbar-color:#d6d6d6 transparent;}
+.page-home,.page-manage,.page-add,.page-fav,.page-search,.page-proxy{display:none;}
 #pageHome,#pageManage,#pageFav,#pageSearch{
     width: 100%;
 }
 #pageAdd{
+    width: 100%;
+}
+#pageProxy{
     width: 100%;
 }
 
@@ -759,6 +773,32 @@ body{
             <div id="searchResultBox"></div>
         </div>
     </div>
+    <div class="page-proxy" id="pageProxy">
+        <div class="proxy-section">
+            <div class="proxy-section-title">RSS 代理（提取 / 分析内容）</div>
+            <div class="proxy-list" id="proxyRssList"></div>
+            <div class="proxy-add">
+                <input id="proxyRssInput" placeholder="输入域名，如 htumeng.com">
+                <button id="proxyRssAdd">添加</button>
+            </div>
+        </div>
+        <div class="proxy-sep"></div>
+        <div class="proxy-section">
+            <div class="proxy-section-title">媒体代理（图片 / 视频播放）</div>
+            <div class="proxy-list" id="proxyMediaList"></div>
+            <div class="proxy-add">
+                <input id="proxyMediaInput" placeholder="输入域名，如 htumeng.com">
+                <button id="proxyMediaAdd">添加</button>
+            </div>
+        </div>
+        <div class="proxy-token">
+            <label>管理令牌（与 Cloudflare 环境变量 PROXY_ADMIN_TOKEN 一致）</label>
+            <input id="proxyTokenInput" type="password" placeholder="未设置则无法保存">
+        </div>
+        <div class="proxy-actions">
+            <button id="proxySave">保存并同步</button>
+        </div>
+    </div>
 </div>
 
 <div class="bottom-nav-bar">
@@ -790,12 +830,42 @@ body{
             <line x1="3" x2="3.01" y1="18" y2="18"></line>
         </svg>
     </button>
+    <button id="btnProxy" title="代理域名管理">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#111111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="2" y1="12" x2="22" y2="12"></line>
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+        </svg>
+    </button>
     <button id="btnFav">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#111111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
         </svg>
     </button>
 </div>
+
+<style>
+.page-proxy{padding:14px 12px 40px;}
+.proxy-section{margin-bottom:6px;}
+.proxy-section-title{font-weight:600;margin-bottom:10px;font-size:15px;color:#222;}
+.proxy-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;min-height:28px;}
+.proxy-chip{display:inline-flex;align-items:center;gap:4px;background:#eef3ff;color:#234;border:1px solid #cdddff;border-radius:999px;padding:4px 10px;font-size:13px;}
+.proxy-chip.builtin{background:#f3f3f3;color:#888;border-color:#ddd;}
+.proxy-chip-x{cursor:pointer;font-weight:700;color:#c33;padding:0 2px;font-size:15px;}
+.proxy-chip-lock{font-size:11px;}
+.proxy-empty{color:#bbb;font-size:13px;}
+.proxy-sep{height:0;border-top:2px solid #4CAF50;margin:20px 0;}
+.proxy-add{display:flex;gap:8px;margin-bottom:4px;}
+.proxy-add input{flex:1;margin-bottom:0;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:15px;box-sizing:border-box;}
+.proxy-add button{padding:10px 16px;border:none;border-radius:8px;background:#1d9bf0;color:#fff;font-size:15px;cursor:pointer;min-width:72px;}
+.proxy-add button:hover{background:#0d8bf0;}
+.proxy-token{margin:18px 0 12px;}
+.proxy-token label{display:block;font-size:13px;margin-bottom:6px;color:#555;}
+.proxy-token input{width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:15px;box-sizing:border-box;}
+.proxy-actions{margin-top:6px;}
+.proxy-actions button{width:100%;padding:12px;border:none;border-radius:8px;background:#1d9bf0;color:#fff;font-size:16px;cursor:pointer;}
+.proxy-actions button:hover{background:#0d8bf0;}
+</style>
 
 <div class="modal-mask" id="editModal">
     <div class="modal-box">
@@ -861,8 +931,9 @@ const MEDIA_PROXY_ENDPOINTS = [
     "https://rss-twitter-viewer.pages.dev/media-proxy"
 ];
 
-// 这些域名的 RSS 或媒体资源默认走代理。需要新增国外或特殊域名时，加到这里即可。
-const FORCE_PROXY_HOSTS = [
+// 内置默认代理名单（代码写死，UI 中只读不可删）。RSS 与媒体分开管理。
+// htumeng.com 等需要代理补 CORS 头的域名已内置，上传即生效。
+const BUILTIN_RSS_HOSTS = [
     "twitter.com",
     "x.com",
     "t.co",
@@ -871,18 +942,79 @@ const FORCE_PROXY_HOSTS = [
     "pbs.twimg.com",
     "abs.twimg.com",
     "xcancel.com",
-    "nitter.net",
+    "niter.net",
     "16k.club",
     "xxxfollow.com",
-    "media.redgifs.com", 
+    "media.redgifs.com",
     "redd.it",
     "770118.xyz",
     "phe69.com",
     "3go.fun",
     "rsshub.app",
     "venexa.site",
-    "aguea.com"
+    "aguea.com",
+    "htumeng.com"
 ];
+const BUILTIN_MEDIA_HOSTS = [
+    "twitter.com",
+    "x.com",
+    "t.co",
+    "twimg.com",
+    "video.twimg.com",
+    "pbs.twimg.com",
+    "abs.twimg.com",
+    "xcancel.com",
+    "niter.net",
+    "16k.club",
+    "xxxfollow.com",
+    "media.redgifs.com",
+    "redd.it",
+    "770118.xyz",
+    "phe69.com",
+    "3go.fun",
+    "rsshub.app",
+    "venexa.site",
+    "aguea.com",
+    "htumeng.com"
+];
+
+// 运行时生效名单 = 内置默认 ∪ 从后端 /proxy-config 拉取的用户名单。
+// 这样前端既能决定“是否走代理”，也能在弹窗里增删后由后端自动同步。
+let userRssHosts = [];
+let userMediaHosts = [];
+let RSS_PROXY_HOSTS = [...BUILTIN_RSS_HOSTS];
+let MEDIA_PROXY_HOSTS = [...BUILTIN_MEDIA_HOSTS];
+
+function normalizeProxyHost(raw) {
+    let h = String(raw || "").trim().toLowerCase().replace(/\.+$/, "");
+    h = h.replace(/^www\./, "");
+    return h;
+}
+function dedupeHosts(arr) {
+    return [...new Set(arr.map(normalizeProxyHost).filter(Boolean))];
+}
+function applyProxyConfig(cfg) {
+    userRssHosts = dedupeHosts((cfg.rss || []).filter(x => !x.builtin).map(x => x.host));
+    userMediaHosts = dedupeHosts((cfg.media || []).filter(x => !x.builtin).map(x => x.host));
+    RSS_PROXY_HOSTS = dedupeHosts([...BUILTIN_RSS_HOSTS, ...userRssHosts]);
+    MEDIA_PROXY_HOSTS = dedupeHosts([...BUILTIN_MEDIA_HOSTS, ...userMediaHosts]);
+}
+// 启动时向后端拉取用户自定义名单；后端不可达则回退本地缓存，避免 CORS 直连失败。
+async function loadProxyConfig() {
+    try {
+        const res = await fetch("/proxy-config", { headers: { "Accept": "application/json" } });
+        if (res.ok) {
+            const cfg = await res.json();
+            applyProxyConfig(cfg);
+            try { localStorage.setItem("proxyUserConfig", JSON.stringify({ rss: userRssHosts, media: userMediaHosts })); } catch (e) {}
+            return;
+        }
+    } catch (e) {}
+    try {
+        const cached = JSON.parse(localStorage.getItem("proxyUserConfig") || "null");
+        if (cached) applyProxyConfig({ rss: cached.rss.map(h => ({ host: h })), media: cached.media.map(h => ({ host: h })) });
+    } catch (e) {}
+}
 
 function normalizeUrl(rawUrl) {
     return String(rawUrl || "").trim();
@@ -964,7 +1096,7 @@ function getEmbeddedHttpUrls(rawUrl) {
     return [...new Set(list)];
 }
 
-function hostMatched(rawUrl, hostList = FORCE_PROXY_HOSTS) {
+function hostMatched(rawUrl, hostList = MEDIA_PROXY_HOSTS) {
     const url = normalizeUrl(rawUrl);
     const host = getUrlHost(url);
     if(hostList.some(rule => hostMatchesRule(host, rule))) return true;
@@ -1002,7 +1134,7 @@ function getRSSProxyCandidates(rssUrl) {
 function getMediaProxyCandidates(rawUrl, isFav = false) {
     const url = cleanMediaUrl(rawUrl);
     if (!isHttpUrl(url)) return [];
-    if (!hostMatched(url)) return [];
+    if (!hostMatched(url, MEDIA_PROXY_HOSTS)) return [];
     const params = { raw: "1", q: isFav ? "720" : "480" };
     return MEDIA_PROXY_ENDPOINTS.map(endpoint => buildProxyUrl(endpoint, url, params));
 }
@@ -1143,7 +1275,7 @@ async function fetchRSSFeed(rssUrl) {
     const url = normalizeUrl(rssUrl);
     if (!isHttpUrl(url)) throw new Error("RSS 链接格式不正确");
 
-    const candidates = hostMatched(url)
+    const candidates = hostMatched(url, RSS_PROXY_HOSTS)
         ? getRSSProxyCandidates(url)
         : [url];
 
@@ -1224,9 +1356,11 @@ const btnManage = document.getElementById("btnManage");
 const btnAdd = document.getElementById("btnAdd");
 const btnFav = document.getElementById("btnFav");
 const btnSearch = document.getElementById("btnSearch");
+const btnProxy = document.getElementById("btnProxy");
 
 const pageTitle = document.getElementById("pageTitle");
-let allBtns = [btnHome, btnManage, btnAdd, btnFav, btnSearch];
+const pageProxy = document.getElementById("pageProxy");
+let allBtns = [btnHome, btnManage, btnAdd, btnFav, btnSearch, btnProxy];
 
 const editModal = document.getElementById("editModal");
 const imgPreviewMask = document.getElementById("imgPreviewMask");
@@ -2199,6 +2333,7 @@ function initHlsVideo(){
     document.querySelectorAll(".media-video[data-m3u8], .media-video-mp4").forEach(video=>{
         if (video.dataset.playerBind) return;
         video.dataset.playerBind = "1";
+        try {
         const wrap = video.closest(".video-single-wrap") || video;
         if(!wrap.dataset.mediaClickBind){
             wrap.dataset.mediaClickBind = "1";
@@ -2229,6 +2364,12 @@ function initHlsVideo(){
         bindSlowNetworkDetect(video);
         // 优化：封面图加载失败回退（修复视频预览图不显示）
         bindPosterFallback(video);
+        // 播放后隐藏封面占位层，露出视频画面
+        video.addEventListener("play", () => {
+            const w = video.closest(".video-single-wrap");
+            if (w) w.classList.add("playing");
+        });
+        } catch (e) { console.warn("video bind error", e); }
     });
 }
 
@@ -2277,6 +2418,7 @@ function showPage(targetDom, titleText) {
     pageAdd.style.display = "none";
     pageFav.style.display = "none";
     pageSearch.style.display = "none";
+    pageProxy.style.display = "none";
 
     feedPanel.innerHTML = "";
     favPanel.innerHTML = "";
@@ -2301,6 +2443,7 @@ function showPage(targetDom, titleText) {
     if (titleText === "添加订阅") btnAdd.classList.add("active");
     if (titleText === "我的收藏") btnFav.classList.add("active");
     if (titleText === "内容搜索") btnSearch.classList.add("active");
+    if (titleText === "代理域名") btnProxy.classList.add("active");
 
     if (willRestoreHome) {
         const restoreHomeScroll = ()=>{
@@ -2328,7 +2471,10 @@ function showPage(targetDom, titleText) {
     } else if (titleText === "内容搜索") {
         searchInput.value = "";
         searchResultBox.innerHTML = "";
+    } else if (titleText === "代理域名") {
+        renderProxyPage();
     }
+
 
     lastPageTitle = titleText;
 }
@@ -2352,6 +2498,115 @@ btnHome.onclick = async () => {
 btnManage.onclick = () => showPage(pageManage, "管理订阅");
 btnAdd.onclick = () => showPage(pageAdd, "添加订阅");
 btnFav.onclick = () => showPage(pageFav, "我的收藏");
+
+// ─── 代理域名管理弹窗 ──────────────────────────────
+const proxyRssList = document.getElementById("proxyRssList");
+const proxyMediaList = document.getElementById("proxyMediaList");
+const proxyRssInput = document.getElementById("proxyRssInput");
+const proxyMediaInput = document.getElementById("proxyMediaInput");
+const proxyTokenInput = document.getElementById("proxyTokenInput");
+
+let proxyWorking = { rss: [], media: [] };
+let proxySynced = { rss: [], media: [] };
+
+function isBuiltinProxyHost(host, type) {
+    const list = type === "media" ? BUILTIN_MEDIA_HOSTS : BUILTIN_RSS_HOSTS;
+    return list.includes(normalizeProxyHost(host));
+}
+function makeProxyItems(hosts, type) {
+    return dedupeHosts(hosts).map(h => ({ host: h, builtin: isBuiltinProxyHost(h, type) }));
+}
+function renderProxyList(container, items, type) {
+    container.innerHTML = "";
+    items.forEach(item => {
+        const chip = document.createElement("span");
+        chip.className = "proxy-chip" + (item.builtin ? " builtin" : "");
+        const label = document.createElement("span");
+        label.textContent = item.host;
+        chip.appendChild(label);
+        if (!item.builtin) {
+            const x = document.createElement("span");
+            x.className = "proxy-chip-x";
+            x.textContent = "×";
+            x.onclick = () => {
+                proxyWorking[type] = proxyWorking[type].filter(i => i.host !== item.host);
+                renderProxyList(container, proxyWorking[type], type);
+            };
+            chip.appendChild(x);
+        } else {
+            const lock = document.createElement("span");
+            lock.className = "proxy-chip-lock";
+            lock.textContent = "🔒";
+            lock.title = "内置默认域名，不可删除";
+            chip.appendChild(lock);
+        }
+        container.appendChild(chip);
+    });
+    if (items.length === 0) {
+        const empty = document.createElement("span");
+        empty.className = "proxy-empty";
+        empty.textContent = "（暂无）";
+        container.appendChild(empty);
+    }
+}
+async function renderProxyPage() {
+    try { await loadProxyConfig(); } catch (e) {}
+    proxySynced = { rss: makeProxyItems(RSS_PROXY_HOSTS, "rss"), media: makeProxyItems(MEDIA_PROXY_HOSTS, "media") };
+    proxyWorking = { rss: [...proxySynced.rss], media: [...proxySynced.media] };
+    renderProxyList(proxyRssList, proxyWorking.rss, "rss");
+    renderProxyList(proxyMediaList, proxyWorking.media, "media");
+    try { proxyTokenInput.value = localStorage.getItem("proxyAdminToken") || ""; } catch (e) {}
+}
+function addProxyHost(type) {
+    const input = type === "media" ? proxyMediaInput : proxyRssInput;
+    const host = normalizeProxyHost(input.value);
+    if (!host) { showToast("请输入有效域名"); return; }
+    if (proxyWorking[type].some(i => i.host === host)) { showToast("已存在"); input.value = ""; return; }
+    proxyWorking[type].push({ host, builtin: isBuiltinProxyHost(host, type) });
+    renderProxyList(type === "media" ? proxyMediaList : proxyRssList, proxyWorking[type], type);
+    input.value = "";
+}
+async function postProxyChange(type, action, host, token) {
+    const res = await fetch("/proxy-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Proxy-Token": token },
+        body: JSON.stringify({ type, action, host })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+    return data;
+}
+async function saveProxyConfig() {
+    const token = (proxyTokenInput.value || "").trim();
+    if (!token) { showToast("请先填写管理令牌（与 Cloudflare 环境变量 PROXY_ADMIN_TOKEN 一致）"); return; }
+    try { localStorage.setItem("proxyAdminToken", token); } catch (e) {}
+    try {
+        for (const type of ["rss", "media"]) {
+            const synced = proxySynced[type].map(i => i.host);
+            const working = proxyWorking[type].map(i => i.host);
+            const added = working.filter(h => !synced.includes(h));
+            const removed = synced.filter(h => !working.includes(h) && !isBuiltinProxyHost(h, type));
+            for (const h of added) await postProxyChange(type, "add", h, token);
+            for (const h of removed) await postProxyChange(type, "remove", h, token);
+        }
+        const res = await fetch("/proxy-config", { headers: { "Accept": "application/json" } });
+        if (res.ok) {
+            applyProxyConfig(await res.json());
+            try { localStorage.setItem("proxyUserConfig", JSON.stringify({ rss: userRssHosts, media: userMediaHosts })); } catch (e) {}
+        }
+        showToast("已保存并同步到后端");
+    } catch (e) {
+        showToast("同步失败：" + (e.message || "网络错误"));
+    }
+}
+btnProxy.onclick = () => showPage(pageProxy, "代理域名");
+document.getElementById("proxySave").onclick = saveProxyConfig;
+document.getElementById("proxyRssAdd").onclick = () => addProxyHost("rss");
+document.getElementById("proxyMediaAdd").onclick = () => addProxyHost("media");
+proxyRssInput.addEventListener("keydown", e => { if (e.key === "Enter") addProxyHost("rss"); });
+proxyMediaInput.addEventListener("keydown", e => { if (e.key === "Enter") addProxyHost("media"); });
+
+
 btnSearch.onclick = () => showPage(pageSearch, "内容搜索");
 
 async function refreshAllRSSWithLock(){
@@ -2525,6 +2780,7 @@ window.mergeNewData = async function(){
     renderPageNum = 1;
     renderedArticleCount = 0;
     renderPagedList(true);
+    bindScrollLoadMore();
 }
 
 function renderPagedList(reset = false){
@@ -2554,21 +2810,25 @@ function bindScrollLoadMore(){
     const loadDom = document.getElementById("loadMoreDom");
     if(!loadDom) return;
     scrollObserver = new IntersectionObserver(async (entries)=>{
-        const entry = entries[0];
-        if(entry.isIntersecting && !loadLock){
+        const entry = entries[entries.length - 1];
+        if(entry && entry.isIntersecting && !loadLock){
             loadLock = true;
-            const prevCount = renderedArticleCount;
-            renderPageNum += 1;
-            renderPagedList();
-            // 如果没有新内容，不再重复绑定
-            if(renderedArticleCount === prevCount){
+            try{
+                const prevCount = renderedArticleCount;
+                renderPageNum += 1;
+                renderPagedList();
+                if(renderedArticleCount === prevCount){
+                    return;
+                }
+                const nd = document.getElementById("loadMoreDom");
+                if(nd) scrollObserver.observe(nd);
+            }catch(e){
+                console.warn("滚动加载更多失败：", e);
+            }finally{
                 loadLock = false;
-                return;
             }
-            setTimeout(()=>bindScrollLoadMore(), 30);
-            loadLock = false;
         }
-    }, {rootMargin: "150px 0px"});
+    }, {rootMargin: "600px 0px"});
     scrollObserver.observe(loadDom);
 }
 
@@ -2610,6 +2870,37 @@ function formatCardDate(dateStr){
     return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
 }
 
+function posterOverlayHtml(posterProxy, posterDirect, posterFallbacksArr){
+    if(!posterProxy && !posterDirect) return "";
+    const fbAttr = (posterFallbacksArr && posterFallbacksArr.length) ? `data-fallbacks='${escapeAttr(JSON.stringify(posterFallbacksArr))}'` : "";
+    const src = posterProxy || posterDirect;
+    const directAttr = posterDirect ? `data-direct="${escapeAttr(posterDirect)}"` : "";
+    return `<div class="video-poster-overlay">
+        <img class="video-poster-img" src="${escapeAttr(src)}" ${directAttr} ${fbAttr} onload="this.classList.add('loaded')" onerror="handleVideoPosterError(this)">
+        <div class="video-play-badge">${playIconSvg()}</div>
+    </div>`;
+}
+
+function handleVideoPosterError(img){
+    const fbStr = img.dataset.fallbacks;
+    if(fbStr){
+        try{
+            const arr = JSON.parse(fbStr);
+            if(arr.length){
+                img.dataset.fallbacks = JSON.stringify(arr.slice(1));
+                img.src = arr[0];
+                return;
+            }
+        }catch(e){}
+    }
+    const direct = img.dataset.direct;
+    if(direct && img.src !== direct){
+        img.src = direct;
+        return;
+    }
+    img.style.display = "none";
+}
+
 function buildCard(item, isFav = false){
     let mediaHtml = "";
 
@@ -2635,7 +2926,7 @@ function buildCard(item, isFav = false){
 
     mediaHtml = `<div class="video-single-wrap">
         <video class="media-video" data-m3u8="1" ${proxyVideoAttr} preload="none" playsinline ${posterAttr} ${posterDirectAttr} ${posterFallbacksAttr} data-src="${escapeAttr(firstSrc)}" data-alt-src="${escapeAttr(altSrc)}" ${videoFallbacksAttr}>
-</video>${mediaControlsHtml()}</div>`;
+</video>${posterOverlayHtml(posterProxy, posterDirect, posterFallbacksArr)}${mediaControlsHtml()}</div>`;
 }else if(item.videoUrl){
     // MP4视频：单独class media-video-mp4，完全脱离HLS逻辑
     const imgs = [...new Set(item.media.imgs || [])];
@@ -2657,7 +2948,7 @@ function buildCard(item, isFav = false){
 
     mediaHtml = `<div class="video-single-wrap">
         <video class="media-video-mp4" ${proxyVideoAttr} preload="none" playsinline ${posterAttr} ${posterDirectAttr} ${posterFallbacksAttr} src="${escapeAttr(videoSrc)}" ${videoFallbacksAttr} ${videoDirectAttr}>
-</video>${mediaControlsHtml()}</div>`;
+</video>${posterOverlayHtml(posterProxy, posterDirect, posterFallbacksArr)}${mediaControlsHtml()}</div>`;
 }else if(item.iframe){
     let iframeStr = sanitizeIframeHtml(item.iframe);
 
@@ -2826,6 +3117,8 @@ function bindAllCardEvent(){
     })
 
     document.querySelectorAll(".grid-img").forEach((img)=>{
+        if(img.dataset.imgBind) return;
+        img.dataset.imgBind = "1";
         img.onclick = function(){
             const imgs = JSON.parse(this.dataset.imggroup);
             currentPreviewImgs = imgs;
@@ -2838,6 +3131,8 @@ function bindAllCardEvent(){
     })
 
     document.querySelectorAll(".card-title-wrap").forEach(wrap=>{
+        if(wrap.dataset.titleBind) return;
+        wrap.dataset.titleBind = "1";
         const titleEl = wrap.querySelector(".card-title");
         const toggleBtn = wrap.querySelector(".title-toggle-btn");
         setTimeout(()=>{
@@ -3709,6 +4004,7 @@ window.onload = async function(){
     initVideoObserver();
     showPage(pageHome, "RSS媒体阅读器");
     initLoadAllCache();
+    loadProxyConfig();
 }
 </script>
 </body>

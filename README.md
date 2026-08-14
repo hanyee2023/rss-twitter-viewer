@@ -68,25 +68,12 @@ const RSS_PROXY_ENDPOINTS = [
 const MEDIA_PROXY_ENDPOINT = "https://rss-twitter-viewer.pages.dev/media-proxy";
 ```
 
-默认需要代理的域名包括：
+默认需要代理的域名（内置，代码写死、UI 中只读）包括 twitter/x/twimg 系、xcancel、niter、redgifs、rsshub.app、phe69、htumeng.com 等。
 
-```js
-const FORCE_PROXY_HOSTS = [
-    "twitter.com",
-    "x.com",
-    "t.co",
-    "twimg.com",
-    "video.twimg.com",
-    "pbs.twimg.com",
-    "abs.twimg.com",
-    "xcancel.com",
-    "nitter.net",
-    "venexa.site",
-    "aguea.com",
-    "rsshub.app",
-    "video.shturl."
-];
-```
+**扩展代理域名不再需要改代码**：在阅读器底部【管理订阅】与【收藏】之间的「代理域名」按钮，打开的是与「收藏 / 添加订阅」一致的全屏管理页（RSS 代理 与 媒体代理 两区之间用绿色分隔线隔开，按钮统一蓝色），可分别给 **RSS 代理** 和 **媒体代理** 增删域名，点「保存并同步」即写入后端 KV（`RSS_CACHE` 命名空间下的 `proxy_rss_user` / `proxy_media_user` 键），前后端自动生效。
+
+> 安全：写入接口 `/proxy-config` 需要管理令牌，令牌在服务端环境变量 `PROXY_ADMIN_TOKEN` 中设置，界面里输入的令牌须与它一致；未设置则拒绝写入，防止被当开放代理滥用。
+
 
 普通国内图片、MP4、m3u8 链接会优先由浏览器直接加载。匹配到上述域名的媒体链接会通过 `media-proxy` 代理。
 
