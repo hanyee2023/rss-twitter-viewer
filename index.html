@@ -87,6 +87,15 @@ body{
     background:#000;
     height: auto;
 }
+.video-poster-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1d1d1d,#2e2e2e);z-index:2;}
+.video-poster-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .3s ease;}
+.video-poster-img.loaded{opacity:1;}
+.video-poster-fallback{display:none;width:64px;height:64px;color:rgba(255,255,255,.55);}
+.video-poster-fallback svg{width:100%;height:100%;}
+.recycled-ph{background:#f0f0f0;border-radius:10px;}
+.video-poster-overlay.poster-failed .video-poster-fallback{display:block;}
+.video-poster-overlay.poster-failed .video-poster-img{display:none;}
+.video-single-wrap.playing .video-poster-overlay{display:none;}
 .video-single-wrap:fullscreen{
     width:100vw;
     height:100vh;
@@ -160,7 +169,12 @@ body{
     overflow-y: auto;
     overflow-x: hidden;
 }
-.page-home,.page-manage,.page-add,.page-fav,.page-search{display:none;}
+.main-wrap::-webkit-scrollbar{width:6px;height:6px;}
+.main-wrap::-webkit-scrollbar-track{background:transparent;}
+.main-wrap::-webkit-scrollbar-thumb{background:#d6d6d6;border-radius:3px;}
+.main-wrap::-webkit-scrollbar-thumb:hover{background:#bcbcbc;}
+*{scrollbar-width:thin;scrollbar-color:#d6d6d6 transparent;}
+.page-home,.page-manage,.page-add,.page-fav,.page-search,.page-proxy{display:none;}
 #pageHome,#pageManage,#pageFav,#pageSearch{
     width: 100%;
 }
@@ -426,10 +440,12 @@ body{
 .img-grid{display:grid;gap:2px;}
 .grid-single{grid-template-columns:1fr;}
 .grid-multi{grid-template-columns:1fr 1fr;}
-.grid-img-box{position:relative;aspect-ratio:1/1;overflow:hidden;}
+.grid-img-box{position:relative;aspect-ratio:1/1;overflow:hidden;background:#ececec;}
 .grid-img{
     width:100%;height:100%;object-fit:cover;display:block;
+    opacity:0;transition:opacity .4s ease;
 }
+.grid-img.img-loaded{opacity:1;}
 .img-overlay-more{
     position:absolute;
     inset:0;
@@ -795,6 +811,9 @@ body{
     </button>
 </div>
 
+<style>
+</style>
+
 <div class="modal-mask" id="editModal">
     <div class="modal-box">
         <h3>编辑订阅源</h3>
@@ -848,17 +867,20 @@ body{
 
 <script>
 // 全局代理配置：RSS 拉取和媒体资源分开，避免两套逻辑互相影响。
-// 多个代理会并发竞速（RSS）或级联回退（媒体），修改下面的端点列表即可。
+// RSS 只走 rss-proxy；注意不要把 media-proxy 放进 RSS 列表——
+// media-proxy 对响应设置 Cache-Control: s-maxage=604800（7天），
+// 会导致 RSS 被边缘缓存整整一周，更新内容永远看不到、加载也显得很慢。
+// 媒体资源（图片/视频/m3u8）才走 media-proxy。修改下面的端点列表即可。
 const RSS_PROXY_ENDPOINTS = [
-    "https://rss-twitter-viewer.pages.dev/rss-proxy",
-    "https://rss-twitter-viewer.pages.dev/media-proxy"
+    "https://rss-twitter-viewer.pages.dev/rss-proxy"
 ];
 const MEDIA_PROXY_ENDPOINTS = [
     "https://rss-twitter-viewer.pages.dev/media-proxy"
 ];
 
-// 这些域名的 RSS 或媒体资源默认走代理。需要新增国外或特殊域名时，加到这里即可。
-const FORCE_PROXY_HOSTS = [
+// 内置默认代理名单（代码写死，UI 中只读不可删）。RSS 与媒体分开管理。
+// htumeng.com 等需要代理补 CORS 头的域名已内置，上传即生效。
+const BUILTIN_RSS_HOSTS = [
     "twitter.com",
     "x.com",
     "t.co",
@@ -867,18 +889,55 @@ const FORCE_PROXY_HOSTS = [
     "pbs.twimg.com",
     "abs.twimg.com",
     "xcancel.com",
-    "nitter.net",
+    "niter.net",
     "16k.club",
     "xxxfollow.com",
-    "media.redgifs.com", 
+    "media.redgifs.com",
     "redd.it",
     "770118.xyz",
-    "phe69",
+    "phe69.com",
     "3go.fun",
     "rsshub.app",
     "venexa.site",
-    "aguea.com"
+    "aguea.com",
+    "htumeng.com",
+    "6642p.com",
+    "tutu1.space"
 ];
+const BUILTIN_MEDIA_HOSTS = [
+    "twitter.com",
+    "x.com",
+    "t.co",
+    "twimg.com",
+    "video.twimg.com",
+    "pbs.twimg.com",
+    "abs.twimg.com",
+    "xcancel.com",
+    "niter.net",
+    "16k.club",
+    "xxxfollow.com",
+    "media.redgifs.com",
+    "redd.it",
+    "770118.xyz",
+    "phe69.com",
+    "3go.fun",
+    "rsshub.app",
+    "venexa.site",
+    "aguea.com",
+    "htumeng.com"
+];
+
+let RSS_PROXY_HOSTS = [...BUILTIN_RSS_HOSTS];
+let MEDIA_PROXY_HOSTS = [...BUILTIN_MEDIA_HOSTS];
+
+function normalizeProxyHost(raw) {
+    let h = String(raw || "").trim().toLowerCase().replace(/\.+$/, "");
+    h = h.replace(/^www\./, "");
+    return h;
+}
+function dedupeHosts(arr) {
+    return [...new Set(arr.map(normalizeProxyHost).filter(Boolean))];
+}
 
 function normalizeUrl(rawUrl) {
     return String(rawUrl || "").trim();
@@ -960,7 +1019,7 @@ function getEmbeddedHttpUrls(rawUrl) {
     return [...new Set(list)];
 }
 
-function hostMatched(rawUrl, hostList = FORCE_PROXY_HOSTS) {
+function hostMatched(rawUrl, hostList = MEDIA_PROXY_HOSTS) {
     const url = normalizeUrl(rawUrl);
     const host = getUrlHost(url);
     if(hostList.some(rule => hostMatchesRule(host, rule))) return true;
@@ -991,12 +1050,15 @@ function getRSSProxyCandidates(rssUrl) {
     return RSS_PROXY_ENDPOINTS.map(endpoint => buildProxyUrl(endpoint, rssUrl));
 }
 
+// 代理视频画质：默认 480p（降一档，流畅优先），收藏内容用 720p。
+// qr=high 仅在分享场景下使用（见 getProxyUrl 的 q 参数透传）。
+// 仅对命中代理名单的域名生效，直连媒体不走这些参数。
+
 function getMediaProxyCandidates(rawUrl, isFav = false) {
     const url = cleanMediaUrl(rawUrl);
     if (!isHttpUrl(url)) return [];
-    if (!hostMatched(url)) return [];
-    const params = { raw: "1" };
-    if (isFav) params.cache = "long";
+    if (!hostMatched(url, MEDIA_PROXY_HOSTS)) return [];
+    const params = { raw: "1", q: isFav ? "720" : "480" };
     return MEDIA_PROXY_ENDPOINTS.map(endpoint => buildProxyUrl(endpoint, url, params));
 }
 
@@ -1004,8 +1066,7 @@ function getProxyUrl(rawUrl, isFav = false) {
     const url = cleanMediaUrl(rawUrl);
     if (!isHttpUrl(url)) return url;
     if (!hostMatched(url)) return url;
-    const params = { raw: "1" };
-    if (isFav) params.cache = "long";
+    const params = { raw: "1", q: isFav ? "720" : "480" };
     return buildProxyUrl(MEDIA_PROXY_ENDPOINTS[0], url, params);
 }
 
@@ -1013,8 +1074,7 @@ function getForceMediaProxyUrl(rawUrl, isFav = false) {
     const url = cleanMediaUrl(rawUrl);
     if (!isHttpUrl(url)) return url;
     if (!hostMatched(url)) return url;
-    const params = { raw: "1" };
-    if (isFav) params.cache = "long";
+    const params = { raw: "1", q: isFav ? "720" : "480" };
     return buildProxyUrl(MEDIA_PROXY_ENDPOINTS[0], url, params);
 }
 
@@ -1138,7 +1198,7 @@ async function fetchRSSFeed(rssUrl) {
     const url = normalizeUrl(rssUrl);
     if (!isHttpUrl(url)) throw new Error("RSS 链接格式不正确");
 
-    const candidates = hostMatched(url)
+    const candidates = hostMatched(url, RSS_PROXY_HOSTS)
         ? getRSSProxyCandidates(url)
         : [url];
 
@@ -1219,9 +1279,9 @@ const btnManage = document.getElementById("btnManage");
 const btnAdd = document.getElementById("btnAdd");
 const btnFav = document.getElementById("btnFav");
 const btnSearch = document.getElementById("btnSearch");
+let allBtns = [btnHome, btnManage, btnAdd, btnFav, btnSearch];
 
 const pageTitle = document.getElementById("pageTitle");
-let allBtns = [btnHome, btnManage, btnAdd, btnFav, btnSearch];
 
 const editModal = document.getElementById("editModal");
 const imgPreviewMask = document.getElementById("imgPreviewMask");
@@ -1286,27 +1346,82 @@ function markReadByScroll(){
     if(changed) saveReadLinks();
 }
 
-function loadArticleCacheFromStorage(){
-    try{
-        const cache = JSON.parse(localStorage.getItem(ARTICLE_CACHE_KEY) || "[]");
-        if(Array.isArray(cache)){
-            allArticles = cache;
-            localCacheArticles = [...cache];
-            return cache.length;
-        }
-    }catch(e){
-        console.warn("读取本地文章缓存失败：", e);
-    }
-    return 0;
+// ─── 文章缓存：IndexedDB（兜底 localStorage） ─────────────────────────
+// 原先存 localStorage，文章多（含全文 desc）易超 5MB 配额导致写入静默失败，
+// 进而每次打开都重新拉取全源、变慢且无提示。IndexedDB 配额大得多，可根治该隐患。
+const DB_NAME = "rssViewerDB";
+const IDB_KV_STORE = "kv";
+let _articleDBPromise = null;
+
+function openArticleDB(){
+  if(!window.indexedDB) return Promise.reject(new Error("IndexedDB 不可用"));
+  if(_articleDBPromise) return _articleDBPromise;
+  _articleDBPromise = new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if(!db.objectStoreNames.contains(IDB_KV_STORE)) db.createObjectStore(IDB_KV_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  return _articleDBPromise;
 }
 
-function saveArticleCacheToStorage(list){
-    try{
-        const slimList = (list || []).slice(0, ARTICLE_CACHE_LIMIT);
-        localStorage.setItem(ARTICLE_CACHE_KEY, JSON.stringify(slimList));
-    }catch(e){
-        console.warn("保存本地文章缓存失败，可能是容量不足：", e);
-    }
+async function idbSet(key, value){
+  const db = await openArticleDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_KV_STORE, "readwrite");
+    tx.objectStore(IDB_KV_STORE).put(value, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function idbGet(key){
+  const db = await openArticleDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_KV_STORE, "readonly");
+    const req = tx.objectStore(IDB_KV_STORE).get(key);
+    req.onsuccess = () => resolve(req.result === undefined ? null : req.result);
+    req.onerror = () => reject(tx.error);
+  });
+}
+
+async function idbRemove(key){
+  try{
+    const db = await openArticleDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_KV_STORE, "readwrite");
+      tx.objectStore(IDB_KV_STORE).delete(key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }catch(e){ /* ignore */ }
+}
+
+async function loadArticleCacheFromStorage(){
+  let cache = null;
+  try{
+    cache = await idbGet(ARTICLE_CACHE_KEY);
+  }catch(e){
+    try{ cache = JSON.parse(localStorage.getItem(ARTICLE_CACHE_KEY) || "null"); }catch(_){}
+  }
+  if(Array.isArray(cache)){
+    allArticles = cache;
+    localCacheArticles = [...cache];
+    return cache.length;
+  }
+  return 0;
+}
+
+async function saveArticleCacheToStorage(list){
+  const slimList = (list || []).slice(0, ARTICLE_CACHE_LIMIT);
+  try{
+    await idbSet(ARTICLE_CACHE_KEY, slimList);
+  }catch(e){
+    try{ localStorage.setItem(ARTICLE_CACHE_KEY, JSON.stringify(slimList)); }catch(_){}
+  }
 }
 
 function hasBlockedKeyword(title){
@@ -1568,11 +1683,8 @@ function initVideoObserver(){
         entries.forEach(item=>{
             const video = item.target;
             if(item.isIntersecting){
-                // 优化1：智能预加载 - 进入视口时加载元数据（封面+时长，很小）
-                if(video.preload !== "auto" && !video.dataset.userAttempted){
-                    video.preload = "metadata";
-                }
-                // 优化5：内存优化恢复 - 滑回视口时恢复之前释放的视频
+                // 封面图已在卡片渲染时通过 src 直接加载，无需在此触发；
+                // 仅在滑回视口时恢复此前为释放内存而清空的视频源（如需）
                 if(video.dataset.savedTime && !video.src){
                     restoreVideoFromMem(video);
                 }
@@ -1585,15 +1697,15 @@ function initVideoObserver(){
                 tryReleaseVideoMemory(video);
             }
         })
-    }, {threshold:0.01});
+    }, {threshold:0.01, rootMargin:"300px 0"});
 }
 
 // 优化5：尝试释放视频内存（长视频+播放较多时）
 function tryReleaseVideoMemory(video){
     // 只对 MP4 视频做，HLS 已经 stopLoad 了
     if(!video.classList.contains("media-video-mp4")) return;
-    // 播放超过 30 秒才释放（短视频没必要）
-    if(!video.currentTime || video.currentTime < 30) return;
+    // 播放超过 60 秒才释放（短视频没必要，避免划回黑屏/重载）
+    if(!video.currentTime || video.currentTime < 60) return;
     // 没有 src 就不用释放了
     if(!video.src) return;
 
@@ -1760,6 +1872,39 @@ function bindSlowNetworkDetect(video){
         const now = Date.now();
         waitingTimes = waitingTimes.filter(t => now - t < 10000);
     });
+}
+
+// 优化：视频封面(poster)加载失败回退。
+// buildCard 里给 poster 准备了 data-poster-proxy-fallbacks / data-poster-direct，
+// 但 poster 属性本身不会触发 onerror，这里用一次探测请求做回退：
+//   1) 主代理失败 → 依次尝试备用代理端点
+//   2) 仍失败 → 尝试直连（部分 CDN 在直连可达时可用）
+function bindPosterFallback(video){
+    const poster = video.getAttribute("poster");
+    if(!poster || video.dataset.posterBound) return;
+    video.dataset.posterBound = "1";
+    const tryNext = () => {
+        // 1) 依次尝试备用代理端点
+        const fbStr = video.dataset.posterProxyFallbacks;
+        if(fbStr){
+            try{
+                const arr = JSON.parse(fbStr);
+                if(arr.length){
+                    video.setAttribute("poster", arr.shift());
+                    video.dataset.posterProxyFallbacks = JSON.stringify(arr);
+                    return;
+                }
+            }catch(e){}
+        }
+        // 2) 最后尝试直连（保留 data-poster-direct 提供的原始地址）
+        const direct = video.dataset.posterDirect;
+        if(direct && video.getAttribute("poster") !== direct){
+            video.setAttribute("poster", direct);
+        }
+    };
+    const probe = new Image();
+    probe.onerror = tryNext;
+    probe.src = poster;
 }
 
 
@@ -1972,7 +2117,6 @@ function startHlsVideo(video){
     if(!streamUrl) return;
 
     pauseOtherVideos(video);
-    const manualSecondClick = video.dataset.proxyVideo === "1";
 
     const playNow = (retry = true) => {
         video.play().catch(err => {
@@ -2014,9 +2158,12 @@ function startHlsVideo(video){
         const hls = new Hls({
             enableWorker: true,
             lowLatencyMode: false,
-            maxBufferLength: 60,
-            maxMaxBufferLength: 120,
-            maxBufferSize: 60 * 1000 * 1000,
+            // 代理视频带宽有限：缩短缓冲窗口，减少并发分片请求数，降低卡顿
+            maxBufferLength: isProxyVid ? 30 : 60,
+            maxMaxBufferLength: isProxyVid ? 60 : 120,
+            maxBufferSize: isProxyVid ? 30 * 1000 * 1000 : 60 * 1000 * 1000,
+            // 限制向后缓冲，避免长视频内存占用过高
+            backBufferLength: isProxyVid ? 30 : 60,
             maxBufferHole: 0.5,
             // 代理视频从最低码率起步，快速起播避免黑屏；非代理视频自动选择
             startLevel: isProxyVid ? 0 : -1,
@@ -2051,10 +2198,10 @@ function startHlsVideo(video){
             }
             hls.startLoad();
             video.dataset.hlsLoaded = "1";
-            // 代理视频采用两次点击模式：第一次仅加载 manifest，不自动播放
-            if(!manualSecondClick){
-                playNow();
-            }
+            // 加载完成后立即自动播放（单次点击即可起播）。
+            // 用户刚点击过卡片，浏览器 sticky activation 已生效，程序化 play() 通常允许带声音播放；
+            // 若个别浏览器仍拦截，playNow 会捕获 NotAllowedError 并提示“请再点一次播放”。
+            playNow();
         });
         hls.on(Hls.Events.ERROR, (event, data) => {
             if(data && data.fatal){
@@ -2088,11 +2235,8 @@ function startHlsVideo(video){
         };
         video.addEventListener("loadedmetadata", markNativeLoaded, {once:true});
         video.addEventListener("canplay", markNativeLoaded, {once:true});
-        if(manualSecondClick){
-            video.load();
-        }else{
-            playNow();
-        }
+        // 原生 HLS 同样单次点击起播
+        playNow();
     } else {
         if(video.dataset.userAttempted === "1"){
             showToast("当前浏览器不支持m3u8播放");
@@ -2107,6 +2251,7 @@ function initHlsVideo(){
     document.querySelectorAll(".media-video[data-m3u8], .media-video-mp4").forEach(video=>{
         if (video.dataset.playerBind) return;
         video.dataset.playerBind = "1";
+        try {
         const wrap = video.closest(".video-single-wrap") || video;
         if(!wrap.dataset.mediaClickBind){
             wrap.dataset.mediaClickBind = "1";
@@ -2119,8 +2264,12 @@ function initHlsVideo(){
         if(video.classList.contains("media-video")){
             video.addEventListener("play", ()=>{
             if(!video.dataset.hlsLoaded) {
-                video.pause();
-                startHlsVideo(video);
+                // 仅在 Hls.js 模式下需要回退初始化；原生 HLS 已通过 video.src 处理，
+                // 否则会在 play 事件中反复进入 startHlsVideo 造成初始化死循环。
+                if(window.Hls && Hls.isSupported()){
+                    video.pause();
+                    startHlsVideo(video);
+                }
             } else if(video.hlsInstance) {
                 video.hlsInstance.startLoad();
             }
@@ -2131,6 +2280,14 @@ function initHlsVideo(){
         bindVideoErrorRetry(video);
         // 优化6：绑定低网速检测
         bindSlowNetworkDetect(video);
+        // 优化：封面图加载失败回退（修复视频预览图不显示）
+        bindPosterFallback(video);
+        // 播放后隐藏封面占位层，露出视频画面
+        video.addEventListener("play", () => {
+            const w = video.closest(".video-single-wrap");
+            if (w) w.classList.add("playing");
+        });
+        } catch (e) { console.warn("video bind error", e); }
     });
 }
 
@@ -2169,6 +2326,7 @@ function showPage(targetDom, titleText) {
     if (lastPageTitle === "RSS媒体阅读器") {
         markReadByScroll();
         homeScrollTop = mainWrap.scrollTop;
+        restoreAllRecycled();   // 先恢复回收卡，确保缓存的是完整内容（不丢媒体/_item）
         homeArticleHtml = articleBox.innerHTML;
         homeIsCached = true;
         homeCachedFilterSourceUrl = filterSourceUrl;
@@ -2231,7 +2389,6 @@ function showPage(targetDom, titleText) {
         searchInput.value = "";
         searchResultBox.innerHTML = "";
     }
-
     lastPageTitle = titleText;
 }
 
@@ -2254,6 +2411,8 @@ btnHome.onclick = async () => {
 btnManage.onclick = () => showPage(pageManage, "管理订阅");
 btnAdd.onclick = () => showPage(pageAdd, "添加订阅");
 btnFav.onclick = () => showPage(pageFav, "我的收藏");
+
+
 btnSearch.onclick = () => showPage(pageSearch, "内容搜索");
 
 async function refreshAllRSSWithLock(){
@@ -2327,7 +2486,7 @@ async function checkAndPromptUpdate(isManual = false){
 }
 
 async function initLoadAllCache() {
-    const cacheCount = loadArticleCacheFromStorage();
+    const cacheCount = await loadArticleCacheFromStorage();
     if(cacheCount > 0){
         renderHomeFromCache();
     }
@@ -2427,6 +2586,7 @@ window.mergeNewData = async function(){
     renderPageNum = 1;
     renderedArticleCount = 0;
     renderPagedList(true);
+    bindScrollLoadMore();
 }
 
 function renderPagedList(reset = false){
@@ -2440,8 +2600,14 @@ function renderPagedList(reset = false){
     const nextCount = Math.min(renderPageNum * PAGE_SIZE, currentArticles.length);
     const appendList = currentArticles.slice(renderedArticleCount, nextCount);
     if(appendList.length > 0){
+        const oldCount = renderedArticleCount;
         articleBox.insertAdjacentHTML("beforeend", renderCardList(appendList));
         renderedArticleCount = nextCount;
+        // D：为新增卡片挂 _item 引用，供缓冲回收重建使用
+        const allCards = articleBox.querySelectorAll('.tweet-card');
+        for(let i = oldCount; i < allCards.length; i++){
+            allCards[i]._item = appendList[i - oldCount];
+        }
     }
     const remain = currentArticles.length - renderedArticleCount;
     articleBox.insertAdjacentHTML("beforeend", remain > 0
@@ -2450,27 +2616,32 @@ function renderPagedList(reset = false){
     bindAllCardEvent();
     bindVideoPauseObserver();
     initHlsVideo();
+    // initRecycleTrigger();  // 已关闭：回退到稳定版（上午“快”的版本不含回收）；如需“深刷不卡”可取消此行注释
 }
 function bindScrollLoadMore(){
     if(scrollObserver) scrollObserver.disconnect();
     const loadDom = document.getElementById("loadMoreDom");
     if(!loadDom) return;
     scrollObserver = new IntersectionObserver(async (entries)=>{
-        const entry = entries[0];
-        if(entry.isIntersecting && !loadLock){
+        const entry = entries[entries.length - 1];
+        if(entry && entry.isIntersecting && !loadLock){
             loadLock = true;
-            const prevCount = renderedArticleCount;
-            renderPageNum += 1;
-            renderPagedList();
-            // 如果没有新内容，不再重复绑定
-            if(renderedArticleCount === prevCount){
+            try{
+                const prevCount = renderedArticleCount;
+                renderPageNum += 1;
+                renderPagedList();
+                if(renderedArticleCount === prevCount){
+                    return;
+                }
+                const nd = document.getElementById("loadMoreDom");
+                if(nd) scrollObserver.observe(nd);
+            }catch(e){
+                console.warn("滚动加载更多失败：", e);
+            }finally{
                 loadLock = false;
-                return;
             }
-            setTimeout(()=>bindScrollLoadMore(), 30);
-            loadLock = false;
         }
-    }, {rootMargin: "150px 0px"});
+    }, {rootMargin: "600px 0px"});
     scrollObserver.observe(loadDom);
 }
 
@@ -2478,6 +2649,86 @@ function renderCardList(list){
     let html = "";
     list.forEach(item => html += buildCard(item, false));
     return html;
+}
+
+// ===== D：基于状态的缓冲回收（已读/未收藏/未播放/离屏远 优先回收）=====
+let recycleObserver = null;
+let _recycleTriggerBound = false;
+function ensureRecycleObserver(){
+    if(recycleObserver) return;
+    recycleObserver = new IntersectionObserver((entries)=>{
+        entries.forEach(en=>{
+            const card = en.target;
+            if(en.isIntersecting && card.dataset.recycled === "1"){
+                restoreRecycledCard(card);
+            }
+        });
+    }, {rootMargin:"400px 0px"});
+}
+function recycleOffscreenCards(){
+    if(lastPageTitle !== "RSS媒体阅读器") return;
+    if(!articleBox) return;
+    const vh = window.innerHeight || document.documentElement.clientHeight || 800;
+    const cards = articleBox.querySelectorAll('.tweet-card:not([data-recycled="1"])');
+    cards.forEach(card=>{
+        const link = card.dataset.link;
+        if(!link) return;
+        if(!readLinkSet.has(link)) return;                             // 未读不回收
+        if(favList.some(f=>f.link === link)) return;                   // 已收藏不回收
+        if(card.querySelector('.media-video.is-playing, .media-video-mp4.is-playing')) return; // 播放中不回收
+        const rect = card.getBoundingClientRect();
+        if(rect.bottom > -0.1*vh && rect.top < 1.5*vh) return;         // 视口附近不回收
+        doRecycleCard(card);
+    });
+}
+function doRecycleCard(card){
+    const item = card._item;
+    if(!item) return;
+    const h = card.offsetHeight || 0;
+    card.dataset.recycled = "1";
+    card.dataset.recycledH = String(h);
+    try { card.dataset.itemjson = JSON.stringify(item); } catch(e){}
+    // 释放媒体资源（视频/图片从 DOM 移除后浏览器自动回收，这里主动切断视频源）
+    card.querySelectorAll('video').forEach(v=>{ try{ v.removeAttribute('src'); v.load(); }catch(e){} });
+    card.innerHTML = `<div class="recycled-ph" style="height:${h}px"></div>`;
+    ensureRecycleObserver();
+    recycleObserver.observe(card);
+}
+function restoreRecycledCard(card){
+    let item = card._item;
+    if(!item && card.dataset.itemjson){
+        try { item = JSON.parse(card.dataset.itemjson); } catch(e){}
+    }
+    if(!item) return;
+    const fresh = document.createElement("div");
+    fresh.innerHTML = buildCard(item, false);
+    const newCard = fresh.firstElementChild;
+    if(!newCard) return;
+    newCard._item = item;
+    try { newCard.dataset.itemjson = JSON.stringify(item); } catch(e){}
+    if(recycleObserver) recycleObserver.unobserve(card);
+    card.replaceWith(newCard);
+    // 重建后重新绑定事件与视频（函数内部均有防重复/清理逻辑）
+    bindAllCardEvent();
+    initHlsVideo();
+    bindVideoPauseObserver();
+}
+function initRecycleTrigger(){
+    if(_recycleTriggerBound) return;
+    _recycleTriggerBound = true;
+    let t = null;
+    const onScroll = ()=>{
+        if(t) clearTimeout(t);
+        t = setTimeout(recycleOffscreenCards, 1200);
+    };
+    const mw = document.querySelector('.main-wrap');
+    if(mw) mw.addEventListener('scroll', onScroll, {passive:true});
+    window.addEventListener('scroll', onScroll, {passive:true});
+    setInterval(recycleOffscreenCards, 8000);
+}
+function restoreAllRecycled(){
+    if(!articleBox) return;
+    articleBox.querySelectorAll('[data-recycled="1"]').forEach(c=>restoreRecycledCard(c));
 }
 
 function getPureText(str){
@@ -2512,6 +2763,40 @@ function formatCardDate(dateStr){
     return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
 }
 
+function posterOverlayHtml(posterProxy, posterDirect, posterFallbacksArr){
+    if(!posterProxy && !posterDirect) return "";
+    const fbAttr = (posterFallbacksArr && posterFallbacksArr.length) ? `data-fallbacks='${escapeAttr(JSON.stringify(posterFallbacksArr))}'` : "";
+    const src = posterProxy || posterDirect;
+    const directAttr = posterDirect ? `data-direct="${escapeAttr(posterDirect)}"` : "";
+    const fbIcon = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`;
+    return `<div class="video-poster-overlay">
+        <img class="video-poster-img" src="${escapeAttr(src)}" ${directAttr} ${fbAttr} referrerpolicy="no-referrer" decoding="async" onload="this.classList.add('loaded')" onerror="handleVideoPosterError(this)">
+        <div class="video-poster-fallback">${fbIcon}</div>
+    </div>`;
+}
+
+function handleVideoPosterError(img){
+    const fbStr = img.dataset.fallbacks;
+    if(fbStr){
+        try{
+            const arr = JSON.parse(fbStr);
+            if(arr.length){
+                img.dataset.fallbacks = JSON.stringify(arr.slice(1));
+                img.src = arr[0];
+                return;
+            }
+        }catch(e){}
+    }
+    const direct = img.dataset.direct;
+    if(direct && img.src !== direct){
+        img.src = direct;
+        return;
+    }
+    const ov = img.closest(".video-poster-overlay");
+    if(ov) ov.classList.add("poster-failed");
+    img.style.display = "none";
+}
+
 function buildCard(item, isFav = false){
     let mediaHtml = "";
 
@@ -2537,7 +2822,7 @@ function buildCard(item, isFav = false){
 
     mediaHtml = `<div class="video-single-wrap">
         <video class="media-video" data-m3u8="1" ${proxyVideoAttr} preload="none" playsinline ${posterAttr} ${posterDirectAttr} ${posterFallbacksAttr} data-src="${escapeAttr(firstSrc)}" data-alt-src="${escapeAttr(altSrc)}" ${videoFallbacksAttr}>
-</video>${mediaControlsHtml()}</div>`;
+</video>${posterOverlayHtml(posterProxy, posterDirect, posterFallbacksArr)}${mediaControlsHtml()}</div>`;
 }else if(item.videoUrl){
     // MP4视频：单独class media-video-mp4，完全脱离HLS逻辑
     const imgs = [...new Set(item.media.imgs || [])];
@@ -2559,7 +2844,7 @@ function buildCard(item, isFav = false){
 
     mediaHtml = `<div class="video-single-wrap">
         <video class="media-video-mp4" ${proxyVideoAttr} preload="none" playsinline ${posterAttr} ${posterDirectAttr} ${posterFallbacksAttr} src="${escapeAttr(videoSrc)}" ${videoFallbacksAttr} ${videoDirectAttr}>
-</video>${mediaControlsHtml()}</div>`;
+</video>${posterOverlayHtml(posterProxy, posterDirect, posterFallbacksArr)}${mediaControlsHtml()}</div>`;
 }else if(item.iframe){
     let iframeStr = sanitizeIframeHtml(item.iframe);
 
@@ -2587,7 +2872,7 @@ function buildCard(item, isFav = false){
             const imgFallbacksAttr = imgIsProxy ? getProxyFallbacksAttr(src, isFav) : "";
             const imgSrc = imgIsProxy ? imgProxy : imgDirect;
             mediaHtml += `<div class="grid-img-box">
-                <img class="grid-img" ${imgIsProxy ? 'crossorigin="anonymous"' : ""} referrerpolicy="no-referrer" decoding="async" data-imggroup='${escapeAttr(JSON.stringify(imgs))}' data-direct-src="${escapeAttr(imgDirect)}" src="${escapeAttr(imgSrc)}" loading="lazy" ${imgFallbacksAttr} onerror="if(!fallbackMediaProxy(this) && this.dataset.directSrc && this.src!==this.dataset.directSrc){this.src=this.dataset.directSrc;}">${overlay}
+                <img class="grid-img" ${imgIsProxy ? 'crossorigin="anonymous"' : ""} referrerpolicy="no-referrer" decoding="async" data-imggroup='${escapeAttr(JSON.stringify(imgs))}' data-direct-src="${escapeAttr(imgDirect)}" src="${escapeAttr(imgSrc)}" loading="lazy" ${imgFallbacksAttr} onload="this.classList.add('img-loaded')" onerror="if(!fallbackMediaProxy(this) && this.dataset.directSrc && this.src!==this.dataset.directSrc){this.src=this.dataset.directSrc;}">${overlay}
             </div>`;
         })
         mediaHtml += `</div></div>`;
@@ -2608,7 +2893,8 @@ function buildCard(item, isFav = false){
     const avatarSvg = avatarIconSvg(avatarIndex);
     const dateText = formatCardDate(item.date);
 
-    // 分享链接：优先使用原始媒体 URL（不带代理），方便分享、查看和下载
+    // 分享链接：
+    // 分享链接：优先使用原始媒体 URL（不带代理前缀），方便分享、查看和下载
     // 视频帖用视频 URL，图片帖用第一张图片 URL，无媒体则用文章链接
     let shareUrl = itemLink;
     if (item.videoUrl) {
@@ -2727,6 +3013,8 @@ function bindAllCardEvent(){
     })
 
     document.querySelectorAll(".grid-img").forEach((img)=>{
+        if(img.dataset.imgBind) return;
+        img.dataset.imgBind = "1";
         img.onclick = function(){
             const imgs = JSON.parse(this.dataset.imggroup);
             currentPreviewImgs = imgs;
@@ -2739,6 +3027,8 @@ function bindAllCardEvent(){
     })
 
     document.querySelectorAll(".card-title-wrap").forEach(wrap=>{
+        if(wrap.dataset.titleBind) return;
+        wrap.dataset.titleBind = "1";
         const titleEl = wrap.querySelector(".card-title");
         const toggleBtn = wrap.querySelector(".title-toggle-btn");
         setTimeout(()=>{
@@ -3312,6 +3602,7 @@ document.getElementById("confirmClear").onclick = function(){
         localCacheArticles = [];
         localStorage.removeItem(ARTICLE_CACHE_KEY);
         localStorage.removeItem(LAST_REFRESH_KEY);
+        idbRemove(ARTICLE_CACHE_KEY);
         lastRefreshTime = 0;
         homeIsCached = false;
         homeArticleHtml = "";
