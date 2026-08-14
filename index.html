@@ -1,6 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
-<head>
+<html lang="zh-CN"><head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>RSS媒体阅读器</title>
@@ -711,10 +710,10 @@ body{
 </header>
 
 <div class="main-wrap">
-    <div class="page-home" id="pageHome">
-        <div id="articleBox"></div>
+    <div class="page-home" id="pageHome" style="display: block;">
+        <div id="articleBox"><div class="empty-tip">暂无文章内容</div></div>
     </div>
-    <div class="page-manage" id="pageManage">
+    <div class="page-manage" id="pageManage" style="display: none;">
         <div class="feed-top-op">
     <button id="importFeed">一键导入</button>
     <button id="exportAllBtn">一键导出</button>
@@ -723,7 +722,7 @@ body{
 </div>
         <div class="feed-list" id="feedPanel"></div>
     </div>
-    <div class="page-add" id="pageAdd">
+    <div class="page-add" id="pageAdd" style="display: none;">
         <div class="add-feed-form">
             <div class="keyword-block-title">添加新订阅</div>
             <div class="add-feed-row">
@@ -747,11 +746,11 @@ body{
                 <input id="blockKeywordInput" placeholder="输入要屏蔽的关键字">
                 <button id="addKeywordBtn">添加</button>
             </div>
-            <div class="keyword-list" id="keywordList"></div>
+            <div class="keyword-list" id="keywordList"><div style="color:#999;font-size:13px;padding:8px 4px;">暂无屏蔽关键字</div></div>
         </div>
     </div>
-    <div class="page-fav" id="pageFav"><div id="favPanel"></div></div>
-    <div class="page-search" id="pageSearch">
+    <div class="page-fav" id="pageFav" style="display: none;"><div id="favPanel"></div></div>
+    <div class="page-search" id="pageSearch" style="display: none;">
         <div style="padding:12px;">
             <input id="searchInput" placeholder="输入关键词精确匹配标题" style="width:100%;padding:12px;border-radius:8px;border:1px solid #ddd;font-size:16px;">
             <div id="searchResultBox"></div>
@@ -760,25 +759,25 @@ body{
 </div>
 
 <div class="bottom-nav-bar">
-    <button id="btnHome">
+    <button id="btnHome" class="active">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#111111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
             <polyline points="9 22 9 12 15 12 15 22"></polyline>
         </svg>
     </button>
-    <button id="btnSearch">
+    <button id="btnSearch" class="">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#111111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="11" cy="11" r="8"></circle>
             <path d="m21 21-4.35-4.35"></path>
         </svg>
     </button>
-    <button id="btnAdd">
+    <button id="btnAdd" class="">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#111111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
             <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"></path>
         </svg>
     </button>
-    <button id="btnManage">
+    <button id="btnManage" class="">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#111111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="8" x2="21" y1="6" y2="6"></line>
             <line x1="8" x2="21" y1="12" y2="12"></line>
@@ -788,7 +787,7 @@ body{
             <line x1="3" x2="3.01" y1="18" y2="18"></line>
         </svg>
     </button>
-    <button id="btnFav">
+    <button id="btnFav" class="">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#111111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
         </svg>
@@ -812,10 +811,10 @@ body{
     <div class="modal-box">
         <h3>一键清空</h3>
         <div class="clear-options">
-            <label><input type="checkbox" id="clearFeeds" checked> 清除所有订阅源</label>
-            <label><input type="checkbox" id="clearArticles" checked> 清除主页所有内容</label>
-            <label><input type="checkbox" id="clearFav" checked> 清除收藏所有内容</label>
-            <label><input type="checkbox" id="clearKeywords" checked> 清除关键字屏蔽记录</label>
+            <label><input type="checkbox" id="clearFeeds" checked=""> 清除所有订阅源</label>
+            <label><input type="checkbox" id="clearArticles" checked=""> 清除主页所有内容</label>
+            <label><input type="checkbox" id="clearFav" checked=""> 清除收藏所有内容</label>
+            <label><input type="checkbox" id="clearKeywords" checked=""> 清除关键字屏蔽记录</label>
         </div>
         <div class="modal-btn-bar">
             <button id="cancelClear">取消</button>
@@ -828,9 +827,9 @@ body{
     <div class="modal-box">
         <h3>导出数据</h3>
         <div class="clear-options">
-            <label><input type="checkbox" id="exportFeeds" checked> 所有订阅源列表</label>
-            <label><input type="checkbox" id="exportFav" checked> 收藏记录数据</label>
-            <label><input type="checkbox" id="exportKeywords" checked> 关键字屏蔽</label>
+            <label><input type="checkbox" id="exportFeeds" checked=""> 所有订阅源列表</label>
+            <label><input type="checkbox" id="exportFav" checked=""> 收藏记录数据</label>
+            <label><input type="checkbox" id="exportKeywords" checked=""> 关键字屏蔽</label>
         </div>
         <div class="modal-btn-bar">
             <button id="cancelExport">取消</button>
@@ -860,7 +859,7 @@ const MEDIA_PROXY_ENDPOINTS = [
 // 这些域名的 RSS 或媒体资源默认走代理。需要新增国外或特殊域名时，加到这里即可。
 const FORCE_PROXY_HOSTS = [
     "twitter.com",
-    "x.com",
+   "x.com",
     "t.co",
     "twimg.com",
     "video.twimg.com",
@@ -868,16 +867,17 @@ const FORCE_PROXY_HOSTS = [
     "abs.twimg.com",
     "xcancel.com",
     "nitter.net",
-    "16k.club",
     "xxxfollow.com",
-    "media.redgifs.com", 
-    "redd.it",
+    "media.redgifs.com",
     "770118.xyz",
     "phe69",
     "3go.fun",
     "rsshub.app",
     "venexa.site",
-    "aguea.com"
+    "aguea.com",
+    "htumeng.com",
+    "642p.com",
+    "tutu1.space"
 ];
 
 function normalizeUrl(rawUrl) {
@@ -1087,6 +1087,8 @@ let scrollObserver = null;
 let loadLock = false;
 let currentPreviewImgs = [];
 let videoObserver = null;
+let preloadCount = 0;
+const MAX_PRELOAD = 2;
 let filterSourceUrl = "";
 let localCacheArticles = [];
 let hasNewUpdate = false;
@@ -1572,6 +1574,11 @@ function initVideoObserver(){
                 if(video.preload !== "auto" && !video.dataset.userAttempted){
                     video.preload = "metadata";
                 }
+                // 优化7：m3u8 代理视频进入视口时预加载首段分片（点击即播）
+                if(video.classList.contains("media-video") && !video.dataset.hlsLoaded
+                    && video.dataset.proxyVideo === "1" && preloadCount < MAX_PRELOAD){
+                    preloadHlsFirstFrag(video);
+                }
                 // 优化5：内存优化恢复 - 滑回视口时恢复之前释放的视频
                 if(video.dataset.savedTime && !video.src){
                     restoreVideoFromMem(video);
@@ -1581,11 +1588,67 @@ function initVideoObserver(){
                 if(video.hlsInstance){
                     video.hlsInstance.stopLoad();
                 }
+                // 预加载中的视频滑出视口：取消预加载
+                if(video.dataset.preloading === "1"){
+                    cancelHlsPreload(video);
+                }
                 // 优化5：内存优化 - 长视频滑出视口且播放较多时释放内存
                 tryReleaseVideoMemory(video);
             }
         })
     }, {threshold:0.01});
+}
+
+// 优化7：m3u8 代理视频预加载首段分片（进入视口时静默加载，点击即播）
+// 调用 startHlsVideo 但不自动播放，首段加载后停止下载，节省带宽
+function preloadHlsFirstFrag(video){
+    if(video.dataset.hlsLoaded || video.dataset.preloading) return;
+    if(preloadCount >= MAX_PRELOAD) return;
+    if(!(window.Hls && Hls.isSupported())) return;
+
+    preloadCount++;
+    video.dataset.preloading = "1";
+
+    // 标记为预加载模式，startHlsVideo 内部会识别并跳过自动播放
+    video.dataset.preloadMode = "1";
+    startHlsVideo(video);
+
+    // 首段加载完成后停止继续下载
+    const onFragLoaded = () => {
+        if(video.hlsInstance){
+            video.hlsInstance.stopLoad();
+        }
+        preloadCount = Math.max(0, preloadCount - 1);
+        video.dataset.preloading = "0";
+        if(video.hlsInstance){
+            video.hlsInstance.off(Hls.Events.FRAG_LOADED, onFragLoaded);
+        }
+    };
+    if(video.hlsInstance){
+        video.hlsInstance.on(Hls.Events.FRAG_LOADED, onFragLoaded);
+    }
+
+    // 3 秒超时保护（网络太慢就取消，避免占用预加载名额）
+    setTimeout(() => {
+        if(video.dataset.preloading === "1"){
+            cancelHlsPreload(video);
+        }
+    }, 3000);
+}
+
+// 取消预加载（滑出视口或超时时调用）
+function cancelHlsPreload(video){
+    if(video.dataset.preloading === "1"){
+        preloadCount = Math.max(0, preloadCount - 1);
+        video.dataset.preloading = "0";
+    }
+    delete video.dataset.preloadMode;
+    // 用户还没点击过，销毁 HLS 实例省资源
+    if(video.hlsInstance && video.dataset.userAttempted !== "1"){
+        try{ video.hlsInstance.destroy(); }catch(e){}
+        video.hlsInstance = null;
+        delete video.dataset.hlsLoaded;
+    }
 }
 
 // 优化5：尝试释放视频内存（长视频+播放较多时）
@@ -1972,7 +2035,6 @@ function startHlsVideo(video){
     if(!streamUrl) return;
 
     pauseOtherVideos(video);
-    const manualSecondClick = video.dataset.proxyVideo === "1";
 
     const playNow = (retry = true) => {
         video.play().catch(err => {
@@ -2009,7 +2071,7 @@ function startHlsVideo(video){
             try{ video.hlsInstance.destroy(); }catch(e){}
             video.hlsInstance = null;
         }
-        // 代理视频走 Cloudflare 中转，带宽有限，使用更保守的配置
+        // 代理视频走 Cloudflare 中转，带宽有限，使用 480p~720p 自适应策略
         const isProxyVid = video.dataset.proxyVideo === "1";
         const hls = new Hls({
             enableWorker: true,
@@ -2018,11 +2080,11 @@ function startHlsVideo(video){
             maxMaxBufferLength: 120,
             maxBufferSize: 60 * 1000 * 1000,
             maxBufferHole: 0.5,
-            // 代理视频从最低码率起步，快速起播避免黑屏；非代理视频自动选择
-            startLevel: isProxyVid ? 0 : -1,
+            // startLevel 设为 -1，由 MANIFEST_PARSED 后手动设置起始级别
+            startLevel: -1,
             capLevelToPlayerSize: true,
-            // 代理视频初始带宽估计偏保守，避免起步选太高码率
-            abrEwmaDefaultEstimate: isProxyVid ? 300000 : 500000,
+            // 代理视频初始带宽估计按 480p 所需设置（约 800Kbps）
+            abrEwmaDefaultEstimate: isProxyVid ? 800000 : 500000,
             abrBandWidthFactor: 0.95,
             abrBandWidthUpFactor: 0.7,
             storage: null,
@@ -2034,26 +2096,45 @@ function startHlsVideo(video){
             hls.loadSource(streamUrl);
         });
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            // 代理视频限制最高码率级别为 720p，避免 1080p/1760p 通过代理加载缓慢
+            // 代理视频：清晰度限制在 480p ~ 720p 区间，网速好自动升到 720p
             if(isProxyVid && hls.levels && hls.levels.length > 0){
                 const maxLevel = hls.levels.length - 1;
-                let restrictedMax = maxLevel;
+                let minLevelIdx = 0;
+                let maxLevelIdx = maxLevel;
+                let found480 = false;
+                let found720 = false;
+
                 for(let i = 0; i <= maxLevel; i++){
                     const h = hls.levels[i].height || 0;
-                    if(h > 720){ restrictedMax = i - 1; break; }
+                    if(!found480 && h >= 480){ minLevelIdx = i; found480 = true; }
+                    if(h <= 720){ maxLevelIdx = i; found720 = true; }
+                    if(h > 720) break;
                 }
-                if(restrictedMax < maxLevel && restrictedMax >= 0){
-                    hls.currentLevel = 0;
-                    // 限制自动码率切换不超过 720p
-                    // 通过设置 autoLevelCapping 实现
-                    hls.autoLevelCapping = restrictedMax;
-                }
+                if(!found480) minLevelIdx = 0;
+                if(!found720) maxLevelIdx = maxLevel;
+                if(minLevelIdx > maxLevelIdx) minLevelIdx = maxLevelIdx;
+
+                // 设置上限（ABR 自动切换不超过 720p）
+                hls.autoLevelCapping = maxLevelIdx;
+                // 从 480p 起步，平衡起播速度和初始画质
+                hls.currentLevel = minLevelIdx;
+                // 记录上下限供 ABR 切换事件使用
+                hls._minAutoLevel = minLevelIdx;
+                hls._maxAutoLevel = maxLevelIdx;
             }
             hls.startLoad();
             video.dataset.hlsLoaded = "1";
-            // 代理视频采用两次点击模式：第一次仅加载 manifest，不自动播放
-            if(!manualSecondClick){
+            // 预加载模式不自动播放，仅加载数据；正常模式点击一次即播放
+            if(video.dataset.preloadMode !== "1"){
                 playNow();
+            }
+        });
+        // 代理视频：ABR 级别切换下限保护，确保不低于 480p
+        hls.on(Hls.Events.LEVEL_SWITCHED, (_evt, data) => {
+            if(!isProxyVid) return;
+            const minLvl = hls._minAutoLevel;
+            if(minLvl !== undefined && data.level < minLvl){
+                hls.currentLevel = minLvl;
             }
         });
         hls.on(Hls.Events.ERROR, (event, data) => {
@@ -3611,5 +3692,5 @@ window.onload = async function(){
     initLoadAllCache();
 }
 </script>
-</body>
-</html>
+
+</body></html>
