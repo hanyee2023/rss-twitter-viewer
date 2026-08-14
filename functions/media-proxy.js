@@ -41,6 +41,28 @@ function isHttpUrl(rawUrl) {
   return /^https?:\/\//i.test(String(rawUrl || ""));
 }
 
+function isBlockedPrivateHost(rawUrl) {
+  try {
+    const host = String(new URL(rawUrl).hostname || "").toLowerCase().replace(/\.+$/, "");
+    const ipMatch = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (ipMatch) {
+      const [, a] = ipMatch;
+      return host === "0.0.0.0" ||
+        host === "127.0.0.1" ||
+        a === "127" ||
+        a === "10" ||
+        host.startsWith("192.168.") ||
+        /^172\.(1[6-9]|2\d|3[0-1])\./.test(host) ||
+        a === "169"; // 169.254.x.x link-local
+    }
+    return host === "localhost" ||
+      host.endsWith(".local") ||
+      host.endsWith(".internal");
+  } catch (e) {
+    return true;
+  }
+}
+
 function buildProxyUrl(requestUrl, targetUrl) {
   const current = new URL(requestUrl);
   const proxy = new URL(current.pathname, current.origin);
@@ -243,6 +265,9 @@ export async function onRequest({ request }) {
   }
   if (!hostAllowed(targetUrl)) {
     return new Response("该媒体域名不在代理名单中", { status: 403, headers: corsHeaders() });
+  }
+  if (isBlockedPrivateHost(targetUrl)) {
+    return new Response("不允许代理内网地址", { status: 403, headers: corsHeaders() });
   }
 
   try {
