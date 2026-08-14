@@ -13,11 +13,12 @@ const ALLOW_RSS_PROXY_HOSTS = [
   "media.redgifs.com", 
   "redd.it",
   "770118.xyz",
-  "phe69",
+  "phe69.com",
   "3go.fun",
   "rsshub.app",
   "venexa.site",
-  "aguea.com"
+  "aguea.com",
+  "htumeng.com"
 ];
 
 function normalizeHost(host) {
@@ -61,7 +62,7 @@ function corsHeaders(extra = {}) {
   };
 }
 
-export async function onRequest({ request }) {
+export async function onRequest({ request, env }) {
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders() });
   }
@@ -73,6 +74,30 @@ export async function onRequest({ request }) {
   }
   if (isBlockedPrivateHost(targetUrl)) {
     return new Response("不允许代理内网地址", { status: 403, headers: corsHeaders() });
+  }
+
+  // Cloudflare KV 缓存（绑定名 RSS_CACHE）。未绑定时 kv 为 undefined，
+  // 自动降级为原来的实时代理，部署不报错、功能不受影响。
+  const kv = env && env.RSS_CACHE;
+  const cacheKey = targetUrl;
+
+  // 命中 KV → 直接返回，毫秒级、不再回源，大幅提速并降源站压力
+  if (kv) {
+    try {
+      const cached = await kv.get(cacheKey, { type: "json" });
+      if (cached && typeof cached.body === "string") {
+        return new Response(cached.body, {
+          status: cached.status || 200,
+          headers: corsHeaders({
+            "Content-Type": cached.contentType || "application/xml;charset=utf-8",
+            "Cache-Control": "public, max-age=1800",
+            "X-Cache": "HIT"
+          })
+        });
+      }
+    } catch (e) {
+      console.warn("RSS KV 读取失败，回退实时代理：", e);
+    }
   }
 
   try {
@@ -87,10 +112,39 @@ export async function onRequest({ request }) {
     const text = await res.text();
     const headers = corsHeaders({
       "Content-Type": "application/xml;charset=utf-8",
-      "Cache-Control": res.ok ? "public, max-age=1800" : "no-store"
+      "Cache-Control": res.ok ? "public, max-age=1800" : "no-store",
+      "X-Cache": "MISS"
     });
+    // 成功响应写入 KV，TTL 30 分钟（仅在绑定了 RSS_CACHE 时）
+    if (kv && res.ok) {
+      try {
+        await kv.put(cacheKey, JSON.stringify({
+          body: text,
+          status: res.status,
+          contentType: "application/xml;charset=utf-8"
+        }), { expirationTtl: 1800 });
+      } catch (e) {
+        console.warn("RSS KV 写入失败（不影响本次返回）：", e);
+      }
+    }
     return new Response(text, { status: res.status, headers });
   } catch (err) {
+    // 源站失败时，若有 KV 旧数据则降级返回（即使已过期），保证可读
+    if (kv) {
+      try {
+        const stale = await kv.get(cacheKey, { type: "json" });
+        if (stale && typeof stale.body === "string") {
+          return new Response(stale.body, {
+            status: stale.status || 200,
+            headers: corsHeaders({
+              "Content-Type": stale.contentType || "application/xml;charset=utf-8",
+              "Cache-Control": "public, max-age=300",
+              "X-Cache": "STALE"
+            })
+          });
+        }
+      } catch (e) { /* ignore */ }
+    }
     return new Response("RSS代理失败：" + err.message, { status: 502, headers: corsHeaders({ "Cache-Control": "no-store" }) });
   }
 }
