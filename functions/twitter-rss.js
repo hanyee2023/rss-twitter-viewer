@@ -1,16 +1,22 @@
 // Twitter 用户时间线 RSS 生成器
-// 多源回退架构：asia.aguea.com (Nitter) → Syndication API
-// 视频输出策略：
-//   - Nitter 路径：直接输出原始 m3u8 URL，变体过滤在 media-proxy.js 中完成
-//   - Syndication API 路径：选择中等码率 MP4（约 720p），便于浏览器嗅探
+// 多源回退架构：xcancel.com → nitter.catsarch.com → nitter.kareem.one → asia.aguea.com → Syndication API
+// 视频输出策略（优先 MP4，兼容 m3u8）：
+//   - MP4 路径：从 <source src="..."> 或下载链接提取原始 video.twimg.com MP4 URL
+//   - m3u8 路径：从 data-url 属性提取原始 m3u8 URL，变体过滤在 media-proxy.js 中完成
+//   - 图片路径：从代理 URL 解码出原始 pbs.twimg.com 地址
 // 部署到 Cloudflare Pages 的 functions 目录即可使用
 // 订阅地址: /twitter-rss?user=用户名
 
 const DEFAULT_MAX_ITEMS = 20;
 const ABSOLUTE_MAX_ITEMS = 50;
 
-// Nitter 实例列表（按优先级排序，经验证 asia.aguea.com 可用）
+// Nitter 实例列表（按优先级排序）
+// 2026-08-14 验证：xcancel.com / nitter.catsarch.com / nitter.kareem.one 可用
+// asia.aguea.com 当前不可用，保留在末尾等恢复
 const NITTER_INSTANCES = [
+  'https://xcancel.com',
+  'https://nitter.catsarch.com',
+  'https://nitter.kareem.one',
   'https://asia.aguea.com',
 ];
 
@@ -45,17 +51,13 @@ function escapeHtml(text) {
 }
 
 // 从视频变体列表中选择中等码率的 MP4（平衡画质和加载速度）
-// 之前选最高码率导致高分辨率视频加载缓慢，
-// 现在选择最接近 832000bps（约 720p）的变体，确保流畅播放
 function pickBestMp4(variants) {
   const mp4s = variants
     .filter(v => v.content_type === 'video/mp4')
-    .sort((a, b) => (a.bitrate || 0) - (b.bitrate || 0)); // 升序排列
+    .sort((a, b) => (a.bitrate || 0) - (b.bitrate || 0));
 
   if (mp4s.length === 0) return null;
 
-  // 目标码率：832000 bps（约 720p）
-  // 选择最接近目标码率的变体，避免最高码率导致缓冲缓慢
   const targetBitrate = 832000;
   let best = mp4s[0];
   let bestDiff = Infinity;
@@ -80,7 +82,66 @@ function simpleHash(str) {
   return Math.abs(hash).toString(36);
 }
 
-// ─── 方案 A：Nitter HTML 解析（asia.aguea.com，首选）──────────
+// ─── URL 解码工具 ──────────────────────────────────────────────
+
+// 从 Nitter 代理 URL 中提取原始 Twitter CDN URL
+// 代理格式1: https://cdn.xcancel.com/pic/哈希/pbs.twimg.com%2Fprofile_images%2F...
+// 代理格式2: https://cdn.xcancel.com/video/哈希/https%3A%2F%2Fvideo.twimg.com%2F...
+// 代理格式3 (asia.aguea.com): https://venexa.site/media/xxx.jpg
+// 代理格式4: https://nitter.catsarch.com/pic/...
+function decodeNitterProxyUrl(proxyUrl) {
+  if (!proxyUrl) return '';
+  let url = proxyUrl.replace(/&amp;/g, '&');
+
+  // 格式3: venexa.site → 替换为 pbs.twimg.com 或 video.twimg.com
+  if (/venexa\.site/.test(url)) {
+    if (/\/media\//.test(url) || /\.(jpg|jpeg|png|gif|webp)/i.test(url)) {
+      return url.replace(/https?:\/\/venexa\.site\//, 'https://pbs.twimg.com/');
+    }
+    return url.replace(/https?:\/\/venexa\.site\//, 'https://video.twimg.com/');
+  }
+
+  // 格式1/2/4: 从 /pic/ 或 /video/ 路径中提取 URL 编码的原始地址
+  // 匹配 /pic/xxx/ 或 /video/xxx/ 后面的部分
+  const proxyMatch = url.match(/\/(?:pic|video|thumb)\/[A-Za-z0-9]+\/(.+)$/);
+  if (proxyMatch) {
+    let encoded = proxyMatch[1];
+    // URL 解码（可能双重编码）
+    try {
+      // 先检查是否以 http 开头（未编码）
+      if (/^https?:\/\//i.test(encoded)) {
+        return encoded;
+      }
+      // URL 解码
+      let decoded = decodeURIComponent(encoded);
+      // 如果解码后仍然包含 % 编码，再解一次
+      if (decoded.includes('%')) {
+        const decoded2 = decodeURIComponent(decoded);
+        if (decoded2 !== decoded) decoded = decoded2;
+      }
+      // 确保是有效的 HTTP URL
+      if (/^https?:\/\//i.test(decoded)) {
+        return decoded;
+      }
+      // xcancel.com 格式: /pic/哈希/pbs.twimg.com%2F... → 解码后 pbs.twimg.com/...（缺少协议）
+      if (/^(pbs|video)\.twimg\.com\//i.test(decoded)) {
+        return 'https://' + decoded;
+      }
+    } catch (e) {
+      // 解码失败，返回原始
+    }
+  }
+
+  // 如果已经是原始 Twitter CDN URL，直接返回
+  if (/^https?:\/\/(?:pbs|video)\.twimg\.com\//i.test(url)) {
+    return url;
+  }
+
+  // 其他情况返回原始 URL（可能是直连地址）
+  return url;
+}
+
+// ─── 方案 A：Nitter HTML 解析（多实例回退）──────────────────────
 async function fetchFromNitter(username, maxItems) {
   for (const base of NITTER_INSTANCES) {
     try {
@@ -98,19 +159,25 @@ async function fetchFromNitter(username, maxItems) {
       const html = await res.text();
 
       // 检测用户不存在
-      if (html.includes('User not found') || html.includes('does not exist')) {
-        return buildEmptyRss(username, '该用户不存在');
+      if (html.includes('User not found') || html.includes('does not exist') || html.includes('Account suspended')) {
+        return buildEmptyRss(username, '该用户不存在或已被封禁');
       }
 
-      // 检测是否有推文
+      // 检测是否有推文内容
       if (!html.includes('timeline-item')) {
+        continue;
+      }
+
+      // 检测 Cloudflare 验证页
+      if (html.includes('Just a moment') || html.includes('cloudflare') && html.includes('challenge')) {
         continue;
       }
 
       const items = await parseNitterHtml(html, username, maxItems, base);
 
       if (items.length === 0) {
-        return buildEmptyRss(username, '该用户暂无可获取的公开推文');
+        // 当前实例能访问但没有媒体推文，不继续尝试其他实例
+        return buildEmptyRss(username, '该用户暂无可获取的公开推文（仅显示含图片或视频的推文）');
       }
 
       const rss =
@@ -119,7 +186,7 @@ async function fetchFromNitter(username, maxItems) {
         '<channel>\n' +
         '<title>@' + username + ' / Twitter</title>\n' +
         '<link>https://x.com/' + username + '</link>\n' +
-        '<description>Twitter 时间线 - @' + username + '（via Nitter）</description>\n' +
+        '<description>Twitter 时间线 - @' + username + '（via ' + base.replace('https://', '') + '）</description>\n' +
         '<language>zh-CN</language>\n' +
         '<lastBuildDate>' + new Date().toUTCString() + '</lastBuildDate>\n' +
         items.join('\n') + '\n' +
@@ -135,18 +202,31 @@ async function fetchFromNitter(username, maxItems) {
 }
 
 // 解析 Nitter HTML，提取推文、图片、视频
-// asia.aguea.com 的 HTML 结构：
-//   <div class="timeline-item" data-username="xxx">
+// 兼容多种 Nitter 实例的 HTML 结构（xcancel.com / nitter.catsarch.com / asia.aguea.com 等）
+//
+// 通用 HTML 结构（基于 Nitter 最新源码 tweet.nim）:
+//   <div class="timeline-item ...">
 //     <div class="tweet-body">
-//       <div class="tweet-header">...<span class="tweet-date">15h</span></div>
+//       <div class="tweet-header">
+//         ... <span class="tweet-date"><a href="..." title="Aug 14, 2026 · 3:08 AM UTC">10h</a></span>
+//       </div>
 //       <div class="tweet-content media-body" dir="auto">推文文本</div>
 //       <div class="attachments">
-//         <div class="gallery-row">
-//           <div class="attachment image">
-//             <a class="still-image" href="https://venexa.site/media/xxx.jpg">
-//               <img src="https://venexa.site/media/xxx.jpg?name=small&format=webp" />
-//             </a>
-//           </div>
+//         <!-- 图片 -->
+//         <div class="attachment">
+//           <a class="still-image" href="代理URL"><img src="代理URL" /></a>
+//         </div>
+//         <!-- 视频 MP4 模式 -->
+//         <div class="attachment">
+//           <video poster="代理URL" controls>
+//             <source src="代理URL" type="video/mp4">
+//           </video>
+//           <a class="video-download" href="代理URL">Download video</a>
+//         </div>
+//         <!-- 视频 m3u8 模式 -->
+//         <div class="attachment">
+//           <video poster="代理URL" data-url="代理URL" data-autoload="false"></video>
+//           <div class="video-overlay">...</div>
 //         </div>
 //       </div>
 //     </div>
@@ -165,9 +245,9 @@ async function parseNitterHtml(html, username, maxItems, nitterBase) {
     const contentMatch = block.match(/<div class="tweet-content[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
     if (!contentMatch) continue;
 
-    // 清理 HTML 标签，保留纯文本和 @mention
+    // 清理 HTML 标签，保留纯文本和链接文本
     let rawText = contentMatch[1];
-    // 将 <a> 标签的文本保留（如 @mention）
+    // 将 <a> 标签的文本保留（如 @mention、链接文本）
     rawText = rawText.replace(/<a[^>]*>([^<]*)<\/a>/gi, '$1');
     const text = rawText
       .replace(/<br\s*\/?>/gi, '\n')
@@ -183,86 +263,127 @@ async function parseNitterHtml(html, username, maxItems, nitterBase) {
     if (!text) continue;
 
     // 提取日期
-    // asia.aguea.com 的日期格式：<span class="tweet-date">15h</span> 或 <span class="tweet-date">Aug 4</span>
-    const dateMatch = block.match(/<span class="tweet-date"[^>]*>([^<]+)<\/span>/i);
+    // 优先从 <a title="Aug 14, 2026 · 3:08 AM UTC"> 解析精确时间
+    // 回退到 <span class="tweet-date">10h</span> 相对时间
     let pubDate = '';
-    if (dateMatch) {
-      pubDate = parseNitterDate(dateMatch[1].trim());
+    const dateTitleMatch = block.match(/<span class="tweet-date"[^>]*>\s*<a[^>]*title="([^"]+)"/i);
+    if (dateTitleMatch) {
+      pubDate = parseNitterDate(dateTitleMatch[1].trim());
+    }
+    if (!pubDate) {
+      const dateTextMatch = block.match(/<span class="tweet-date"[^>]*>([^<]*<[^>]*>)?([^<]*)<\/span>/i);
+      if (dateTextMatch) {
+        const dateText = (dateTextMatch[2] || dateTextMatch[1] || '').replace(/<[^>]+>/g, '').trim();
+        if (dateText) pubDate = parseNitterDate(dateText);
+      }
+    }
+    if (!pubDate) {
+      // 兜底：直接从 tweet-date 块提取所有文本
+      const dateFallback = block.match(/<span class="tweet-date"[^>]*>([\s\S]*?)<\/span>/i);
+      if (dateFallback) {
+        const dateText = dateFallback[1].replace(/<[^>]+>/g, '').trim();
+        if (dateText) pubDate = parseNitterDate(dateText);
+      }
     }
     if (!pubDate) pubDate = new Date().toUTCString();
 
     // 提取图片
-    // 格式：<a class="still-image" href="https://venexa.site/media/xxx.jpg" ...>
-    const imageRegex = /<a[^>]*class="still-image"[^>]*href="([^"]+)"/gi;
+    // 格式：<a class="still-image" href="代理URL">
     const imageUrls = [];
+    const imageRegex = /<a[^>]*class="still-image"[^>]*href="([^"]+)"/gi;
     let imgMatch;
     while ((imgMatch = imageRegex.exec(block)) !== null) {
-      imageUrls.push(imgMatch[1]);
+      const originalUrl = decodeNitterProxyUrl(imgMatch[1]);
+      if (originalUrl) imageUrls.push(originalUrl);
     }
 
     // 提取视频
-    // asia.aguea.com 的视频格式：<video poster="xxx.jpg" data-url="xxx.m3u8" data-autoload="false"></video>
-    // 不使用 src 属性，而是用 data-url 存放 m3u8 链接，用 poster 存放预览图
-    // 直接输出原始 m3u8 URL，变体过滤（选择中等码率、保留音频轨道）在 media-proxy.js 中完成
-    const videoRegex = /<video[^>]*\sdata-url="([^"]+)"[^>]*>/gi;
-    const videoPosterRegex = /<video[^>]*\sposter="([^"]+)"[^>]*>/gi;
+    // 优先级 1: <source src="代理URL" type="video/mp4"> （MP4 直链）
+    // 优先级 2: <a class="video-download" href="代理URL"> （下载链接，通常也是 MP4）
+    // 优先级 3: <video data-url="代理URL"> （m3u8 流）
     const videoUrls = [];
     const videoPosters = [];
+
+    // 提取 video 标签的 poster
+    const videoPosterRegex = /<video[^>]*\sposter="([^"]+)"[^>]*>/gi;
     let vidMatch;
-    while ((vidMatch = videoRegex.exec(block)) !== null) {
-      videoUrls.push(vidMatch[1]);
-    }
     while ((vidMatch = videoPosterRegex.exec(block)) !== null) {
-      videoPosters.push(vidMatch[1]);
+      videoPosters.push(decodeNitterProxyUrl(vidMatch[1]));
+    }
+
+    // 优先：MP4 <source> 标签
+    const sourceRegex = /<source[^>]*\ssrc="([^"]+)"[^>]*>/gi;
+    while ((vidMatch = sourceRegex.exec(block)) !== null) {
+      const mp4Url = decodeNitterProxyUrl(vidMatch[1]);
+      if (mp4Url && /\.mp4/i.test(mp4Url)) {
+        videoUrls.push(mp4Url);
+      }
+    }
+
+    // 如果没有 <source>，尝试 video-download 链接（通常是 MP4 直链）
+    if (videoUrls.length === 0) {
+      const downloadRegex = /<a[^>]*class="video-download"[^>]*href="([^"]+)"/gi;
+      while ((vidMatch = downloadRegex.exec(block)) !== null) {
+        const dlUrl = decodeNitterProxyUrl(vidMatch[1]);
+        if (dlUrl && /\.mp4/i.test(dlUrl)) {
+          videoUrls.push(dlUrl);
+        }
+      }
+    }
+
+    // 如果仍没有视频，尝试 m3u8 data-url（部分实例如 asia.aguea.com 使用此格式）
+    if (videoUrls.length === 0) {
+      const dataUrlRegex = /<video[^>]*\sdata-url="([^"]+)"[^>]*>/gi;
+      while ((vidMatch = dataUrlRegex.exec(block)) !== null) {
+        const m3u8Url = decodeNitterProxyUrl(vidMatch[1]);
+        if (m3u8Url) videoUrls.push(m3u8Url);
+      }
     }
 
     // 过滤掉无媒体条目：只显示包含图片或视频的推文
     if (imageUrls.length === 0 && videoUrls.length === 0) continue;
 
-    // 生成伪推文 ID（asia.aguea.com 不提供推文状态链接）
-    // 优先用第一张图片的文件名，其次用文本哈希
-    let pseudoId = '';
-    if (imageUrls.length > 0) {
-      const fnMatch = imageUrls[0].match(/\/media\/([^.]+)/);
-      if (fnMatch) pseudoId = fnMatch[1];
+    // 生成推文链接
+    // 优先从日期链接中提取真实推文 ID
+    let tweetId = '';
+    const statusLinkMatch = block.match(/href="[^"]*\/status\/(\d+)/i);
+    if (statusLinkMatch) {
+      tweetId = statusLinkMatch[1];
     }
-    if (!pseudoId && videoUrls.length > 0) {
-      const fnMatch = videoUrls[0].match(/\/amplify_video\/([^/]+)/);
-      if (fnMatch) pseudoId = fnMatch[1];
-    }
-    if (!pseudoId) {
-      pseudoId = simpleHash(text + pubDate);
+    if (!tweetId) {
+      // 回退：用媒体 URL 文件名或文本哈希生成伪 ID
+      if (imageUrls.length > 0) {
+        const fnMatch = imageUrls[0].match(/\/media\/([^.\/]+)/);
+        if (fnMatch) tweetId = fnMatch[1];
+      }
+      if (!tweetId && videoUrls.length > 0) {
+        const fnMatch = videoUrls[0].match(/\/amplify_video\/([^\/]+)/);
+        if (fnMatch) tweetId = fnMatch[1];
+      }
+      if (!tweetId) tweetId = simpleHash(text + pubDate);
     }
 
-    const tweetLink = 'https://x.com/' + username + '/status/' + pseudoId;
+    const tweetLink = 'https://x.com/' + username + '/status/' + tweetId;
 
     // 构建描述 HTML
     let desc = '<p>' + escapeHtml(text) + '</p>';
 
-    // 添加图片
-    // 将 venexa.site 替换为 pbs.twimg.com，通过官方 CDN 代理速度更快
+    // 添加图片（使用原始 pbs.twimg.com URL，通过 media-proxy 代理播放）
     for (const imgUrl of imageUrls) {
-      const twimgUrl = imgUrl.replace(/https?:\/\/venexa\.site\//, 'https://pbs.twimg.com/');
-      desc += '<img src="' + twimgUrl + '" />';
+      desc += '<img src="' + escapeHtml(imgUrl) + '" />';
     }
 
-    // 添加视频（直接输出原始 m3u8 URL，变体过滤在 media-proxy.js 中完成）
-    // Twitter CDN 的视频以 fMP4 分段（.m4s）存储，音频和视频分离在不同播放列表中。
-    // 主播放列表包含多个变体（如 270p/360p/720p/1080p）和多个音频轨道。
-    // 这里直接输出原始 m3u8 URL，由 media-proxy.js 在代理时过滤变体：
-    //   - 保留中等码率视频变体（约 720p / 832kbps）
-    //   - 保留对应的音频轨道（避免视频无声音）
-    //   - 移除其他变体（避免浏览器嗅探器发现多个链接）
+    // 添加视频
+    // MP4 视频：直接输出原始 video.twimg.com URL，由阅读器的 media-proxy 代理
+    // m3u8 视频：输出原始 m3u8 URL，由 media-proxy 做变体过滤
     for (let i = 0; i < videoUrls.length; i++) {
       const videoUrl = videoUrls[i];
-      const posterUrl = videoPosters[i] || '';
-      const cleanVideoUrl = videoUrl.replace(/&amp;/g, '&').replace(/https?:\/\/venexa\.site\//, 'https://video.twimg.com/');
-      const cleanPosterUrl = posterUrl.replace(/&amp;/g, '&').replace(/https?:\/\/venexa\.site\//, 'https://pbs.twimg.com/');
+      const posterUrl = videoPosters[i] || (imageUrls.length > 0 ? imageUrls[0] : '');
 
       if (posterUrl) {
-        desc += '<img src="' + cleanPosterUrl + '" />';
+        desc += '<img src="' + escapeHtml(posterUrl) + '" />';
       }
-      desc += '<video src="' + cleanVideoUrl + '" controls></video>';
+      desc += '<video src="' + escapeHtml(videoUrl) + '" controls></video>';
     }
 
     items.push(
@@ -281,12 +402,35 @@ async function parseNitterHtml(html, username, maxItems, nitterBase) {
 
 // 解析 Nitter 日期格式
 // 支持的格式：
+//   精确时间 (title 属性): "Aug 14, 2026 · 3:08 AM UTC"
 //   相对时间: "15h", "2d", "3m", "30s"
 //   绝对时间: "Aug 4", "Aug 4, 2025", "Jan 5"
 function parseNitterDate(dateStr) {
   if (!dateStr) return '';
 
   const now = new Date();
+
+  // 精确时间格式: "Aug 14, 2026 · 3:08 AM UTC" 或 "Aug 14, 2026, 3:08 AM"
+  // 这是 Nitter <a title="..."> 中提供的完整时间戳
+  const preciseMatch = dateStr.match(/^([A-Z][a-z]{2})\s+(\d{1,2}),?\s+(\d{4})[,\s·]+(\d{1,2}):(\d{2})\s*(AM|PM)?\s*(UTC)?$/i);
+  if (preciseMatch) {
+    const months = {
+      'Jan': 0, 'Feb': 1, 'Mar': 2, 'Apr': 3, 'May': 4, 'Jun': 5,
+      'Jul': 6, 'Aug': 7, 'Sep': 8, 'Oct': 9, 'Nov': 10, 'Dec': 11
+    };
+    const month = months[preciseMatch[1]];
+    if (month !== undefined) {
+      const day = parseInt(preciseMatch[2]);
+      const year = parseInt(preciseMatch[3]);
+      let hour = parseInt(preciseMatch[4]);
+      const minute = parseInt(preciseMatch[5]);
+      const ampm = preciseMatch[6];
+      if (ampm && /PM/i.test(ampm) && hour < 12) hour += 12;
+      if (ampm && /AM/i.test(ampm) && hour === 12) hour = 0;
+      const d = new Date(Date.UTC(year, month, day, hour, minute, 0));
+      if (!isNaN(d.getTime())) return d.toUTCString();
+    }
+  }
 
   // "15h" → 15小时前
   const hoursMatch = dateStr.match(/^(\d+)h$/i);
@@ -317,7 +461,6 @@ function parseNitterDate(dateStr) {
   }
 
   // "Aug 4" 或 "Aug 4, 2025" 格式
-  // Nitter 默认不显示年份，假设是当前年份
   const monthDayMatch = dateStr.match(/^([A-Z][a-z]{2})\s+(\d{1,2})(?:,?\s*(\d{4}))?$/);
   if (monthDayMatch) {
     const monthName = monthDayMatch[1];
@@ -329,7 +472,6 @@ function parseNitterDate(dateStr) {
     };
     const month = months[monthName];
     if (month !== undefined) {
-      // 如果日期是未来的日期且没有指定年份，可能是去年的
       let actualYear = year;
       if (!monthDayMatch[3]) {
         const candidate = new Date(year, month, day);
@@ -352,7 +494,7 @@ function parseNitterDate(dateStr) {
   return now.toUTCString();
 }
 
-// ─── 方案 B：Syndication API（回退）──────────────────────────
+// ─── 方案 B：Syndication API（最终回退）────────────────────────
 async function fetchFromSyndication(username, maxItems) {
   try {
     const res = await fetch(SYNDICATION_BASE + username, {
@@ -367,6 +509,9 @@ async function fetchFromSyndication(username, maxItems) {
 
     const html = await res.text();
 
+    // 检测限速
+    if (html.includes('Rate limit exceeded')) return null;
+
     const match = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
     if (!match) return null;
 
@@ -379,7 +524,7 @@ async function fetchFromSyndication(username, maxItems) {
     const hasResults = data?.props?.pageProps?.contextProvider?.hasResults;
 
     if (!hasResults || entries.length === 0) {
-      return buildEmptyRss(username, 'Syndication API 对该用户返回空（Twitter 可能对该用户限制了无认证访问）');
+      return null;
     }
 
     const items = [];
@@ -402,20 +547,26 @@ async function fetchFromSyndication(username, maxItems) {
       let desc = '<p>' + escapeHtml(text) + '</p>';
 
       const mediaList = tweet.entities?.media || [];
+      let hasMedia = false;
       for (const m of mediaList) {
         if (m.type === 'photo') {
-          desc += '<img src="' + (m.media_url_https || '') + '" />';
+          desc += '<img src="' + escapeHtml(m.media_url_https || '') + '" />';
+          hasMedia = true;
         } else if (m.type === 'video' || m.type === 'animated_gif') {
           const poster = m.media_url_https || '';
           if (poster) {
-            desc += '<img src="' + poster + '" />';
+            desc += '<img src="' + escapeHtml(poster) + '" />';
           }
           const mp4Url = pickBestMp4(m.video_info?.variants || []);
           if (mp4Url) {
-            desc += '<video src="' + mp4Url + '" controls></video>';
+            desc += '<video src="' + escapeHtml(mp4Url) + '" controls></video>';
+            hasMedia = true;
           }
         }
       }
+
+      // 只保留有媒体的推文
+      if (!hasMedia) continue;
 
       items.push(
         '<item>\n' +
@@ -429,7 +580,7 @@ async function fetchFromSyndication(username, maxItems) {
     }
 
     if (items.length === 0) {
-      return buildEmptyRss(username, '该用户暂无可获取的公开推文');
+      return null;
     }
 
     const rss =
@@ -491,10 +642,10 @@ export async function onRequest({ request }) {
     });
   }
 
-  // 方案 A：尝试 Nitter HTML 解析（首选）
+  // 方案 A：尝试 Nitter HTML 解析（多实例依次回退）
   let rss = await fetchFromNitter(username, maxItems);
 
-  // 方案 B：Nitter 失败，回退到 Syndication API
+  // 方案 B：所有 Nitter 实例失败，回退到 Syndication API
   if (!rss) {
     rss = await fetchFromSyndication(username, maxItems);
   }
