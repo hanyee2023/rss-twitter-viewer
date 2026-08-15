@@ -370,9 +370,9 @@ function buildCard(item, isFav = false){
     // 优先使用 videoPoster（从 <video poster="..."> 属性提取的视频缩略图）
     // 回退到 imgs[0]（兼容旧格式 RSS）
     const posterImg = item.videoPoster || (imgs.length > 0 ? imgs[0] : "");
-    const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) + "&twname=medium" : "";
+    const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
     const posterDirect = posterImg ? cleanMediaUrl(posterImg) : "";
-    const posterAttr = posterProxy ? `poster="${escapeAttr(posterProxy)}"` : ""; // 恢复原生 <video poster>：渲染即显示封面，无黑屏、无逐点加载
+    const posterAttr = posterProxy ? (hostMatched(posterImg) ? `poster="${escapeAttr(posterProxy + "&twname=medium")}"` : `poster="${escapeAttr(posterProxy)}"`) : ""; // 原生 <video poster>：代理图加 twname 尺寸优化，直连图原样，渲染即显示封面
     const posterDirectAttr = posterDirect ? `data-poster-direct="${escapeAttr(posterDirect)}"` : "";
     const posterFallbacksArr = posterImg && hostMatched(posterImg) ? getMediaProxyCandidates(posterImg, isFav).slice(1) : [];
     const posterFallbacksAttr = posterFallbacksArr.length > 0 ? `data-poster-proxy-fallbacks="${escapeAttr(JSON.stringify(posterFallbacksArr))}"` : "";
@@ -398,9 +398,9 @@ function buildCard(item, isFav = false){
     // 优先使用 videoPoster（从 <video poster="..."> 属性提取的视频缩略图）
     // 回退到 imgs[0]（兼容旧格式 RSS）
     const posterImg = item.videoPoster || (imgs.length > 0 ? imgs[0] : "");
-    const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) + "&twname=medium" : "";
+    const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
     const posterDirect = posterImg ? cleanMediaUrl(posterImg) : "";
-    const posterAttr = posterProxy ? `poster="${escapeAttr(posterProxy)}"` : ""; // 恢复原生 <video poster>：渲染即显示封面，无黑屏、无逐点加载
+    const posterAttr = posterProxy ? (hostMatched(posterImg) ? `poster="${escapeAttr(posterProxy + "&twname=medium")}"` : `poster="${escapeAttr(posterProxy)}"`) : ""; // 原生 <video poster>：代理图加 twname 尺寸优化，直连图原样，渲染即显示封面
     const posterDirectAttr = posterDirect ? `data-poster-direct="${escapeAttr(posterDirect)}"` : "";
     const posterFallbacksArr = posterImg && hostMatched(posterImg) ? getMediaProxyCandidates(posterImg, isFav).slice(1) : [];
     const posterFallbacksAttr = posterFallbacksArr.length > 0 ? `data-poster-proxy-fallbacks="${escapeAttr(JSON.stringify(posterFallbacksArr))}"` : "";
