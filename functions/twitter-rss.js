@@ -150,6 +150,14 @@ function decodeNitterProxyUrl(proxyUrl) {
     return url.replace(/https?:\/\/venexa\.site\//, 'https://video.twimg.com/');
   }
 
+  // 格式5: 部分 Nitter 实例（如 xcancel.com）把图片/视频封面输出为 /i/ 前缀的未编码 twimg 路径，
+  // 例如 https://cdn.xcancel.com/i/pbs.twimg.com/ext_tw_video_thumb/.../png
+  // 不还原的话前端会去代理 cdn.xcancel.com/i/... 而失败，导致「视频能播、封面不显示」
+  const iMatch = url.match(/\/i\/((?:pbs|video|abs)\.twimg\.com\/.+)$/i);
+  if (iMatch) {
+    return 'https://' + iMatch[1];
+  }
+
   // 格式1/2/4: 从 /pic/ 或 /video/ 路径中提取 URL 编码的原始地址
   // 匹配 /pic/xxx/ 或 /video/xxx/ 后面的部分
   const proxyMatch = url.match(/\/(?:pic|video|thumb)\/[A-Za-z0-9]+\/(.+)$/);
