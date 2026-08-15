@@ -729,7 +729,7 @@ function buildEmptyRss(username, reason) {
 }
 
 // ─── 主入口：多源回退 ──────────────────────────────────────────
-export async function onRequest({ request }) {
+export async function onRequest({ request, env }) {
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders() });
   }
@@ -752,17 +752,50 @@ export async function onRequest({ request }) {
     });
   }
 
+  // KV 缓存（命名空间 rss-video-cache，已在 Cloudflare 后台绑定）
+  // 命中则直接返回，毫秒级、不再回源打 Nitter，既提速又抗 Nitter 限流/封锁
+  const kv = env && env["rss-video-cache"];
+  const cacheKey = `twrss:${username}:${maxItems}`;
+  if (kv) {
+    try {
+      const cached = await kv.get(cacheKey, { type: "text" });
+      if (cached) {
+        return new Response(cached, {
+          status: 200,
+          headers: corsHeaders({
+            'Content-Type': 'application/rss+xml; charset=utf-8',
+            'Cache-Control': 'public, max-age=60, stale-while-revalidate=240',
+            'X-Cache': 'HIT',
+          }),
+        });
+      }
+    } catch (e) {
+      console.warn("twitter-rss KV 读取失败，回退实时代理：", e);
+    }
+  }
+
   // 方案 A：尝试 Nitter HTML 解析（多实例依次回退）
   let rss = await fetchFromNitter(username, maxItems);
+  let gotReal = !!rss;
 
   // 方案 B：所有 Nitter 实例失败，回退到 Syndication API
   if (!rss) {
     rss = await fetchFromSyndication(username, maxItems);
+    gotReal = !!rss;
   }
 
   // 所有方案都失败
   if (!rss) {
     rss = buildEmptyRss(username, '所有数据源均不可用，可能是网络问题或 Twitter 风控限制，请稍后重试');
+  }
+
+  // 仅缓存真实抓取到的内容；空结果/失败不缓存，以便尽快重试源站
+  if (kv && gotReal && rss) {
+    try {
+      await kv.put(cacheKey, rss, { expirationTtl: 300 });
+    } catch (e) {
+      console.warn("twitter-rss KV 写入失败（不影响本次返回）：", e);
+    }
   }
 
   return new Response(rss, {
@@ -771,6 +804,7 @@ export async function onRequest({ request }) {
       'Content-Type': 'application/rss+xml; charset=utf-8',
       'Cache-Control': 'public, max-age=300, stale-while-revalidate=300',
       'ETag': '"' + username + '-' + maxItems + '-' + Math.floor(Date.now() / 300000) + '"',
+      'X-Cache': gotReal ? 'MISS' : 'BYPASS',
     }),
   });
 }
