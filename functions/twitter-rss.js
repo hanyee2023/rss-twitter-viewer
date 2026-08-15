@@ -1,5 +1,5 @@
 // Twitter 用户时间线 RSS 生成器
-// 多源回退架构：xcancel.com → nitter.catsarch.com → nitter.kareem.one → asia.aguea.com → Syndication API
+// 多源回退架构：xcancel.com → nitter.catsarch.com → nitter.kareem.one → Syndication API
 // 视频输出策略（优先 MP4，兼容 m3u8）：
 //   - MP4 路径：从 <source src="..."> 或下载链接提取原始 video.twimg.com MP4 URL
 //   - m3u8 路径：从 data-url 属性提取原始 m3u8 URL，变体过滤在 media-proxy.js 中完成
@@ -10,18 +10,19 @@
 const DEFAULT_MAX_ITEMS = 20;
 const ABSOLUTE_MAX_ITEMS = 50;
 
-// Nitter 实例列表（按优先级排序）
-// 2026-08-15 复验：
-//   xcancel.com        ✅ 可用（推文+视频附件完整，无拦截）
-//   nitter.kareem.one  ✅ 已恢复可用（此前曾遭 Cloudflare 拦截，现已正常）
-//   nitter.catsarch.com ✅ 上次(08-14)验证可用，本次未复验，保持原序
-//   asia.aguea.com     ⚠️ 首页/搜索页在线，但用户时间线(/username)纯HTTP抓取返回404，
-//                      后端 fetch 无法取到推文，故仍置末尾、暂不置顶（等待恢复后再调整）
+// Nitter 实例列表（按优先级排序，仅保留实测稳定的实例）
+// 2026-08-14 实测复验（以 WebFetch 实际内容为准，curl 出口在本环境不可靠）：
+//   ✅ xcancel.com        —— 时间线正常，媒体走 cdn.xcancel.com 的 /pic/、/video/ 前缀
+//   ✅ nitter.catsarch.com —— 时间线正常，标准 /pic/、/video/ 前缀，无拦截
+//   ✅ nitter.kareem.one  —— 时间线正常，标准 /pic/、/video/ 前缀，已无 Cloudflare 拦截
+//   ❌ vanlett-cn.net      —— 两次连接均 fetch failed（首页与时间线均不可达，疑似域名失效/被墙）
+//   ❌ aguea.com           —— 仅为门户首页（跳 asia.aguea.com），用户时间线 /username 返回 404
+//   ⚠️ asia.aguea.com      —— 首页/搜索在线，但用户时间线 /username 抓取返回 404，后端取不到推文，已移出
+//   结论：保留上述 3 个 ✅ 实例即可；如需更多冗余，可另测公开 Nitter 实例列表再补。
 const NITTER_INSTANCES = [
   'https://xcancel.com',
   'https://nitter.catsarch.com',
   'https://nitter.kareem.one',
-  'https://asia.aguea.com',
 ];
 
 const SYNDICATION_BASE = 'https://syndication.twitter.com/srv/timeline-profile/screen-name/';
