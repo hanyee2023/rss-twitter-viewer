@@ -11,8 +11,12 @@ const DEFAULT_MAX_ITEMS = 20;
 const ABSOLUTE_MAX_ITEMS = 50;
 
 // Nitter 实例列表（按优先级排序）
-// 2026-08-14 验证：xcancel.com / nitter.catsarch.com / nitter.kareem.one 可用
-// asia.aguea.com 当前不可用，保留在末尾等恢复
+// 2026-08-15 复验：
+//   xcancel.com        ✅ 可用（推文+视频附件完整，无拦截）
+//   nitter.kareem.one  ✅ 已恢复可用（此前曾遭 Cloudflare 拦截，现已正常）
+//   nitter.catsarch.com ✅ 上次(08-14)验证可用，本次未复验，保持原序
+//   asia.aguea.com     ⚠️ 首页/搜索页在线，但用户时间线(/username)纯HTTP抓取返回404，
+//                      后端 fetch 无法取到推文，故仍置末尾、暂不置顶（等待恢复后再调整）
 const NITTER_INSTANCES = [
   'https://xcancel.com',
   'https://nitter.catsarch.com',

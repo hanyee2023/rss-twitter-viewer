@@ -8,6 +8,7 @@ const ALLOW_PROXY_HOSTS = [
   "abs.twimg.com",
   "xcancel.com",
   "nitter.net",
+  "16k.club",
   "xxxfollow.com",
   "media.redgifs.com",
   "redd.it",

@@ -17,7 +17,7 @@ const BUILTIN_RSS_HOSTS = [
   "media.redgifs.com",
   "redd.it",
   "770118.xyz",
-  "phe69.com",
+  "phe69",
   "3go.fun",
   "rsshub.app",
   "venexa.site",
