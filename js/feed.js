@@ -327,6 +327,7 @@ window.mergeNewData = async function(){
     renderPageNum = 1;
     renderedArticleCount = 0;
     renderPagedList(true);
+    bindScrollLoadMore();
 }
 
 function renderPagedList(reset = false){
@@ -351,26 +352,44 @@ function renderPagedList(reset = false){
     bindVideoPauseObserver();
     initHlsVideo();
 }
+let mainScrollHandler = null;
+function doLoadMore(){
+    if(loadLock) return;
+    loadLock = true;
+    const prevCount = renderedArticleCount;
+    renderPageNum += 1;
+    renderPagedList();
+    // 如果没有新内容，不再重复绑定
+    if(renderedArticleCount === prevCount){
+        loadLock = false;
+        return;
+    }
+    setTimeout(()=>bindScrollLoadMore(), 30);
+    loadLock = false;
+}
 function bindScrollLoadMore(){
     if(scrollObserver) scrollObserver.disconnect();
     const loadDom = document.getElementById("loadMoreDom");
     if(!loadDom) return;
+    // 滚动事件兜底：内部滚动容器(.main-wrap)下，IntersectionObserver 默认 root=视口不可靠，
+    // 用 scrollTop+clientHeight 判断是否接近底部，确保「划不动」不再发生。
+    if(!mainScrollHandler){
+        mainScrollHandler = () => {
+            if(!pageHome || pageHome.style.display === "none") return;
+            const dom = document.getElementById("loadMoreDom");
+            if(!dom) return;
+            if(mainWrap.scrollTop + mainWrap.clientHeight >= mainWrap.scrollHeight - 200){
+                doLoadMore();
+            }
+        };
+        mainWrap.addEventListener("scroll", mainScrollHandler, {passive: true});
+    }
     scrollObserver = new IntersectionObserver(async (entries)=>{
         const entry = entries[0];
         if(entry.isIntersecting && !loadLock){
-            loadLock = true;
-            const prevCount = renderedArticleCount;
-            renderPageNum += 1;
-            renderPagedList();
-            // 如果没有新内容，不再重复绑定
-            if(renderedArticleCount === prevCount){
-                loadLock = false;
-                return;
-            }
-            setTimeout(()=>bindScrollLoadMore(), 30);
-            loadLock = false;
+            doLoadMore();
         }
-    }, {rootMargin: "150px 0px"});
+    }, {root: mainWrap, rootMargin: "150px 0px"});
     scrollObserver.observe(loadDom);
 }
 
