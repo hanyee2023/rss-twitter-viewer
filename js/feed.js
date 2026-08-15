@@ -3,14 +3,18 @@ function showPage(targetDom, titleText) {
     if (lastPageTitle === titleText) {
         return;
     }
-    const willRestoreHome = titleText === "RSS媒体阅读器" && homeIsCached && homeCachedFilterSourceUrl === filterSourceUrl;
+    const returningHome = titleText === "RSS媒体阅读器";
 
-    if (lastPageTitle === "RSS媒体阅读器") {
+    // 仅当离开的是【完整主页】(filterSourceUrl 为空) 才更新主页快照。
+    // 单源视图(filterSourceUrl 非空) 离开时不要覆盖完整主页快照，否则快照会被单源 HTML 污染，
+    // 之后回主页会错误恢复到单源视图而非完整主页位置。
+    const leavingFullHome = lastPageTitle === "RSS媒体阅读器" && !filterSourceUrl;
+    if (leavingFullHome) {
         markReadByScroll();
         homeScrollTop = mainWrap.scrollTop;
         homeArticleHtml = articleBox.innerHTML;
         homeIsCached = true;
-        homeCachedFilterSourceUrl = filterSourceUrl;
+        homeCachedFilterSourceUrl = "";
         // 离开首页时断开已读观察器，避免非首页卡片被误标记已读
         if(readObserver){
             readObserver.disconnect();
@@ -26,12 +30,21 @@ function showPage(targetDom, titleText) {
 
     feedPanel.innerHTML = "";
     favPanel.innerHTML = "";
+
+    // 回到主页且当前仍处于单源过滤视图：清空过滤，确保恢复的是完整主页（保留上次滚动位置）
+    if (returningHome && filterSourceUrl !== "") {
+        filterSourceUrl = "";
+    }
+    const willRestoreHome = returningHome && homeIsCached && homeCachedFilterSourceUrl === filterSourceUrl;
+
     if (targetDom === pageHome && !willRestoreHome) {
         articleBox.innerHTML = "";
     }
 
-    if (willRestoreHome && !articleBox.innerHTML) {
+    // 恢复到完整主页时，若当前 articleBox 仍是单源内容则无条件用快照覆盖（保留上次位置）
+    if (willRestoreHome && showingSingleSource) {
         articleBox.innerHTML = homeArticleHtml;
+        showingSingleSource = false;
     }
     targetDom.style.display = "block";
     targetDom.scrollTop = 0;
@@ -86,10 +99,28 @@ function showPage(targetDom, titleText) {
 
 btnHome.onclick = async () => {
     const wasFiltered = !!filterSourceUrl;
-    filterSourceUrl = "";
 
     if(lastPageTitle === "RSS媒体阅读器"){
         if(wasFiltered){
+            // 从单源视图点主页：恢复到【完整主页】上次离开的位置（不清空快照、不回顶部，避免重看已读）
+            filterSourceUrl = "";
+            if(homeIsCached && homeArticleHtml){
+                articleBox.innerHTML = homeArticleHtml;
+                showingSingleSource = false;
+                const restore = ()=>{
+                    mainWrap.scrollTop = homeScrollTop;
+                    requestAnimationFrame(()=>{ mainWrap.scrollTop = homeScrollTop; });
+                };
+                setTimeout(restore, 0);
+                setTimeout(restore, 80);
+                setTimeout(restore, 250);
+                bindAllCardEvent();
+                bindVideoPauseObserver();
+                initHlsVideo();
+                bindScrollLoadMore();
+                return;
+            }
+            // 无快照兜底：渲染完整主页顶部
             homeIsCached = false;
             renderHomeFromCache();
             mainWrap.scrollTop = 0;
@@ -195,6 +226,7 @@ async function initLoadAllCache() {
 
 function renderHomeFromCache() {
     if(scrollObserver) scrollObserver.disconnect();
+    showingSingleSource = !!filterSourceUrl; // 同步视图状态：有过滤=单源视图，否则完整主页
     renderPageNum = 0;
     renderedArticleCount = 0;
     loadLock = false;
@@ -215,6 +247,7 @@ function renderHomeFromCache() {
 
 async function renderSingleFeedFromSource(sourceUrl){
     if(scrollObserver) scrollObserver.disconnect();
+    showingSingleSource = true; // 标记进入单源视图，避免其 HTML 污染主页快照
     const feed = feedList.find(f => String(f.url).trim() === String(sourceUrl).trim());
     const fallbackList = localCacheArticles.filter(item => item.sourceUrl.trim() === String(sourceUrl).trim());
     // 先渲染本地缓存（主页已加载的数据），实现「切换即见」，随后后台静默刷新覆盖

@@ -245,6 +245,7 @@ let homeScrollTop = 0;
 let homeArticleHtml = "";
 let homeIsCached = false;
 let homeCachedFilterSourceUrl = "";
+let showingSingleSource = false; // 当前是否处于「单源阅读」视图（用于主页快照恢复判断）
 let readObserver = null;
 let updateFloatTimer = null;
 let lastRefreshTime = Number(localStorage.getItem(LAST_REFRESH_KEY)) || 0;
