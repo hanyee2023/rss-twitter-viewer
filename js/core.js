@@ -26,7 +26,7 @@ const FORCE_PROXY_HOSTS = [
     "redd.it",
     "770118.xyz",
     "phe69",
-    "3go.fun",
+    "video.3go.fun",
     "rsshub.app",
     "venexa.site",
     "aguea.com",
@@ -216,7 +216,7 @@ const ARTICLE_CACHE_KEY = "rss_article_cache";
 const BLOCK_KEYWORD_KEY = "rss_block_keywords";
 const LAST_REFRESH_KEY = "rss_last_refresh_time";
 const PAGE_SIZE = 30;
-const ARTICLE_CACHE_LIMIT = 600;
+const ARTICLE_CACHE_LIMIT = 800; // 全局文章缓存上限：原 600，提高到 800（约 2 天 @400条/天），localStorage 约 2-3MB 安全范围内
 const FETCH_TIMEOUT = 10000;
 const RSS_CONCURRENCY = 5;
 const AUTO_REFRESH_INTERVAL = 5 * 60 * 1000;

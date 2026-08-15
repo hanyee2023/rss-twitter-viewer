@@ -217,22 +217,23 @@ async function renderSingleFeedFromSource(sourceUrl){
     if(scrollObserver) scrollObserver.disconnect();
     const feed = feedList.find(f => String(f.url).trim() === String(sourceUrl).trim());
     const fallbackList = localCacheArticles.filter(item => item.sourceUrl.trim() === String(sourceUrl).trim());
-    articleBox.innerHTML = `<div class="empty-tip">正在加载该订阅内容...</div>`;
+    // 先渲染本地缓存（主页已加载的数据），实现「切换即见」，随后后台静默刷新覆盖
+    if(fallbackList.length > 0){
+        currentArticles = [...fallbackList];
+        renderPageNum = 1;
+        renderedArticleCount = 0;
+        loadLock = false;
+        renderPagedList(true);
+        bindScrollLoadMore();
+        showToast("正在后台刷新该订阅…");
+    }else{
+        articleBox.innerHTML = `<div class="empty-tip">正在加载该订阅内容...</div>`;
+    }
     try{
         const xmlText = await fetchRSSFeed(sourceUrl);
         const list = parseRSS(xmlText, feed ? feed.name : "未命名订阅", sourceUrl, feed ? feed.category : "img")
             .sort((a,b)=>new Date(b.date).getTime() - new Date(a.date).getTime());
-        if(list.length === 0){
-            // 解析为空，尝试缓存
-            const cache = getRssCache(sourceUrl);
-            if(cache && cache.items && cache.items.length > 0){
-                currentArticles = cache.items;
-                showToast("该订阅未解析到新内容，已显示缓存");
-            }else{
-                currentArticles = fallbackList;
-                articleBox.innerHTML = fallbackList.length ? "" : `<div class="empty-tip">该订阅暂未解析到内容</div>`;
-            }
-        }else{
+        if(list.length > 0){
             currentArticles = list;
             // 保存缓存
             saveRssCache(sourceUrl, list);
@@ -242,36 +243,53 @@ async function renderSingleFeedFromSource(sourceUrl){
             localCacheArticles = merged;
             allArticles = [...merged];
             saveArticleCacheToStorage(merged);
+            renderPageNum = 1;
+            renderedArticleCount = 0;
+            loadLock = false;
+            renderPagedList(true);
+            bindScrollLoadMore();
+        }else{
+            // 解析为空：已有缓存则保留，无需重绘
+            const cache = getRssCache(sourceUrl);
+            if(fallbackList.length === 0 && (!cache || !cache.items || cache.items.length === 0)){
+                articleBox.innerHTML = `<div class="empty-tip">该订阅暂未解析到内容</div>`;
+            }
         }
     }catch(err){
         console.warn("单订阅加载失败：", err);
         const errDesc = describeRssError(err);
-        // 尝试使用 RSS 缓存
-        const cache = getRssCache(sourceUrl);
-        if(cache && cache.items && cache.items.length > 0){
-            currentArticles = cache.items;
-            console.warn("订阅加载失败，已回退至本地缓存：", errDesc);
+        // 已有本地缓存则保留显示，仅提示后台刷新失败
+        if(fallbackList.length > 0){
+            showToast("后台刷新失败，仍显示本地缓存：" + errDesc);
         }else{
-            currentArticles = fallbackList;
-            articleBox.innerHTML = fallbackList.length ? "" : `<div class="empty-tip">该订阅加载失败：${errDesc}</div>`;
+            const cache = getRssCache(sourceUrl);
+            if(cache && cache.items && cache.items.length > 0){
+                currentArticles = cache.items;
+                showToast("订阅加载失败，已回退至本地缓存：" + errDesc);
+                renderPageNum = 1; renderedArticleCount = 0; loadLock = false;
+                renderPagedList(true); bindScrollLoadMore();
+            }else{
+                articleBox.innerHTML = `<div class="empty-tip">该订阅加载失败：${errDesc}</div>`;
+            }
         }
-    }
-    if(currentArticles.length > 0){
-        renderPageNum = 1;
-        renderedArticleCount = 0;
-        loadLock = false;
-        renderPagedList(true);
-        bindScrollLoadMore();
     }
 }
 
 window.mergeNewData = async function(){
     if(scrollObserver) scrollObserver.disconnect();
-    allArticles = await loadAllRSS();
-    localCacheArticles = [...allArticles];
-    saveArticleCacheToStorage(allArticles);
-    let filterArticles = allArticles;
-    if(filterSourceUrl) filterArticles = allArticles.filter(item => item.sourceUrl === filterSourceUrl);
+    const fresh = await loadAllRSS();
+    // 累积合并：保留本地缓存中「本次刷新未返回」的旧条目（按 link 去重），
+    // 避免 twitter 源（每源仅返回最新 N 条）刷新后，更早的未读内容被整批清除。
+    const freshLinks = new Set(fresh.map(i => i.link));
+    const oldKept = localCacheArticles.filter(i => i.link && !freshLinks.has(i.link));
+    const merged = [...fresh, ...oldKept]
+        .sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+        .slice(0, ARTICLE_CACHE_LIMIT);
+    allArticles = merged;
+    localCacheArticles = [...merged];
+    saveArticleCacheToStorage(merged);
+    let filterArticles = merged;
+    if(filterSourceUrl) filterArticles = merged.filter(item => item.sourceUrl === filterSourceUrl);
     currentArticles = [...filterArticles];
     renderPageNum = 1;
     renderedArticleCount = 0;
