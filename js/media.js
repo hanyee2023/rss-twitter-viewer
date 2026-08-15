@@ -21,15 +21,6 @@ function initVideoObserver(){
                 if(video.dataset.savedTime && !video.src){
                     restoreVideoFromMem(video);
                 }
-                // ③ 预览图随视频一起懒加载（代理/直连全覆盖）：进入视口才加载封面，避免一上来拉全部图
-                const posterImgEl = video.parentElement && video.parentElement.querySelector(".video-poster-img");
-                if(posterImgEl && !posterImgEl.getAttribute("src") && posterImgEl.dataset.posterSrc){
-                    posterImgEl.src = posterImgEl.dataset.posterSrc;
-                    // 图加载完后同步给 video 原生 poster（同一 URL，走缓存不再请求），播放起始避免黑屏
-                    posterImgEl.addEventListener("load", () => {
-                        try { video.poster = posterImgEl.currentSrc || posterImgEl.src; } catch(e){}
-                    }, { once: true });
-                }
             }else{
                 _visibleVideos.delete(video);
                 video.pause();
@@ -55,7 +46,7 @@ function initVideoObserver(){
                 tryReleaseVideoMemory(video);
             }
         })
-    }, {threshold:0.01, rootMargin: "300px 0px 700px 0px"});
+    }, {threshold:0.01, rootMargin: "100px 0px 250px 0px"});
 }
 
 // 优化7：m3u8 代理视频预加载首段分片（进入视口时静默加载，点击即播）
@@ -215,13 +206,8 @@ function getVideoErrorMessage(video, fallback = "视频播放失败"){
     }
 }
 
-// 视频加载圈：点击即显示，播放或出错时隐藏（让用户确认点击已生效，且不误以为卡死）
-function setVideoLoading(video, on){
-    const wrap = video.closest(".video-single-wrap");
-    if(!wrap) return;
-    if(on) wrap.classList.add("is-loading");
-    else wrap.classList.remove("is-loading");
-}
+// 加载圈已移除：点击播放后主按钮图标即切换为“暂停”，已是足够反馈，不需要转圈
+function setVideoLoading(video, on){ /* no-op */ }
 
 function getPlayErrorMessage(err, video, fallback = "视频播放失败"){
     if(err && err.name === "NotAllowedError") return "请再点一次播放";
@@ -238,10 +224,10 @@ function toggleVideoPlay(video){
     const wrapEl = video.closest(".video-single-wrap");
     // 点击即给出反馈：按钮切到“暂停”图标 + 显示加载圈，让用户确认点击已生效
     const showImmediateFeedback = () => {
+        // 仅切换主播放按钮图标为“暂停”作为点击反馈，不再显示加载圈
         if(wrapEl){
             const pb = wrapEl.querySelector(".media-play-btn");
             if(pb) pb.innerHTML = pauseIconSvg();
-            wrapEl.classList.add("is-loading");
         }
         video.dataset.userAttempted = "1";
     };
@@ -721,14 +707,8 @@ function initHlsVideo(){
         bindVideoErrorRetry(video);
         // 优化6：绑定低网速检测
         bindSlowNetworkDetect(video);
-        // 播放开始时隐藏预览图浮层、收起加载圈，露出视频画面
+        // 播放开始：原生 poster 会自动让位于视频画面；清除缓冲超时计时器
         video.addEventListener("playing", () => {
-            const wrapEl = video.closest(".video-single-wrap");
-            if(wrapEl){
-                const pi = wrapEl.querySelector(".video-poster-img");
-                if(pi) pi.style.display = "none";
-                wrapEl.classList.remove("is-loading");
-            }
             if(video._loadTimeout){ clearTimeout(video._loadTimeout); video._loadTimeout = null; }
         });
     });

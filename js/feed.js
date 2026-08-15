@@ -372,7 +372,7 @@ function buildCard(item, isFav = false){
     const posterImg = item.videoPoster || (imgs.length > 0 ? imgs[0] : "");
     const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) + "&twname=medium" : "";
     const posterDirect = posterImg ? cleanMediaUrl(posterImg) : "";
-    let posterAttr = ""; // 预览图改由 overlay 图懒加载（见 IntersectionObserver），不再让 video 原生 poster 也 eager 拉图
+    const posterAttr = posterProxy ? `poster="${escapeAttr(posterProxy)}"` : ""; // 恢复原生 <video poster>：渲染即显示封面，无黑屏、无逐点加载
     const posterDirectAttr = posterDirect ? `data-poster-direct="${escapeAttr(posterDirect)}"` : "";
     const posterFallbacksArr = posterImg && hostMatched(posterImg) ? getMediaProxyCandidates(posterImg, isFav).slice(1) : [];
     const posterFallbacksAttr = posterFallbacksArr.length > 0 ? `data-poster-proxy-fallbacks="${escapeAttr(JSON.stringify(posterFallbacksArr))}"` : "";
@@ -390,9 +390,8 @@ function buildCard(item, isFav = false){
     const twRssAttr = isTwRss ? ' data-twitter-rss="1"' : "";
 
     mediaHtml = `<div class="video-single-wrap">
-        ${posterProxy ? `<img class="video-poster-img" data-poster-src="${escapeAttr(posterProxy)}" referrerpolicy="no-referrer" decoding="async" data-poster-direct="${escapeAttr(posterDirect)}" onerror="if(this.dataset.posterDirect && this.src!==this.dataset.posterDirect){this.src=this.dataset.posterDirect;}">` : ""}
         <video class="media-video" data-m3u8="1" ${proxyVideoAttr}${twRssAttr} preload="none" playsinline ${posterAttr} ${posterDirectAttr} ${posterFallbacksAttr} data-src="${escapeAttr(firstSrc)}" data-alt-src="${escapeAttr(altSrc)}" ${videoFallbacksAttr}>
-</video><div class="video-loading-spinner"></div>${mediaControlsHtml()}</div>`;
+</video>${mediaControlsHtml()}</div>`;
 }else if(item.videoUrl){
     // MP4视频：单独class media-video-mp4，完全脱离HLS逻辑
     const imgs = [...new Set(item.media.imgs || [])];
@@ -401,7 +400,7 @@ function buildCard(item, isFav = false){
     const posterImg = item.videoPoster || (imgs.length > 0 ? imgs[0] : "");
     const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) + "&twname=medium" : "";
     const posterDirect = posterImg ? cleanMediaUrl(posterImg) : "";
-    let posterAttr = ""; // 预览图改由 overlay 图懒加载（见 IntersectionObserver），不再让 video 原生 poster 也 eager 拉图
+    const posterAttr = posterProxy ? `poster="${escapeAttr(posterProxy)}"` : ""; // 恢复原生 <video poster>：渲染即显示封面，无黑屏、无逐点加载
     const posterDirectAttr = posterDirect ? `data-poster-direct="${escapeAttr(posterDirect)}"` : "";
     const posterFallbacksArr = posterImg && hostMatched(posterImg) ? getMediaProxyCandidates(posterImg, isFav).slice(1) : [];
     const posterFallbacksAttr = posterFallbacksArr.length > 0 ? `data-poster-proxy-fallbacks="${escapeAttr(JSON.stringify(posterFallbacksArr))}"` : "";
@@ -417,9 +416,8 @@ function buildCard(item, isFav = false){
     const twRssAttr = isTwRss ? ' data-twitter-rss="1"' : "";
 
     mediaHtml = `<div class="video-single-wrap">
-        ${posterProxy ? `<img class="video-poster-img" data-poster-src="${escapeAttr(posterProxy)}" referrerpolicy="no-referrer" decoding="async" data-poster-direct="${escapeAttr(posterDirect)}" onerror="if(this.dataset.posterDirect && this.src!==this.dataset.posterDirect){this.src=this.dataset.posterDirect;}">` : ""}
         <video class="media-video-mp4"${twRssAttr} ${proxyVideoAttr} preload="none" playsinline ${posterAttr} ${posterDirectAttr} ${posterFallbacksAttr} src="${escapeAttr(videoSrc)}" ${videoFallbacksAttr} ${videoDirectAttr}>
-</video><div class="video-loading-spinner"></div>${mediaControlsHtml()}</div>`;
+</video>${mediaControlsHtml()}</div>`;
 }else if(item.iframe){
     let iframeStr = sanitizeIframeHtml(item.iframe);
 
