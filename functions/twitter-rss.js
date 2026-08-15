@@ -7,8 +7,8 @@
 // 部署到 Cloudflare Pages 的 functions 目录即可使用
 // 订阅地址: /twitter-rss?user=用户名
 
-const DEFAULT_MAX_ITEMS = 20;
-const ABSOLUTE_MAX_ITEMS = 50;
+const DEFAULT_MAX_ITEMS = 50;   // 每源每次返回上限：原 20，提高到 50 以保留更多历史未读（约 5 天/源 @10条）
+const ABSOLUTE_MAX_ITEMS = 100; // ?max= 硬上限：原 50，提高到 100（保留调优空间）
 
 // Nitter 实例列表（按优先级排序，仅保留实测稳定的实例）
 // 2026-08-14 实测复验（以 WebFetch 实际内容为准，curl 出口在本环境不可靠）：
