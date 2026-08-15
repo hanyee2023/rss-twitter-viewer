@@ -372,7 +372,7 @@ function buildCard(item, isFav = false){
     const posterImg = item.videoPoster || (imgs.length > 0 ? imgs[0] : "");
     const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
     const posterDirect = posterImg ? cleanMediaUrl(posterImg) : "";
-    const posterAttr = posterProxy ? (hostMatched(posterImg) ? `poster="${escapeAttr(posterProxy + "&twname=medium")}"` : `poster="${escapeAttr(posterProxy)}"`) : ""; // 原生 <video poster>：代理图加 twname 尺寸优化，直连图原样，渲染即显示封面
+    const posterAttr = posterProxy ? `poster="${escapeAttr(posterProxy)}"` : ""; // 原生 <video poster>：渲染即显示封面；封面图不加 twname（对齐稳定版，避免部分代理封面加载失败）
     const posterDirectAttr = posterDirect ? `data-poster-direct="${escapeAttr(posterDirect)}"` : "";
     const posterFallbacksArr = posterImg && hostMatched(posterImg) ? getMediaProxyCandidates(posterImg, isFav).slice(1) : [];
     const posterFallbacksAttr = posterFallbacksArr.length > 0 ? `data-poster-proxy-fallbacks="${escapeAttr(JSON.stringify(posterFallbacksArr))}"` : "";
@@ -400,7 +400,7 @@ function buildCard(item, isFav = false){
     const posterImg = item.videoPoster || (imgs.length > 0 ? imgs[0] : "");
     const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
     const posterDirect = posterImg ? cleanMediaUrl(posterImg) : "";
-    const posterAttr = posterProxy ? (hostMatched(posterImg) ? `poster="${escapeAttr(posterProxy + "&twname=medium")}"` : `poster="${escapeAttr(posterProxy)}"`) : ""; // 原生 <video poster>：代理图加 twname 尺寸优化，直连图原样，渲染即显示封面
+    const posterAttr = posterProxy ? `poster="${escapeAttr(posterProxy)}"` : ""; // 原生 <video poster>：渲染即显示封面；封面图不加 twname（对齐稳定版，避免部分代理封面加载失败）
     const posterDirectAttr = posterDirect ? `data-poster-direct="${escapeAttr(posterDirect)}"` : "";
     const posterFallbacksArr = posterImg && hostMatched(posterImg) ? getMediaProxyCandidates(posterImg, isFav).slice(1) : [];
     const posterFallbacksAttr = posterFallbacksArr.length > 0 ? `data-poster-proxy-fallbacks="${escapeAttr(JSON.stringify(posterFallbacksArr))}"` : "";

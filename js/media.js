@@ -1,4 +1,32 @@
 // ===== media.js (从 index.html 拆出) =====
+
+// 封面回退：原生 <video poster> 加载失败没有 onerror 事件，这里主动探测候选图，
+// 第一张能加载的设为封面。候选顺序：主图（代理/直连）→ data-poster-direct（直连）→ 备用代理。
+// 解决「少部分封面不显示但能播」：代理封面偶发失败回退直连、直连封面失败回退代理。
+function ensurePosterFallback(video){
+    if(video.dataset.posterFixed === "1") return;
+    video.dataset.posterFixed = "1"; // 标记已处理，避免重复探测
+    const candidates = [];
+    const push = u => { if(u && candidates.indexOf(u) === -1) candidates.push(u); };
+    if(video.poster) push(video.poster);                 // 主图（可能代理或直连）
+    if(video.dataset.posterDirect) push(video.dataset.posterDirect);
+    try {
+        const fb = JSON.parse(video.dataset.posterProxyFallbacks || "[]");
+        fb.forEach(push);
+    } catch(e){}
+    if(candidates.length <= 1) return; // 无回退余地
+    let idx = 0;
+    const tryNext = () => {
+        if(idx >= candidates.length) return;
+        const url = candidates[idx++];
+        const img = new Image();
+        img.onload = () => { if(video.poster !== url) video.poster = url; };
+        img.onerror = () => { tryNext(); };
+        img.src = url;
+    };
+    tryNext();
+}
+
 function initVideoObserver(){
     if(videoObserver) return;
     videoObserver = new IntersectionObserver((entries)=>{
@@ -12,6 +40,8 @@ function initVideoObserver(){
                 if(video.preload !== "auto" && !video.dataset.userAttempted){
                     video.preload = "metadata";
                 }
+                // 封面回退：主图加载失败时自动切到直连/备用代理（原生 poster 无 onerror）
+                ensurePosterFallback(video);
                 // 优化7：m3u8 代理视频进入视口时预加载首段分片（点击即播）
                 if(video.classList.contains("media-video") && !video.dataset.hlsLoaded
                     && video.dataset.proxyVideo === "1" && preloadCount < MAX_PRELOAD){
