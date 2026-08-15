@@ -102,11 +102,6 @@ body{
     align-items:center;
     justify-content:center;
 }
-/* 预览图浮层：卡片渲染即 eager 加载，覆盖在 video 上方，消除黑屏；播放时由 JS 隐藏 */
-.video-poster-img{
-    position:absolute;inset:0;width:100%;height:100%;
-    object-fit:cover;z-index:2;background:#111;pointer-events:none;
-}
 
 /* 骨架屏微光：推文配图占位，消除布局抖动（CLS），观感更顺 */
 .grid-img-box{
@@ -117,19 +112,6 @@ body{
 }
 .grid-img{background:transparent;animation:none;}
 
-/* 视频加载圈：点击即显示，播放或出错时隐藏（让用户确认点击已生效） */
-.video-loading-spinner{
-    position:absolute;inset:0;z-index:4;display:none;
-    align-items:center;justify-content:center;pointer-events:none;
-    background:rgba(0,0,0,.18);
-}
-.video-single-wrap.is-loading .video-loading-spinner{display:flex;}
-.video-loading-spinner::after{
-    content:"";width:34px;height:34px;border-radius:50%;
-    border:3px solid rgba(255,255,255,.35);border-top-color:#fff;
-    animation:vs-spin .8s linear infinite;
-}
-@keyframes vs-spin{to{transform:rotate(360deg);}}
 @keyframes vs-shimmer{to{background-position:-200% 0;}}
 
 /* 底部悬浮导航栏 磨砂玻璃 */
