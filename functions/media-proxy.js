@@ -20,7 +20,8 @@ const ALLOW_PROXY_HOSTS = [
   "aguea.com",
   "htumeng.com",
   "642p.com",
-  "tutu1.space"
+  "tutu1.space",
+  "freeshare58.com"
 ];
 
 function normalizeHost(host) {
