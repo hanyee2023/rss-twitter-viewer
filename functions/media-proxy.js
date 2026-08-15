@@ -10,6 +10,7 @@ const ALLOW_PROXY_HOSTS = [
   "nitter.net",
   "xxxfollow.com",
   "media.redgifs.com",
+  "redd.it",
   "770118.xyz",
   "phe69",
   "video.3go.fun",
