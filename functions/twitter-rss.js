@@ -482,6 +482,13 @@ async function parseNitterHtml(html, username, maxItems, nitterBase) {
       const videoUrl = videoUrls[i];
       const posterUrl = videoPosters[i] || '';
       const posterAttr = posterUrl ? ` poster="${escapeHtml(posterUrl)}"` : '';
+      // 双重保险：同时把 poster 作为 <img> 输出在 <video> 前面。
+      // 旧版前端只解析 imgs[0] 作为封面（不识别 <video poster> 属性），
+      // 新版前端优先从 <video poster> 属性取封面，两种方式都能正确显示预览图，
+      // 避免「只更新了后端 Function、前端 index.html 未同步」时出现黑屏。
+      if (posterUrl) {
+        desc += '<img src="' + escapeHtml(posterUrl) + '" />';
+      }
       desc += `<video src="${escapeHtml(videoUrl)}"${posterAttr} controls></video>`;
     }
 
