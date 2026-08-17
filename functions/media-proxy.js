@@ -1,3 +1,4 @@
+// 与 core.js 的 FORCE_PROXY_HOSTS、rss-proxy.js 的 BUILTIN_RSS_HOSTS 保持一致（见 core.js 注释）。
 const ALLOW_PROXY_HOSTS = [
   "twitter.com",
   "x.com",
@@ -8,20 +9,19 @@ const ALLOW_PROXY_HOSTS = [
   "abs.twimg.com",
   "xcancel.com",
   "nitter.net",
-  "16k.club",
   "xxxfollow.com",
   "media.redgifs.com",
-  "redd.it",
   "770118.xyz",
-  "phe69",
-  "video.3go.fun",
+  "phe69.com",
+  "3go.fun",
   "rsshub.app",
   "venexa.site",
   "aguea.com",
   "htumeng.com",
   "642p.com",
   "tutu1.space",
-  "freeshare58.com"
+  "16k.club",
+  "redd.it"
 ];
 
 function normalizeHost(host) {
@@ -315,7 +315,9 @@ export async function onRequest({ request }) {
 
     const res = await fetch(targetUrl, {
       headers: fetchHeaders,
-      signal: AbortSignal.timeout(8000)
+      // 媒体代理 fetch 超时：源站慢时过短的超时会导致分片被 abort → 播放卡顿/黑屏。
+      // 由 8000ms 提到 20000ms，给慢源站更多余量（仍受 Cloudflare Functions 墙钟上限约束）。
+      signal: AbortSignal.timeout(20000)
     });
 
     if (isLikelyM3u8(targetUrl, res)) {
@@ -329,8 +331,9 @@ export async function onRequest({ request }) {
         status: res.status,
         headers: corsHeaders({
           "Content-Type": "application/vnd.apple.mpegurl;charset=utf-8",
-          // 放开缓存：m3u8 清单走 Cloudflare 边缘缓存，重复访问不再回源，省流量/提速
-          "Cache-Control": "s-maxage=604800, public"
+          // 修复：删除 Vary:Range（之前 Range 把每个 byte-range 当成不同对象，缓存命中率 0%）
+          // m3u8 清单：浏览器侧 10min + CF 边缘 7 天
+          "Cache-Control": "public, max-age=600, s-maxage=604800"
         })
       });
     }
@@ -339,9 +342,12 @@ export async function onRequest({ request }) {
     headers.set("Access-Control-Allow-Origin", "*");
     headers.set("Access-Control-Allow-Methods", "GET,HEAD,OPTIONS");
     headers.set("Access-Control-Allow-Headers", "*");
-    headers.set("Access-Control-Expose-Headers", "Content-Length,Content-Range,Accept-Ranges,Content-Type");
-    headers.set("Cache-Control", "s-maxage=604800, public");
-    headers.set("Vary", "Range");
+    // 暴露 CF-Cache-Status：方便用户在 DevTools 一眼看到 HIT/MISS，自证缓存命中修复
+    headers.set("Access-Control-Expose-Headers", "Content-Length,Content-Range,Accept-Ranges,Content-Type,CF-Cache-Status,X-Cache-Status");
+    // 修复：删除 Vary:Range 让分片按 URL 命中缓存（不再因不同 Range 字节区间分别缓存）
+    //      CF 边缘 7 天；浏览器侧 24 小时（短于 7 天避免与边缘策略冲突）
+    headers.set("Cache-Control", "public, max-age=86400, s-maxage=604800, immutable");
+    headers.delete("Vary");
     headers.delete("Transfer-Encoding");
 
     return new Response(res.body, { status: res.status, headers });
