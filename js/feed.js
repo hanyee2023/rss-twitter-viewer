@@ -1,4 +1,14 @@
 // ===== feed.js (从 index.html 拆出) =====
+// 从 RSS 文本提取 <channel> 级别的 <description>（后端在抓取失败时写入诊断原因）
+function extractChannelDesc(xml) {
+  try {
+    const m = xml.match(/<channel>[\s\S]*?<description>([\s\S]*?)<\/description>/i);
+    return m ? fullDecodeXml(m[1]).trim() : "";
+  } catch (e) {
+    return "";
+  }
+}
+
 // 页面状态机：主页/搜索/添加订阅/管理订阅/收藏 各为独立标签界面，单源浏览再独立成一个界面。
 // 去重与快照一律以【页面 DOM】(currentPage) 为依据，不再依赖标题字符串，
 // 这样单源视图（标题=订阅名）与主页（标题=“RSS媒体阅读器”）不会再被当成同一个界面而相互污染。
@@ -57,6 +67,14 @@ function showPage(targetDom, titleText) {
         if (homeIsCached && homeArticleHtml) {
             currentArticleBox = articleBox;
             articleBox.innerHTML = homeArticleHtml;
+            // 关键修复：innerHTML 恢复不会保留事件监听器，但会保留 data-* 绑定标记。
+            // 若不清除，initHlsVideo/bindCustomMediaControls 会因“已绑定”而跳过，
+            // 导致主页视频（离开再回来后）点击无反应、播放按钮不变。
+            articleBox.querySelectorAll(".media-video, .media-video-mp4, .video-single-wrap").forEach(el => {
+                el.removeAttribute("data-player-bind");
+                el.removeAttribute("data-control-bind");
+                el.removeAttribute("data-media-click-bind");
+            });
             const restoreHomeScroll = ()=>{
                 mainWrap.scrollTop = homeScrollTop;
                 requestAnimationFrame(()=>{ mainWrap.scrollTop = homeScrollTop; });
@@ -281,7 +299,13 @@ async function renderSingleFeedFromSource(sourceUrl){
             // 解析为空：已有缓存则保留，无需重绘
             const cache = getRssCache(sourceUrl);
             if(fallbackList.length === 0 && (!cache || !cache.items || cache.items.length === 0)){
-                articleBoxSingle.innerHTML = `<div class="empty-tip">该订阅暂未解析到内容</div>`;
+                // 显示后端透传的诊断原因（哪个实例失败/验证页/超时），不再静默“无内容”
+                const diag = extractChannelDesc(xmlText);
+                const tip = document.createElement('div');
+                tip.className = 'empty-tip';
+                tip.textContent = diag ? `该订阅暂未解析到内容：${diag}` : '该订阅暂未解析到内容';
+                articleBoxSingle.innerHTML = '';
+                articleBoxSingle.appendChild(tip);
             }
         }
     }catch(err){
