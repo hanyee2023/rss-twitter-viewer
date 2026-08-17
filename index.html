@@ -170,7 +170,7 @@ body{
     overflow-y: auto;
     overflow-x: hidden;
 }
-.page-home,.page-manage,.page-add,.page-fav,.page-search{display:none;}
+.page-home,.page-manage,.page-add,.page-fav,.page-search,.page-single{display:none;}
 #pageHome,#pageManage,#pageFav,#pageSearch{
     width: 100%;
 }
@@ -723,6 +723,9 @@ body{
 <div class="main-wrap">
     <div class="page-home" id="pageHome" style="display: block;">
         <div id="articleBox"><div class="empty-tip">暂无文章内容</div></div>
+    </div>
+    <div class="page-single" id="pageSingle" style="display: none;">
+        <div id="articleBoxSingle"><div class="empty-tip">暂无文章内容</div></div>
     </div>
     <div class="page-manage" id="pageManage" style="display: none;">
         <div class="feed-top-op">
