@@ -240,12 +240,12 @@ let filterSourceUrl = "";
 let localCacheArticles = [];
 let hasNewUpdate = false;
 let newArticleCount = 0;
-let lastPageTitle = "";
+let currentPage = null;        // 当前显示的页面 DOM，作为去重与快照的唯一依据（取代标题判重）
+let currentArticleBox = null;  // 当前渲染用的文章容器：主页=articleBox，单源=articleBoxSingle
 let homeScrollTop = 0;
 let homeArticleHtml = "";
 let homeIsCached = false;
-let homeCachedFilterSourceUrl = "";
-let showingSingleSource = false; // 当前是否处于「单源阅读」视图（用于主页快照恢复判断）
+let singleSourceUrl = "";      // 当前单源浏览的源 URL（用于单源界面内刷新/合并）
 let readObserver = null;
 let updateFloatTimer = null;
 let lastRefreshTime = Number(localStorage.getItem(LAST_REFRESH_KEY)) || 0;
@@ -341,8 +341,11 @@ const pageManage = document.getElementById("pageManage");
 const pageAdd = document.getElementById("pageAdd");
 const pageFav = document.getElementById("pageFav");
 const pageSearch = document.getElementById("pageSearch");
+const pageSingle = document.getElementById("pageSingle");
 
 const articleBox = document.getElementById("articleBox");
+const articleBoxSingle = document.getElementById("articleBoxSingle");
+currentArticleBox = articleBox; // 默认渲染目标=主页容器
 const feedPanel = document.getElementById("feedPanel");
 const favPanel = document.getElementById("favPanel");
 const searchResultBox = document.getElementById("searchResultBox");
@@ -416,7 +419,7 @@ function markCardRead(card){
 }
 
 function markReadByScroll(){
-    if(lastPageTitle !== "RSS媒体阅读器") return;
+    if(currentPage !== pageHome) return;
     const lineY = mainWrap.getBoundingClientRect().top + 56;
     let changed = false;
     articleBox.querySelectorAll(".tweet-card").forEach(card=>{

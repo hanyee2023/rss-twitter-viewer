@@ -51,7 +51,7 @@ function renderFav(){
 
 function bindAllCardEvent(){
     // 主页卡片头像点击：跳转查看该订阅源所有内容
-    document.querySelectorAll("#pageHome .card-avatar").forEach(avatar=>{
+    document.querySelectorAll("#pageHome .card-avatar, #pageSingle .card-avatar").forEach(avatar=>{
         avatar.style.cursor = "pointer";
         avatar.title = "点击查看该订阅源";
         avatar.onclick = async function(e){
@@ -60,10 +60,7 @@ function bindAllCardEvent(){
             if(!card) return;
             const sourceUrl = card.dataset.sourceUrl;
             if(!sourceUrl) return;
-            filterSourceUrl = sourceUrl;
-            homeIsCached = false;
-            showPage(pageHome, "RSS媒体阅读器");
-            await renderSingleFeedFromSource(filterSourceUrl);
+            await openSingleSource(sourceUrl);
         }
     })
 
@@ -164,7 +161,7 @@ function bindAllCardEvent(){
             entries.forEach(entry => {
                 if (!entry.isIntersecting) {
                     const card = entry.target;
-                    if(lastPageTitle !== "RSS媒体阅读器" || !articleBox.contains(card)) return;
+                    if(currentPage !== pageHome || !articleBox.contains(card)) return;
                     if(card.getBoundingClientRect().bottom > 90) return;
                     const link = card.dataset.link;
                     if(!link) return;
@@ -783,10 +780,7 @@ function renderManage(){
         const delBtn = e.target.closest(".del");
         const editBtn = e.target.closest(".edit");
         if(avatarBtn){
-            filterSourceUrl = avatarBtn.dataset.source;
-            homeIsCached = false;
-            showPage(pageHome, "RSS媒体阅读器");
-            await renderSingleFeedFromSource(filterSourceUrl);
+            await openSingleSource(avatarBtn.dataset.source);
             return;
         }
         if(delBtn){

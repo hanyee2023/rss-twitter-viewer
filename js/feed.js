@@ -1,20 +1,20 @@
 // ===== feed.js (从 index.html 拆出) =====
+// 页面状态机：主页/搜索/添加订阅/管理订阅/收藏 各为独立标签界面，单源浏览再独立成一个界面。
+// 去重与快照一律以【页面 DOM】(currentPage) 为依据，不再依赖标题字符串，
+// 这样单源视图（标题=订阅名）与主页（标题=“RSS媒体阅读器”）不会再被当成同一个界面而相互污染。
 function showPage(targetDom, titleText) {
-    if (lastPageTitle === titleText) {
+    // 去重：当前已在该页面则直接返回（主页重复点击交给 btnHome 的更新提示逻辑处理）
+    if (currentPage === targetDom) {
         return;
     }
-    const returningHome = titleText === "RSS媒体阅读器";
 
-    // 仅当离开的是【完整主页】(filterSourceUrl 为空) 才更新主页快照。
-    // 单源视图(filterSourceUrl 非空) 离开时不要覆盖完整主页快照，否则快照会被单源 HTML 污染，
-    // 之后回主页会错误恢复到单源视图而非完整主页位置。
-    const leavingFullHome = lastPageTitle === "RSS媒体阅读器" && !filterSourceUrl;
-    if (leavingFullHome) {
+    // 离开【主页】时记录快照（滚动位置 + HTML），返回时恢复到上次阅读位置
+    const leavingHome = (currentPage === pageHome);
+    if (leavingHome) {
         markReadByScroll();
         homeScrollTop = mainWrap.scrollTop;
         homeArticleHtml = articleBox.innerHTML;
         homeIsCached = true;
-        homeCachedFilterSourceUrl = "";
         // 离开首页时断开已读观察器，避免非首页卡片被误标记已读
         if(readObserver){
             readObserver.disconnect();
@@ -27,27 +27,17 @@ function showPage(targetDom, titleText) {
     pageAdd.style.display = "none";
     pageFav.style.display = "none";
     pageSearch.style.display = "none";
+    pageSingle.style.display = "none";
 
     feedPanel.innerHTML = "";
     favPanel.innerHTML = "";
 
-    // 回到主页且当前仍处于单源过滤视图：清空过滤，确保恢复的是完整主页（保留上次滚动位置）
-    if (returningHome && filterSourceUrl !== "") {
-        filterSourceUrl = "";
-    }
-    const willRestoreHome = returningHome && homeIsCached && homeCachedFilterSourceUrl === filterSourceUrl;
-
-    if (targetDom === pageHome && !willRestoreHome) {
-        articleBox.innerHTML = "";
-    }
-
-    // 恢复到完整主页时，若当前 articleBox 仍是单源内容则无条件用快照覆盖（保留上次位置）
-    if (willRestoreHome && showingSingleSource) {
-        articleBox.innerHTML = homeArticleHtml;
-        showingSingleSource = false;
-    }
     targetDom.style.display = "block";
-    targetDom.scrollTop = 0;
+    currentPage = targetDom;
+    // 非主页界面进入时滚动到顶部（主页由下方快照/渲染自行决定）
+    if (targetDom !== pageHome) {
+        mainWrap.scrollTop = 0;
+    }
 
     const textNode = Array.from(pageTitle.childNodes).find(n => n.nodeType === 3);
     if (textNode) {
@@ -55,82 +45,99 @@ function showPage(targetDom, titleText) {
     }
 
     allBtns.forEach(b => b.classList.remove("active"));
-    if (titleText === "RSS媒体阅读器") btnHome.classList.add("active");
-    if (titleText === "管理订阅") btnManage.classList.add("active");
-    if (titleText === "添加订阅") btnAdd.classList.add("active");
-    if (titleText === "我的收藏") btnFav.classList.add("active");
-    if (titleText === "内容搜索") btnSearch.classList.add("active");
+    if (targetDom === pageHome) btnHome.classList.add("active");
+    else if (targetDom === pageManage) btnManage.classList.add("active");
+    else if (targetDom === pageAdd) btnAdd.classList.add("active");
+    else if (targetDom === pageFav) btnFav.classList.add("active");
+    else if (targetDom === pageSearch) btnSearch.classList.add("active");
+    // 单源界面不属于任一底部固定 tab，不高亮
 
-    if (willRestoreHome) {
-        const restoreHomeScroll = ()=>{
-            mainWrap.scrollTop = homeScrollTop;
-            requestAnimationFrame(()=>{ mainWrap.scrollTop = homeScrollTop; });
-        };
-        setTimeout(restoreHomeScroll, 0);
-        setTimeout(restoreHomeScroll, 80);
-        setTimeout(restoreHomeScroll, 250);
-        bindAllCardEvent();
-        bindVideoPauseObserver();
-        initHlsVideo();
-        bindScrollLoadMore();
-        lastPageTitle = titleText;
-        return;
-    }
-
-    if (titleText === "RSS媒体阅读器") {
+    if (targetDom === pageHome) {
+        // 恢复到【完整主页】：优先用快照（保留上次滚动位置），否则重新渲染
+        if (homeIsCached && homeArticleHtml) {
+            currentArticleBox = articleBox;
+            articleBox.innerHTML = homeArticleHtml;
+            const restoreHomeScroll = ()=>{
+                mainWrap.scrollTop = homeScrollTop;
+                requestAnimationFrame(()=>{ mainWrap.scrollTop = homeScrollTop; });
+            };
+            setTimeout(restoreHomeScroll, 0);
+            setTimeout(restoreHomeScroll, 80);
+            setTimeout(restoreHomeScroll, 250);
+            bindAllCardEvent();
+            bindVideoPauseObserver();
+            initHlsVideo();
+            bindScrollLoadMore();
+            return;
+        }
         renderHomeFromCache();
-        homeIsCached = false;
-    } else if (titleText === "管理订阅") {
+    } else if (targetDom === pageSingle) {
+        currentArticleBox = articleBoxSingle; // 单源渲染目标指向独立容器
+    } else if (targetDom === pageManage) {
         renderManage();
-    } else if (titleText === "我的收藏") {
+    } else if (targetDom === pageFav) {
         renderFav();
-    } else if (titleText === "内容搜索") {
+    } else if (targetDom === pageSearch) {
         searchInput.value = "";
         searchResultBox.innerHTML = "";
-    }
-
-    // 显示添加订阅页时渲染关键字列表
-    if (targetDom === pageAdd) {
+    } else if (targetDom === pageAdd) {
         renderKeywordList();
     }
-
-    lastPageTitle = titleText;
 }
 
 btnHome.onclick = async () => {
-    const wasFiltered = !!filterSourceUrl;
-
-    if(lastPageTitle === "RSS媒体阅读器"){
-        if(wasFiltered){
-            // 从单源视图点主页：恢复到【完整主页】上次离开的位置（不清空快照、不回顶部，避免重看已读）
-            filterSourceUrl = "";
-            if(homeIsCached && homeArticleHtml){
-                articleBox.innerHTML = homeArticleHtml;
-                showingSingleSource = false;
-                const restore = ()=>{
-                    mainWrap.scrollTop = homeScrollTop;
-                    requestAnimationFrame(()=>{ mainWrap.scrollTop = homeScrollTop; });
-                };
-                setTimeout(restore, 0);
-                setTimeout(restore, 80);
-                setTimeout(restore, 250);
-                bindAllCardEvent();
-                bindVideoPauseObserver();
-                initHlsVideo();
-                bindScrollLoadMore();
-                return;
-            }
-            // 无快照兜底：渲染完整主页顶部
-            homeIsCached = false;
-            renderHomeFromCache();
-            mainWrap.scrollTop = 0;
-            return;
-        }
+    if (currentPage === pageHome) {
+        // 已在主页：触发更新检查与提示
         await checkAndPromptUpdate(true);
         return;
     }
+    // 从任意其它界面（含单源）点主页：恢复到主页上次离开的位置
     showPage(pageHome, "RSS媒体阅读器");
 };
+
+// 进入单源浏览：作为独立的第 6 个界面展示，完全不触碰主页的 articleBox / 状态
+async function openSingleSource(sourceUrl){
+    const feed = feedList.find(f => String(f.url).trim() === String(sourceUrl).trim());
+    const title = feed ? feed.name : "单源订阅";
+    if (currentPage === pageSingle) {
+        // 已在单源界面，只是切换不同源：直接重渲染（不走 showPage 去重，因为容器相同）
+        await renderSingleFeedFromSource(sourceUrl);
+        const textNode = Array.from(pageTitle.childNodes).find(n => n.nodeType === 3);
+        if (textNode) textNode.textContent = title;
+        return;
+    }
+    showPage(pageSingle, title);
+    await renderSingleFeedFromSource(sourceUrl);
+}
+
+// 强制回到主页并渲染最新内容（用于「点击查看更新」浮条，无论当前在哪个界面）
+function showHomeFresh(){
+    if (currentPage !== pageHome) {
+        pageHome.style.display = "block";
+        pageManage.style.display = "none";
+        pageAdd.style.display = "none";
+        pageFav.style.display = "none";
+        pageSearch.style.display = "none";
+        pageSingle.style.display = "none";
+        currentPage = pageHome;
+        allBtns.forEach(b => b.classList.remove("active"));
+        btnHome.classList.add("active");
+        const textNode = Array.from(pageTitle.childNodes).find(n => n.nodeType === 3);
+        if (textNode) textNode.textContent = "RSS媒体阅读器";
+    }
+    homeIsCached = false;
+    homeArticleHtml = "";
+    renderHomeFromCache();
+    const toTop = ()=>{
+        mainWrap.scrollTop = 0;
+        requestAnimationFrame(()=>{ mainWrap.scrollTop = 0; });
+    };
+    toTop();
+    setTimeout(toTop, 80);
+    setTimeout(toTop, 250);
+    const bar = document.getElementById("updateFloatBar");
+    if(bar) bar.remove();
+}
 btnManage.onclick = () => showPage(pageManage, "管理订阅");
 btnAdd.onclick = () => showPage(pageAdd, "添加订阅");
 btnFav.onclick = () => showPage(pageFav, "我的收藏");
@@ -190,16 +197,7 @@ async function checkAndPromptUpdate(isManual = false){
             allArticles = [...newAll];
             localCacheArticles = [...newAll];
             saveArticleCacheToStorage(newAll);
-            renderHomeFromCache();
-            const scrollTopNow = ()=>{
-                mainWrap.scrollTop = 0;
-                requestAnimationFrame(()=>{ mainWrap.scrollTop = 0; });
-            };
-            scrollTopNow();
-            setTimeout(scrollTopNow, 80);
-            setTimeout(scrollTopNow, 250);
-            const bar = document.getElementById("updateFloatBar");
-            if(bar) bar.remove();
+            showHomeFresh();
         });
     }else if(isManual){
         showUpdateFloat("暂无更新内容");
@@ -226,7 +224,7 @@ async function initLoadAllCache() {
 
 function renderHomeFromCache() {
     if(scrollObserver) scrollObserver.disconnect();
-    showingSingleSource = !!filterSourceUrl; // 同步视图状态：有过滤=单源视图，否则完整主页
+    currentArticleBox = articleBox; // 主页渲染目标
     renderPageNum = 0;
     renderedArticleCount = 0;
     loadLock = false;
@@ -234,12 +232,9 @@ function renderHomeFromCache() {
         articleBox.innerHTML = `<div class="empty-tip">暂无文章内容</div>`;
         return;
     }
-    let filterArticles = getVisibleHomeArticles(localCacheArticles);
-    if(filterSourceUrl) {
-        filterArticles = localCacheArticles.filter(item => item.sourceUrl.trim() === filterSourceUrl.trim());
-    }
+    const visibleArticles = getVisibleHomeArticles(localCacheArticles);
 
-    currentArticles = [...filterArticles];
+    currentArticles = [...visibleArticles];
     renderPageNum = 1;
     renderPagedList(true);
     bindScrollLoadMore();
@@ -247,9 +242,10 @@ function renderHomeFromCache() {
 
 async function renderSingleFeedFromSource(sourceUrl){
     if(scrollObserver) scrollObserver.disconnect();
-    showingSingleSource = true; // 标记进入单源视图，避免其 HTML 污染主页快照
-    const feed = feedList.find(f => String(f.url).trim() === String(sourceUrl).trim());
-    const fallbackList = localCacheArticles.filter(item => item.sourceUrl.trim() === String(sourceUrl).trim());
+    currentArticleBox = articleBoxSingle; // 单源视图使用独立容器，绝不污染主页
+    singleSourceUrl = String(sourceUrl || "").trim();
+    const feed = feedList.find(f => String(f.url).trim() === singleSourceUrl);
+    const fallbackList = localCacheArticles.filter(item => item.sourceUrl.trim() === singleSourceUrl);
     // 先渲染本地缓存（主页已加载的数据），实现「切换即见」，随后后台静默刷新覆盖
     if(fallbackList.length > 0){
         currentArticles = [...fallbackList];
@@ -260,7 +256,7 @@ async function renderSingleFeedFromSource(sourceUrl){
         bindScrollLoadMore();
         showToast("正在后台刷新该订阅…");
     }else{
-        articleBox.innerHTML = `<div class="empty-tip">正在加载该订阅内容...</div>`;
+        articleBoxSingle.innerHTML = `<div class="empty-tip">正在加载该订阅内容...</div>`;
     }
     try{
         const xmlText = await fetchRSSFeed(sourceUrl);
@@ -285,7 +281,7 @@ async function renderSingleFeedFromSource(sourceUrl){
             // 解析为空：已有缓存则保留，无需重绘
             const cache = getRssCache(sourceUrl);
             if(fallbackList.length === 0 && (!cache || !cache.items || cache.items.length === 0)){
-                articleBox.innerHTML = `<div class="empty-tip">该订阅暂未解析到内容</div>`;
+                articleBoxSingle.innerHTML = `<div class="empty-tip">该订阅暂未解析到内容</div>`;
             }
         }
     }catch(err){
@@ -302,7 +298,7 @@ async function renderSingleFeedFromSource(sourceUrl){
                 renderPageNum = 1; renderedArticleCount = 0; loadLock = false;
                 renderPagedList(true); bindScrollLoadMore();
             }else{
-                articleBox.innerHTML = `<div class="empty-tip">该订阅加载失败：${errDesc}</div>`;
+                articleBoxSingle.innerHTML = `<div class="empty-tip">该订阅加载失败：${errDesc}</div>`;
             }
         }
     }
@@ -321,9 +317,13 @@ window.mergeNewData = async function(){
     allArticles = merged;
     localCacheArticles = [...merged];
     saveArticleCacheToStorage(merged);
-    let filterArticles = merged;
-    if(filterSourceUrl) filterArticles = merged.filter(item => item.sourceUrl === filterSourceUrl);
-    currentArticles = [...filterArticles];
+    if (currentPage === pageSingle && singleSourceUrl) {
+        currentArticleBox = articleBoxSingle;
+        currentArticles = merged.filter(item => item.sourceUrl.trim() === singleSourceUrl.trim());
+    } else {
+        currentArticleBox = articleBox;
+        currentArticles = getVisibleHomeArticles(merged);
+    }
     renderPageNum = 1;
     renderedArticleCount = 0;
     renderPagedList(true);
@@ -332,20 +332,20 @@ window.mergeNewData = async function(){
 
 function renderPagedList(reset = false){
     if(reset){
-        articleBox.innerHTML = "";
+        currentArticleBox.innerHTML = "";
         renderedArticleCount = 0;
     }else{
-        const oldTip = articleBox.querySelector("#loadMoreDom,.bottom-tip");
+        const oldTip = currentArticleBox.querySelector("#loadMoreDom,.bottom-tip");
         if(oldTip) oldTip.remove();
     }
     const nextCount = Math.min(renderPageNum * PAGE_SIZE, currentArticles.length);
     const appendList = currentArticles.slice(renderedArticleCount, nextCount);
     if(appendList.length > 0){
-        articleBox.insertAdjacentHTML("beforeend", renderCardList(appendList));
+        currentArticleBox.insertAdjacentHTML("beforeend", renderCardList(appendList));
         renderedArticleCount = nextCount;
     }
     const remain = currentArticles.length - renderedArticleCount;
-    articleBox.insertAdjacentHTML("beforeend", remain > 0
+    currentArticleBox.insertAdjacentHTML("beforeend", remain > 0
         ? `<div class="load-more-tip" id="loadMoreDom">滚动加载更多...</div>`
         : `<div class="bottom-tip">全部内容加载完毕</div>`);
     bindAllCardEvent();
@@ -375,7 +375,7 @@ function bindScrollLoadMore(){
     // 用 scrollTop+clientHeight 判断是否接近底部，确保「划不动」不再发生。
     if(!mainScrollHandler){
         mainScrollHandler = () => {
-            if(!pageHome || pageHome.style.display === "none") return;
+            if(currentPage !== pageHome && currentPage !== pageSingle) return;
             const dom = document.getElementById("loadMoreDom");
             if(!dom) return;
             if(mainWrap.scrollTop + mainWrap.clientHeight >= mainWrap.scrollHeight - 200){
