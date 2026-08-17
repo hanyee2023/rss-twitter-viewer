@@ -1,8 +1,8 @@
 // Twitter 用户时间线 RSS 生成器
-// 多源回退架构：xcancel.com → nitter.catsarch.com → nitter.kareem.one → Syndication API
-// 视频输出策略（优先 MP4，兼容 m3u8）：
-//   - MP4 路径：从 <source src="..."> 或下载链接提取原始 video.twimg.com MP4 URL
-//   - m3u8 路径：从 data-url 属性提取原始 m3u8 URL，变体过滤在 media-proxy.js 中完成
+// 多源回退架构：asia.aguea.com → aguea.net → nitter.catsarch.com（按实测可用排序）
+// 视频输出策略（优先 m3u8，兼容 MP4）：
+//   - m3u8 路径（优先）：从 data-url 属性提取原始 m3u8 URL，体积小、起播快，变体过滤在 media-proxy.js 完成
+//   - MP4 路径（兜底）：仅当无 m3u8 时，从 <source src="..."> 或下载链接提取原始 video.twimg.com MP4 URL
 //   - 图片路径：从代理 URL 解码出原始 pbs.twimg.com 地址
 // 部署到 Cloudflare Pages 的 functions 目录即可使用
 // 订阅地址: /twitter-rss?user=用户名
@@ -433,42 +433,42 @@ async function parseNitterHtml(html, username, maxItems, nitterBase) {
       }
 
       // 提取视频 URL
-      // 收集 attachment 块内所有 MP4 URL（<source> 标签 + video-download 链接）
-      // Nitter 源码中 <source> 取最高分辨率，video-download 取最高码率，两者可能不同
-      // 我们选择分辨率最接近 720p 的 MP4，平衡画质和加载速度
+      // 优先 m3u8（HLS 自适应）：data-url 属性里的 m3u8 清单体积小、起播快、弱网也不卡，
+      // 且经前端 hls.js 代理播放稳定（实测 m3u8 可播、MP4 不可播——MP4 是 video.twimg.com 的
+      // amplify 大文件，易超出代理 8s 超时而失败）。仅当不存在 m3u8 时才回退到 MP4。
+      const dataUrlMatch = attBlock.match(/<video[^>]*\sdata-url="([^"]+)"[^>]*>/i);
+      if (dataUrlMatch) {
+        const m3u8Url = decodeNitterProxyUrl(dataUrlMatch[1]);
+        if (m3u8Url && /\.m3u8/i.test(m3u8Url)) {
+          videoUrl = m3u8Url;
+        }
+      }
+
+      // 没有 m3u8 时，从 <source> 标签 + video-download 链接收集 MP4 候选（保留兜底）
       const mp4Candidates = [];
-
-      // <source> 标签
-      const sourceMatch = attBlock.match(/<source[^>]*\ssrc="([^"]+)"[^>]*>/i);
-      if (sourceMatch) {
-        const mp4Url = decodeNitterProxyUrl(sourceMatch[1]);
-        if (mp4Url && /\.mp4/i.test(mp4Url)) {
-          mp4Candidates.push(mp4Url);
-        }
-      }
-
-      // video-download 链接
-      const downloadRegex = /<a[^>]*class="video-download"[^>]*href="([^"]+)"/gi;
-      let dlMatch;
-      while ((dlMatch = downloadRegex.exec(attBlock)) !== null) {
-        const dlUrl = decodeNitterProxyUrl(dlMatch[1]);
-        if (dlUrl && /\.mp4/i.test(dlUrl) && !mp4Candidates.includes(dlUrl)) {
-          mp4Candidates.push(dlUrl);
-        }
-      }
-
-      // 从候选中选择最接近 720p 的 MP4
-      // Twitter MP4 URL 中包含分辨率信息，如 /vid/avc1/1280x720/xxx.mp4
-      if (mp4Candidates.length > 0) {
-        videoUrl = pickBestResolutionMp4(mp4Candidates);
-      }
-
-      // 如果没有 MP4，尝试 m3u8 data-url（部分实例如 asia.aguea.com 使用此格式）
       if (!videoUrl) {
-        const dataUrlMatch = attBlock.match(/<video[^>]*\sdata-url="([^"]+)"[^>]*>/i);
-        if (dataUrlMatch) {
-          const m3u8Url = decodeNitterProxyUrl(dataUrlMatch[1]);
-          if (m3u8Url) videoUrl = m3u8Url;
+        // <source> 标签
+        const sourceMatch = attBlock.match(/<source[^>]*\ssrc="([^"]+)"[^>]*>/i);
+        if (sourceMatch) {
+          const mp4Url = decodeNitterProxyUrl(sourceMatch[1]);
+          if (mp4Url && /\.mp4/i.test(mp4Url)) {
+            mp4Candidates.push(mp4Url);
+          }
+        }
+
+        // video-download 链接
+        const downloadRegex = /<a[^>]*class="video-download"[^>]*href="([^"]+)"/gi;
+        let dlMatch;
+        while ((dlMatch = downloadRegex.exec(attBlock)) !== null) {
+          const dlUrl = decodeNitterProxyUrl(dlMatch[1]);
+          if (dlUrl && /\.mp4/i.test(dlUrl) && !mp4Candidates.includes(dlUrl)) {
+            mp4Candidates.push(dlUrl);
+          }
+        }
+
+        // 从候选中选择最接近 720p 的 MP4
+        if (mp4Candidates.length > 0) {
+          videoUrl = pickBestResolutionMp4(mp4Candidates);
         }
       }
 
