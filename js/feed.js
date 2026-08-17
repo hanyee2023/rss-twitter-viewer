@@ -204,7 +204,7 @@ async function checkAndPromptUpdate(isManual = false){
         if(isManual) showUpdateFloat("检查更新失败，请稍后重试");
         return;
     }
-    const visibleNewList = newAll.filter(item => !oldLinkSet.has(item.link) && !sessionStartReadSet.has(item.link));
+    const visibleNewList = filterPureTextTwitter(newAll.filter(item => !oldLinkSet.has(item.link) && !sessionStartReadSet.has(item.link)));
     const newCount = visibleNewList.length;
     if(newCount > 0){
         showUpdateFloat(`更新${newCount}条内容，点击查看`, ()=>{
@@ -263,7 +263,7 @@ async function renderSingleFeedFromSource(sourceUrl){
     currentArticleBox = articleBoxSingle; // 单源视图使用独立容器，绝不污染主页
     singleSourceUrl = String(sourceUrl || "").trim();
     const feed = feedList.find(f => String(f.url).trim() === singleSourceUrl);
-    const fallbackList = localCacheArticles.filter(item => item.sourceUrl.trim() === singleSourceUrl);
+    const fallbackList = filterPureTextTwitter(localCacheArticles.filter(item => item.sourceUrl.trim() === singleSourceUrl));
     // 先渲染本地缓存（主页已加载的数据），实现「切换即见」，随后后台静默刷新覆盖
     if(fallbackList.length > 0){
         currentArticles = [...fallbackList];
@@ -278,8 +278,9 @@ async function renderSingleFeedFromSource(sourceUrl){
     }
     try{
         const xmlText = await fetchRSSFeed(sourceUrl);
-        const list = parseRSS(xmlText, feed ? feed.name : "未命名订阅", sourceUrl, feed ? feed.category : "img")
+        const parsed = parseRSS(xmlText, feed ? feed.name : "未命名订阅", sourceUrl, feed ? feed.category : "img")
             .sort((a,b)=>new Date(b.date).getTime() - new Date(a.date).getTime());
+        const list = filterPureTextTwitter(parsed);
         if(list.length > 0){
             currentArticles = list;
             // 保存缓存
@@ -317,7 +318,7 @@ async function renderSingleFeedFromSource(sourceUrl){
         }else{
             const cache = getRssCache(sourceUrl);
             if(cache && cache.items && cache.items.length > 0){
-                currentArticles = cache.items;
+                currentArticles = filterPureTextTwitter(cache.items);
                 showToast("订阅加载失败，已回退至本地缓存：" + errDesc);
                 renderPageNum = 1; renderedArticleCount = 0; loadLock = false;
                 renderPagedList(true); bindScrollLoadMore();
@@ -330,14 +331,14 @@ async function renderSingleFeedFromSource(sourceUrl){
 
 window.mergeNewData = async function(){
     if(scrollObserver) scrollObserver.disconnect();
-    const fresh = await loadAllRSS();
+    const fresh = filterPureTextTwitter(await loadAllRSS());
     // 累积合并：保留本地缓存中「本次刷新未返回」的旧条目（按 link 去重），
     // 避免 twitter 源（每源仅返回最新 N 条）刷新后，更早的未读内容被整批清除。
     const freshLinks = new Set(fresh.map(i => i.link));
     const oldKept = localCacheArticles.filter(i => i.link && !freshLinks.has(i.link));
-    const merged = [...fresh, ...oldKept]
+    const merged = filterPureTextTwitter([...fresh, ...oldKept]
         .sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-        .slice(0, ARTICLE_CACHE_LIMIT);
+        .slice(0, ARTICLE_CACHE_LIMIT));
     allArticles = merged;
     localCacheArticles = [...merged];
     saveArticleCacheToStorage(merged);
@@ -584,7 +585,10 @@ function buildCard(item, isFav = false){
             ${mediaHtml}
             <div class="fav-card-bottom">
                 <div class="card-bottom-left">${dateText}</div>
-                <button class="del-fav" data-link="${itemLinkAttr}" title="取消收藏">${favIconSvg(true)}</button>
+                <div class="card-bottom-right">
+                    <button class="btn-share" type="button" aria-label="分享" title="分享">${shareIconSvg()}</button>
+                    <button class="del-fav" data-link="${itemLinkAttr}" title="取消收藏">${favIconSvg(true)}</button>
+                </div>
             </div>
         </div>`;
     }else{

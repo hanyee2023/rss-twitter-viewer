@@ -10,8 +10,11 @@ const MEDIA_PROXY_ENDPOINTS = [
 ];
 
 // 这些域名的 RSS 或媒体资源默认走代理。需要新增国外或特殊域名时，加到这里即可。
+// 注意：本名单必须与 media-proxy.js 的 ALLOW_PROXY_HOSTS、rss-proxy.js 的 BUILTIN_RSS_HOSTS 保持一致，
+// 否则会出现“前端判定直连 / 代理层又放行或拦截”的不一致，导致媒体 CORS 失败或加载变慢。
+// 一律用完整域名（如 phe69.com 而非裸名 phe69），裸名无法匹配 *.phe69.com 子域。
 const FORCE_PROXY_HOSTS = [
-    "twitter.com",
+     "twitter.com",
     "x.com",
     "t.co",
     "twimg.com",
@@ -496,8 +499,24 @@ function hasBlockedKeyword(title){
 }
 
 function getVisibleHomeArticles(list){
-    if(filterSourceUrl) return list.filter(item => !hasBlockedKeyword(getPureText(item.title)));
-    return list.filter(item => !sessionStartReadSet.has(item.link) && !hasBlockedKeyword(getPureText(item.title)));
+    if(filterSourceUrl) return filterPureTextTwitter(list.filter(item => !hasBlockedKeyword(getPureText(item.title))));
+    return filterPureTextTwitter(list.filter(item => !sessionStartReadSet.has(item.link) && !hasBlockedKeyword(getPureText(item.title))));
+}
+
+// 判断一条条目是否是“纯文字”（不含图片/视频/音频iframe 等任何媒体内容）
+function isPureTextItem(item){
+    const hasVideo = item.isM3u8Video || !!item.videoUrl;
+    const hasIframe = !!item.iframe;
+    const hasImg = !!(item.media && Array.isArray(item.media.imgs) && item.media.imgs.length > 0);
+    return !hasVideo && !hasIframe && !hasImg;
+}
+
+// 隐藏“纯文字 Twitter 卡片”：仅针对 twitter-rss.js 生成的推特订阅，
+// 不含图片/视频/音频(iframe)等媒体内容、只有正文的推文不渲染卡片（仍需保留在缓存中以便检测更新）。
+// 直连/其他平台订阅不受影响；已收藏的条目也不在此处过滤（收藏由收藏夹自行管理）。
+function filterPureTextTwitter(list){
+    if(!list || !list.length) return list || [];
+    return list.filter(item => !(item.isTwitterRss && isPureTextItem(item)));
 }
 
 function shareIconSvg(){
