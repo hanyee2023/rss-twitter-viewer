@@ -10,19 +10,25 @@
 const DEFAULT_MAX_ITEMS = 50;   // 每源每次返回上限：原 20，提高到 50 以保留更多历史未读（约 5 天/源 @10条）
 const ABSOLUTE_MAX_ITEMS = 100; // ?max= 硬上限：原 50，提高到 100（保留调优空间）
 
-// Nitter 实例列表（按优先级排序，仅保留实测稳定的实例）
-// 2026-08-14 实测复验（以 WebFetch 实际内容为准，curl 出口在本环境不可靠）：
-//   ✅ xcancel.com        —— 时间线正常，媒体走 cdn.xcancel.com 的 /pic/、/video/ 前缀
-//   ✅ nitter.catsarch.com —— 时间线正常，标准 /pic/、/video/ 前缀，无拦截
-//   ✅ nitter.kareem.one  —— 时间线正常，标准 /pic/、/video/ 前缀，已无 Cloudflare 拦截
-//   ❌ vanlett-cn.net      —— 两次连接均 fetch failed（首页与时间线均不可达，疑似域名失效/被墙）
-//   ❌ aguea.com           —— 仅为门户首页（跳 asia.aguea.com），用户时间线 /username 返回 404
-//   ⚠️ asia.aguea.com      —— 首页/搜索在线，但用户时间线 /username 抓取返回 404，后端取不到推文，已移出
-//   结论：保留上述 3 个 ✅ 实例即可；如需更多冗余，可另测公开 Nitter 实例列表再补。
+// Nitter 实例列表（按优先级排序：服务端实测可用 + HTML 结构一致排前）
+// 2026-08-17 服务端实测（node fetch 直接抓原始 HTML 验证，非浏览器/代理视角）：
+//   ✅ asia.aguea.com      —— 标准 Nitter 结构(timeline-item/tweet-body)，解析出 12 条带媒体条目，
+//                            媒体走 venexa.site（图片）+ /video/<hash>/https://video.twimg.com/...（视频），
+//                            解码器已支持；无需代理即可被服务端 fetch 到，排第一。
+//   ✅ aguea.net           —— 用户实测无需代理、可播放；服务端侧可能被 Cloudflare 验证页(Security Check)拦截，
+//                            作为回退（失败时 fast-fail 落到下一个实例），不影响主链路。
+//   ✅ nitter.catsarch.com —— 标准 Nitter 结构，与 asia.aguea.com 同构；服务端(Cloudflare 边缘)通常可达，
+//                            作冗余兜底。若 asia.aguea.com + aguea.net 均失效，仍能出内容。
+//                            注：用户浏览器侧访问 xcancel/catsarch 可能需代理，但服务端 fetch 走 Cloudflare 网络，
+//                            与用户本地网络无关，故保留为兜底实例（如不需要可删除此行）。
+//   ❌ xcancel.com        —— 服务端 fetch 在本环境不可达（需代理），且部分改版丢 timeline-item 标记，已移出主链。
+//   ❌ nitter.kareem.one  —— 502 Bad gateway，已移除。
+//   ❌ vanlett-cn.net      —— 不可达（域名失效/被墙）。
+//   ❌ asia.aguea.net      —— 注意是 .net；用户此前实测的是 .com，.net 在本环境返回 Security Check，统一用 .com。
 const NITTER_INSTANCES = [
-  'https://xcancel.com',
+  'https://asia.aguea.com',
+  'https://aguea.net',
   'https://nitter.catsarch.com',
-  'https://nitter.kareem.one',
 ];
 
 const SYNDICATION_BASE = 'https://syndication.twitter.com/srv/timeline-profile/screen-name/';
@@ -143,6 +149,16 @@ function decodeNitterProxyUrl(proxyUrl) {
   if (!proxyUrl) return '';
   let url = proxyUrl.replace(/&amp;/g, '&');
 
+  // 通用：代理路径里内嵌了完整原始地址。部分实例（如 asia.aguea.com）的视频下载链接为
+  //   /video/<哈希>/https://venexa.site/amplify_video/.../xxx.mp4
+  // 形式，前面带 /video/<哈希>/ 前缀，直接提取内嵌的绝对地址并递归解析（venexa.site → twimg 等）。
+  // 必须放在 venexa 分支之前，否则 venexa 分支会提前 return 而只替换主机名、残留 /video/<哈希>/ 前缀，
+  // 导致前端拿到非法相对 URL → 媒体区黑屏/闪烁。
+  const embeddedAny = url.match(/\/(?:pic|video|thumb)\/[A-Za-z0-9]+\/(https?:\/\/[^\s"'<>]+)$/i);
+  if (embeddedAny) {
+    return decodeNitterProxyUrl(embeddedAny[1]);
+  }
+
   // 格式3: venexa.site → 替换为 pbs.twimg.com 或 video.twimg.com
   if (/venexa\.site/.test(url)) {
     if (/\/media\//.test(url) || /\.(jpg|jpeg|png|gif|webp)/i.test(url)) {
@@ -185,6 +201,13 @@ function decodeNitterProxyUrl(proxyUrl) {
       if (/^(pbs|video)\.twimg\.com\//i.test(decoded)) {
         return 'https://' + decoded;
       }
+      // asia.aguea.com 等实例：原始 twimg 地址直接嵌在代理路径里
+      // 例如 /video/<哈希>/https://video.twimg.com/...mp4 或 /pic/<哈希>/https://pbs.twimg.com/...
+      // 仅解码出末尾的绝对地址即可（否则前缀 /video/<哈希>/ 会让前端拿到非法相对 URL → 媒体区黑屏/闪烁）
+      const embedded = decoded.match(/https?:\/\/(?:pbs|video)\.twimg\.com\/.+/i);
+      if (embedded) {
+        return embedded[0];
+      }
     } catch (e) {
       // 解码失败，返回原始
     }
@@ -199,8 +222,18 @@ function decodeNitterProxyUrl(proxyUrl) {
   return url;
 }
 
+// 宽松判断页面是否含有推文时间线（兼容不同 Nitter 实例/改版的类名）
+// 旧版仅认 timeline-item，xcancel 等改版后可能换类名，导致整源被误判为空
+function hasTimeline(html) {
+  return html.includes('timeline-item')
+      || html.includes('tweet-content')
+      || html.includes('tweet-header')
+      || html.includes('class="tweet"');
+}
+
 // ─── 方案 A：Nitter HTML 解析（多实例回退）──────────────────────
-async function fetchFromNitter(username, maxItems) {
+async function fetchFromNitter(username, maxItems, diag = []) {
+  const hostOf = (b) => b.replace('https://', '');
   for (const base of NITTER_INSTANCES) {
     try {
       const res = await fetch(base + '/' + username, {
@@ -212,7 +245,10 @@ async function fetchFromNitter(username, maxItems) {
         redirect: 'follow',
       });
 
-      if (!res.ok) continue;
+      if (!res.ok) {
+        diag.push(`${hostOf(base)}: HTTP ${res.status}`);
+        continue;
+      }
 
       const html = await res.text();
 
@@ -221,13 +257,15 @@ async function fetchFromNitter(username, maxItems) {
         return buildEmptyRss(username, '该用户不存在或已被封禁');
       }
 
-      // 检测是否有推文内容
-      if (!html.includes('timeline-item')) {
+      // 检测是否有推文内容（宽松判断，兼容改版）
+      if (!hasTimeline(html)) {
+        diag.push(`${hostOf(base)}: 未识别到推文结构`);
         continue;
       }
 
       // 检测 Cloudflare 验证页
-      if (html.includes('Just a moment') || html.includes('cloudflare') && html.includes('challenge')) {
+      if (html.includes('Just a moment') || (html.includes('cloudflare') && html.includes('challenge'))) {
+        diag.push(`${hostOf(base)}: Cloudflare验证页`);
         continue;
       }
 
@@ -253,6 +291,7 @@ async function fetchFromNitter(username, maxItems) {
 
       return rss;
     } catch (e) {
+      diag.push(`${hostOf(base)}: ${e && e.message ? e.message : 'fetch失败'}`);
       continue;
     }
   }
@@ -445,8 +484,8 @@ async function parseNitterHtml(html, username, maxItems, nitterBase) {
       }
     }
 
-    // 过滤掉无媒体条目：只显示包含图片或视频的推文
-    if (imageUrls.length === 0 && videoUrls.length === 0) continue;
+    // 不再过滤纯文字推文：保留所有推文（含纯文字），确保「及时收到更新」不丢内容。
+    // 纯文字条目没有图片/视频，前端卡片会只显示文字，不影响阅读。
 
     // 生成推文链接
     // 优先从日期链接中提取真实推文 ID
@@ -783,19 +822,24 @@ export async function onRequest({ request, env }) {
     }
   }
 
-  // 方案 A：尝试 Nitter HTML 解析（多实例依次回退）
-  let rss = await fetchFromNitter(username, maxItems);
+  // 方案 A：尝试 Nitter HTML 解析（多实例依次回退），记录每个实例的诊断
+  const nitterDiag = [];
+  let rss = await fetchFromNitter(username, maxItems, nitterDiag);
   let gotReal = !!rss;
 
   // 方案 B：所有 Nitter 实例失败，回退到 Syndication API
   if (!rss) {
-    rss = await fetchFromSyndication(username, maxItems);
-    gotReal = !!rss;
-  }
-
-  // 所有方案都失败
-  if (!rss) {
-    rss = buildEmptyRss(username, '所有数据源均不可用，可能是网络问题或 Twitter 风控限制，请稍后重试');
+    const syn = await fetchFromSyndication(username, maxItems);
+    gotReal = !!syn;
+    if (syn) {
+      rss = syn;
+    } else {
+      const detail = nitterDiag.length ? nitterDiag.join('；') : '未知原因';
+      rss = buildEmptyRss(
+        username,
+        `所有 Nitter 实例均不可用（${detail}），且 Syndication API 也失败。可能是实例失效或 Twitter 风控限制，请稍后重试，或检查 NITTER_INSTANCES 实例列表。`
+      );
+    }
   }
 
   // 仅缓存真实抓取到的内容；空结果/失败不缓存，以便尽快重试源站
