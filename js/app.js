@@ -960,6 +960,7 @@ document.addEventListener("keydown", (e)=>{
 
 window.onload = async function(){
     initVideoObserver();
+    initLazyMedia();
     showPage(pageHome, "RSS媒体阅读器");
     initLoadAllCache();
 }

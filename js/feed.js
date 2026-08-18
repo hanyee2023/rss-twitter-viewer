@@ -497,11 +497,11 @@ function buildCard(item, isFav = false){
     // 优先使用 videoPoster（从 <video poster="..."> 属性提取的视频缩略图）
     // 回退到 imgs[0]（兼容旧格式 RSS）
     const posterImg = item.videoPoster || (imgs.length > 0 ? imgs[0] : "");
-    const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
-    const posterDirect = posterImg ? cleanMediaUrl(posterImg) : "";
-    const posterAttr = posterProxy ? `poster="${escapeAttr(posterProxy)}"` : ""; // 原生 <video poster>：渲染即显示封面；封面图不加 twname（对齐稳定版，避免部分代理封面加载失败）
+    const posterProxy = posterImg ? getProxyUrl(posterImg, isFav, "large") : "";
+    const posterDirect = posterImg ? twimgSizedDirect(cleanMediaUrl(posterImg), "large") : "";
+    const posterAttr = posterProxy ? `data-poster="${escapeAttr(posterProxy)}"` : ""; // 懒加载：仅写 data-poster，由 media.js 的 lazyMediaObserver 在临近视口时再填回 poster 属性，避免开屏一次性下载全部封面
     const posterDirectAttr = posterDirect ? `data-poster-direct="${escapeAttr(posterDirect)}"` : "";
-    const posterFallbacksArr = posterImg && hostMatched(posterImg) ? getMediaProxyCandidates(posterImg, isFav).slice(1) : [];
+    const posterFallbacksArr = posterImg && hostMatched(posterImg) ? getMediaProxyCandidates(posterImg, isFav, "large").slice(1) : [];
     const posterFallbacksAttr = posterFallbacksArr.length > 0 ? `data-poster-proxy-fallbacks="${escapeAttr(JSON.stringify(posterFallbacksArr))}"` : "";
     const videoDirect = cleanMediaUrl(item.videoUrl);
     const preferProxy = hostMatched(item.videoUrl);
@@ -525,11 +525,11 @@ function buildCard(item, isFav = false){
     // 优先使用 videoPoster（从 <video poster="..."> 属性提取的视频缩略图）
     // 回退到 imgs[0]（兼容旧格式 RSS）
     const posterImg = item.videoPoster || (imgs.length > 0 ? imgs[0] : "");
-    const posterProxy = posterImg ? getProxyUrl(posterImg, isFav) : "";
-    const posterDirect = posterImg ? cleanMediaUrl(posterImg) : "";
-    const posterAttr = posterProxy ? `poster="${escapeAttr(posterProxy)}"` : ""; // 原生 <video poster>：渲染即显示封面；封面图不加 twname（对齐稳定版，避免部分代理封面加载失败）
+    const posterProxy = posterImg ? getProxyUrl(posterImg, isFav, "large") : "";
+    const posterDirect = posterImg ? twimgSizedDirect(cleanMediaUrl(posterImg), "large") : "";
+    const posterAttr = posterProxy ? `data-poster="${escapeAttr(posterProxy)}"` : ""; // 懒加载：仅写 data-poster，由 media.js 的 lazyMediaObserver 在临近视口时再填回 poster 属性，避免开屏一次性下载全部封面
     const posterDirectAttr = posterDirect ? `data-poster-direct="${escapeAttr(posterDirect)}"` : "";
-    const posterFallbacksArr = posterImg && hostMatched(posterImg) ? getMediaProxyCandidates(posterImg, isFav).slice(1) : [];
+    const posterFallbacksArr = posterImg && hostMatched(posterImg) ? getMediaProxyCandidates(posterImg, isFav, "large").slice(1) : [];
     const posterFallbacksAttr = posterFallbacksArr.length > 0 ? `data-poster-proxy-fallbacks="${escapeAttr(JSON.stringify(posterFallbacksArr))}"` : "";
     const videoProxy = getProxyUrl(item.videoUrl, isFav);
     const videoDirect = cleanMediaUrl(item.videoUrl);
@@ -572,7 +572,7 @@ function buildCard(item, isFav = false){
             const imgFallbacksAttr = imgIsProxy ? getProxyFallbacksAttr(src, isFav) : "";
             const imgSrc = imgIsProxy ? imgProxy : imgDirect;
             mediaHtml += `<div class="grid-img-box">
-                <img class="grid-img" ${imgIsProxy ? 'crossorigin="anonymous"' : ""} referrerpolicy="no-referrer" decoding="async" data-imggroup='${escapeAttr(JSON.stringify(imgs))}' data-direct-src="${escapeAttr(imgDirect)}" src="${escapeAttr(imgSrc)}" loading="lazy" ${imgFallbacksAttr} onerror="if(!fallbackMediaProxy(this) && this.dataset.directSrc && this.src!==this.dataset.directSrc){this.src=this.dataset.directSrc;}">${overlay}
+                <img class="grid-img" ${imgIsProxy ? 'crossorigin="anonymous"' : ""} referrerpolicy="no-referrer" decoding="async" data-imggroup='${escapeAttr(JSON.stringify(imgs))}' data-direct-src="${escapeAttr(imgDirect)}" data-src="${escapeAttr(imgSrc)}" ${imgFallbacksAttr} onerror="if(!fallbackMediaProxy(this) && this.dataset.directSrc && this.src!==this.dataset.directSrc){this.src=this.dataset.directSrc;}">${overlay}
             </div>`;
         })
         mediaHtml += `</div></div>`;

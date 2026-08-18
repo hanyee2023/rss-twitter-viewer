@@ -150,22 +150,42 @@ function getRSSProxyCandidates(rssUrl) {
     return RSS_PROXY_ENDPOINTS.map(endpoint => buildProxyUrl(endpoint, rssUrl));
 }
 
-function getMediaProxyCandidates(rawUrl, isFav = false) {
+function getMediaProxyCandidates(rawUrl, isFav = false, size = "") {
     const url = cleanMediaUrl(rawUrl);
     if (!isHttpUrl(url)) return [];
     if (!hostMatched(url)) return [];
     const params = { raw: "1" };
     if (isFav) params.cache = "long";
-    return MEDIA_PROXY_ENDPOINTS.map(endpoint => buildProxyUrl(endpoint, url, params));
+    return MEDIA_PROXY_ENDPOINTS.map(endpoint => {
+        let out = buildProxyUrl(endpoint, url, params);
+        if (size) { try { const u = new URL(out); u.searchParams.set("twname", size); out = u.toString(); } catch (e) {} }
+        return out;
+    });
 }
 
-function getProxyUrl(rawUrl, isFav = false) {
+function getProxyUrl(rawUrl, isFav = false, size = "") {
     const url = cleanMediaUrl(rawUrl);
     if (!isHttpUrl(url)) return url;
     if (!hostMatched(url)) return url;
     const params = { raw: "1" };
     if (isFav) params.cache = "long";
-    return buildProxyUrl(MEDIA_PROXY_ENDPOINTS[0], url, params);
+    let out = buildProxyUrl(MEDIA_PROXY_ENDPOINTS[0], url, params);
+    if (size) { try { const u = new URL(out); u.searchParams.set("twname", size); out = u.toString(); } catch (e) {} }
+    return out;
+}
+
+// 直连推图尺寸改写：给 raw Twitter(twimg) URL 的路径追加 :large 等后缀，
+// 让「代理失败回退直连」的预览图也走压缩尺寸，与代理尺寸一致（避免回退时突然变全分辨率原图）。
+function twimgSizedDirect(rawUrl, size) {
+    const allowed = ["small", "medium", "large", "orig"];
+    if (!allowed.includes(size)) return rawUrl;
+    try {
+        const u = new URL(rawUrl);
+        if (!/twimg\.com$/i.test(u.hostname)) return rawUrl;
+        u.pathname = u.pathname.replace(/:(small|medium|large|orig)$/i, "") + ":" + size;
+        u.searchParams.delete("name");
+        return u.toString();
+    } catch (e) { return rawUrl; }
 }
 
 function getProxyFallbacksAttr(rawUrl, isFav = false) {

@@ -27,6 +27,59 @@ function ensurePosterFallback(video){
     tryNext();
 }
 
+// ===== 图片 / 视频预览图 懒加载（限流版，rootMargin 预载）=====
+// 解决一对矛盾：① 开屏不一次性下载全部图（避免挤爆代理）；② 滑到之前已在「视口外 500px」预载好，回看秒显不卡。
+// 渲染时网格图只写 data-src（不写 src）、视频预览图只写 data-poster（不写 poster 属性）→ 不下载；
+// 下面的观察器在元素临近视口时把真实地址填回去，触发加载。兜底链（onerror / ensurePosterFallback）原样生效。
+let lazyMediaObserver = null;
+function getLazyMediaObserver(){
+    if(lazyMediaObserver) return lazyMediaObserver;
+    lazyMediaObserver = new IntersectionObserver((entries, obs) => {
+        entries.forEach(entry => {
+            if(!entry.isIntersecting) return;
+            const el = entry.target;
+            if(el.tagName === "IMG" && el.dataset.src && el.dataset.lazyDone !== "1"){
+                el.dataset.lazyDone = "1";
+                el.src = el.dataset.src;            // 触发下载；原 onerror 代理/直连兜底照常
+            } else if(el.tagName === "VIDEO" && el.dataset.poster && el.dataset.posterDone !== "1"){
+                el.dataset.posterDone = "1";
+                el.poster = el.dataset.poster;      // 触发封面下载；ensurePosterFallback 仍会接管失败回退
+            }
+            obs.unobserve(el);
+        });
+    }, { root: null, rootMargin: "500px 0px", threshold: 0 });
+    return lazyMediaObserver;
+}
+
+function observeLazyMediaEl(el){
+    const obs = getLazyMediaObserver();
+    if(el.matches && el.matches('img.grid-img[data-src]:not([data-lazy-done])')){ obs.observe(el); return true; }
+    if(el.matches && el.matches('video[data-poster]:not([data-poster-done])')){ obs.observe(el); return true; }
+    return false;
+}
+
+// 自动接管所有新插入的卡片（主页 / 收藏 / 搜索 / 订阅 / 分页追加），无需各插入点手动调用。
+// 只扫描「新增子树」，不全局重扫，长信息流滚动也不会变慢。
+function initLazyMedia(){
+    if(typeof MutationObserver === "undefined"){ observeLazyMediaEl(document); return; }
+    const mo = new MutationObserver(mutations => {
+        for(const m of mutations){
+            m.addedNodes.forEach(n => {
+                if(n.nodeType !== 1) return;
+                if(observeLazyMediaEl(n)) return;          // 新增的就是目标元素
+                if(n.querySelectorAll){                     // 新增的是容器，扫其内部
+                    n.querySelectorAll('img.grid-img[data-src]:not([data-lazy-done])').forEach(el => observeLazyMediaEl(el));
+                    n.querySelectorAll('video[data-poster]:not([data-poster-done])').forEach(el => observeLazyMediaEl(el));
+                }
+            });
+        }
+    });
+    mo.observe(document.body || document.documentElement, { childList: true, subtree: true });
+    // 处理脚本加载前已存在的卡片
+    document.querySelectorAll('img.grid-img[data-src]:not([data-lazy-done])').forEach(el => observeLazyMediaEl(el));
+    document.querySelectorAll('video[data-poster]:not([data-poster-done])').forEach(el => observeLazyMediaEl(el));
+}
+
 function initVideoObserver(){
     if(videoObserver) return;
     videoObserver = new IntersectionObserver((entries)=>{
@@ -42,10 +95,8 @@ function initVideoObserver(){
                 }
                 // 封面回退：主图加载失败时自动切到直连/备用代理（原生 poster 无 onerror）
                 ensurePosterFallback(video);
-                // 注：m3u8 不做预加载（与老版本一致）。
-                // 之前的「视口即预热整条短视频/前30s」会在视口含多个视频时产生大量并发
-                // media-proxy 请求，挤占 Cloudflare Function + 拖慢整体加载/播放速度。
-                // 点击播放时由 hls.js 实时拉取即可（老版本实测 1 秒开播，无需预热）。
+                // m3u8 预加载改为「限流版」：仅预热视口中心最近的视频（见 managePreloads），
+                // 不再全量并发；点击时复用已缓冲实例，消除「放几秒卡一下」的冷启动。
                 // 优化5：内存优化恢复 - 滑回视口时恢复之前释放的视频
                 if(video.dataset.savedTime && !video.src){
                     restoreVideoFromMem(video);
@@ -75,13 +126,65 @@ function initVideoObserver(){
                 tryReleaseVideoMemory(video);
             }
         })
+        // 每批可见性变化后，重新评估「该预热哪几个视频」（限流版预载）
+        managePreloads();
     }, {threshold:0.01, rootMargin: "100px 0px 250px 0px"});
 }
 
-// 注：m3u8 预加载（preloadHlsFirstFrag）已移除，与老版本行为一致。
-// 原因：视口含多个 m3u8 视频时并发预热会瞬间产生大量 media-proxy 请求，
-// 挤占 Cloudflare Function 配额并拖累整体加载/播放速度（实测从 1s 开播退化为 25s+）。
-// 点击播放时由 hls.js 实时拉取清单+分片即可，无需预热。
+// ─── 限流版 m3u8 预加载（修复「点击放几秒卡一下」的冷启动，同时避开全量并发的坑）──────────
+// 与当初被移除的「视口全量预热」根本不同：
+//   1) 只预热「离视口中心最近的 MAX_PRELOAD 个」视频，而非视口内全部 → 并发有硬上限；
+//   2) 预载以 preloadMode=1 进行：hls.js 拉取清单+分片缓冲到 maxBufferLength(60s) 即自动停下载，
+//      不播放、不持续占带宽；点谁播谁，其余缓冲区满即静默；
+//   3) 滑出视口的视频立刻 cancelHlsPreload，把并发额度让给新进入中心的视频。
+// 效果：你最可能点的那个视频在点击前就已缓冲好 → 起播即顺（贴近本地直连体验），
+//       又不会像旧版那样 N 个视频同时预热把 media-proxy 打爆（25s+ 退化）。
+const MAX_PRELOAD = 2;
+
+// 视频中心相对视口中心的纵向偏移（绝对值越小越靠近中心，越优先预热）
+function _centerOffset(video){
+    const r = video.getBoundingClientRect();
+    if(!r.height) return Number.MAX_SAFE_INTEGER;
+    return Math.abs((r.top + r.height / 2) - (window.innerHeight / 2));
+}
+
+// 启动单个视频的预加载（限流模式下只缓冲、不自动播放）
+function startHlsPreload(video){
+    if(video.dataset.userAttempted === "1") return;   // 用户已点过：不预载
+    if(video.dataset.preloading === "1") return;       // 已在预载：跳过
+    if(video.dataset.hlsLoaded === "1") return;        // 已建好实例：跳过
+    video.dataset.preloading = "1";
+    video.dataset.preloadMode = "1";                   // 标记：缓冲但不自动播放
+    preloadCount = Math.min(MAX_PRELOAD, preloadCount + 1);
+    startHlsVideo(video);                              // 内部 preloadMode 分支只缓冲不播
+}
+
+// 每批可见性变化后调用：选出离中心最近、且未点过/未建实例的 MAX_PRELOAD 个视频进行预热，
+// 其余超出额度的预载立即取消，把并发额度让给更靠近中心的视频。
+function managePreloads(){
+    const candidates = [];
+    _visibleVideos.forEach(v=>{
+        if(v.dataset.userAttempted === "1") return;
+        if(v.dataset.hlsLoaded === "1") return;
+        if(v.classList.contains("media-video-mp4")) return; // MP4 走原生，无需 hls 预载
+        candidates.push(v);
+    });
+    candidates.sort((a,b)=> _centerOffset(a) - _centerOffset(b));
+    const want = candidates.slice(0, MAX_PRELOAD);
+    const wantSet = new Set(want);
+    // 取消不在「待预热」集合内的预载（释放并发额度）
+    candidates.forEach(v=>{
+        if(!wantSet.has(v) && v.dataset.preloading === "1"){
+            cancelHlsPreload(v);
+        }
+    });
+    // 启动待预热里尚未开始的
+    want.forEach(v=>{
+        if(v.dataset.preloading !== "1" && !v.hlsInstance){
+            startHlsPreload(v);
+        }
+    });
+}
 
 // 取消预加载（滑出视口或超时时调用）
 function cancelHlsPreload(video){
@@ -176,8 +279,9 @@ function resumeNearbyPreload(){
         if(v.preload !== "auto"){
             v.preload = "metadata";
         }
-        // 注：m3u8 预加载已移除（与老版本一致），原因见 videoObserver 处注释
     });
+    // 播放停止后，重新评估附近视频的限流预载（见 managePreloads）
+    managePreloads();
 }
 
 function getVideoErrorMessage(video, fallback = "视频播放失败"){
@@ -558,7 +662,12 @@ function startHlsVideo(video){
     const streamUrl = uniqueSources[sourceIndex] || uniqueSources[0];
     if(!streamUrl) return;
 
-    pauseOtherVideos(video);
+    // 仅在「用户真正点击播放」时集中带宽（暂停/停止其它视频）；
+    // 预载阶段（userAttempted 未置位）不调用，避免一启动预载就把其它预载视频的缓冲也停掉，
+    // 否则限流预载无法让最多 MAX_PRELOAD 个视频同时缓冲（与你选的 C 目标冲突）。
+    if(video.dataset.userAttempted === "1"){
+        pauseOtherVideos(video);
+    }
 
     // 缓冲超时保护：用户主动点击后若 12 秒仍无元数据（时长），说明代理卡死/源失效，
     // 明确报错并收起加载圈，避免“按钮变了却一直黑屏、也不提示”的困惑。
@@ -613,7 +722,7 @@ function startHlsVideo(video){
         const hls = new Hls({
             enableWorker: true,
             lowLatencyMode: true,         // 短片段起播更快（老版本即此值）
-            maxBufferLength: 30,
+            maxBufferLength: 60,          // 加厚缓冲（30→60）：抗代理抖动，播放更顺、不轻易放几秒卡一下
             capLevelToPlayerSize: true,
             storage: null,
             autoStartLoad: true
