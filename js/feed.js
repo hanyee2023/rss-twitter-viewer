@@ -326,8 +326,7 @@ async function renderSingleFeedFromSource(sourceUrl){
             .sort((a,b)=>new Date(b.date).getTime() - new Date(a.date).getTime());
         const list = filterPureTextTwitter(parsed);
         if(list.length > 0){
-            currentArticles = list;
-            // 保存缓存
+            // 保存缓存 + 合并进本地总缓存（供主页/单源复用）
             saveRssCache(sourceUrl, list);
             const merged = [...list, ...localCacheArticles.filter(item => item.sourceUrl.trim() !== String(sourceUrl).trim())]
                 .sort((a,b)=>new Date(b.date).getTime() - new Date(a.date).getTime())
@@ -335,11 +334,41 @@ async function renderSingleFeedFromSource(sourceUrl){
             localCacheArticles = merged;
             allArticles = [...merged];
             saveArticleCacheToStorage(merged);
-            renderPageNum = 1;
-            renderedArticleCount = 0;
-            loadLock = false;
-            renderPagedList(true);
-            bindScrollLoadMore();
+
+            // 关键修复：单源界面在浏览期间，后台刷新不再“清空容器整体重绘”，
+            // 否则已加载、已显示的图片/视频预览图会被整批重新请求 → 卡顿；
+            // 视频元素被替换还会触发 AbortError（表现为“时长出来了却不播放”）。
+            // 改为：首次进入才全量渲染；无新内容只静默更新缓存；有更新则增量前插新条目，保留旧卡片。
+            const prevLinks = new Set((currentArticles || []).map(i => i && i.link));
+            const isFirstRender = fallbackList.length === 0 || !articleBoxSingle.querySelector(".tweet-card");
+            const newItems = list.filter(i => i && i.link && !prevLinks.has(i.link));
+
+            if(isFirstRender){
+                // 首次进入该订阅（本地无缓存 / 容器为空）：全量渲染
+                currentArticles = [...list];
+                renderPageNum = 1;
+                renderedArticleCount = 0;
+                loadLock = false;
+                renderPagedList(true);
+                bindScrollLoadMore();
+            }else if(newItems.length === 0){
+                // 无新内容：保持当前已渲染的 currentArticles 不变（避免 DOM 与数据数组错位），
+                // 仅依赖上面已写入 localCacheArticles 的缓存；不重绘，避免图片/视频重新加载造成卡顿。
+            }else{
+                // 有更新：增量前插新条目，保留已加载的旧卡片（旧图片不再重新请求）
+                if(currentPage !== pageSingle){
+                    currentArticles = [...list]; // 用户已离开单源界面，仅更新数据
+                }else{
+                    currentArticles = [...newItems, ...currentArticles];
+                    articleBoxSingle.insertAdjacentHTML("afterbegin", renderCardList(newItems));
+                    renderedArticleCount += newItems.length;
+                    bindAllCardEvent();
+                    bindVideoPauseObserver();
+                    if(!videoObserver) initVideoObserver();
+                    initHlsVideo();
+                    showToast(`该订阅更新 ${newItems.length} 条`);
+                }
+            }
         }else{
             // 解析为空：已有缓存则保留，无需重绘
             const cache = getRssCache(sourceUrl);

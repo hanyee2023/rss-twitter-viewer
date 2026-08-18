@@ -314,6 +314,11 @@ function toggleVideoPlay(video){
     };
     if(video.classList.contains("media-video") && !video.dataset.hlsLoaded){
         showImmediateFeedback();
+        // 关键修复（解决“点击播放弹提示/点了不出声”）：在【用户点击手势】内同步发起播放意图。
+        // 即便此刻 HLS 尚未解析出数据源，浏览器也会记住“用户想播放”，待清单解析+缓冲就绪后自动续播，
+        // 从而规避异步 play() 被自动播放策略拦截（表现为 NotAllowedError → “请再点一次播放”）。
+        const gp = video.play();
+        if(gp && gp.catch) gp.catch(()=>{});
         startHlsVideo(video);
         return;
     }
@@ -604,6 +609,26 @@ function bindCustomMediaControls(video){
     updateMediaControls(video);
 }
 
+// 锁定单一清晰度：关闭 hls.js 的 ABR 自适应，固定选一个接近 540p 的档位
+// （代理层已剔除 >720p，剩余档位均 ≤720p）。移动端代理播放更稳定、不再播放中反复升降档。
+function lockSingleLevel(hls){
+    try{
+        const levels = hls.levels || [];
+        if(levels.length <= 1) return;          // 只有一档无需锁定
+        const TARGET = 540;
+        let bestIdx = 0, bestScore = Infinity;
+        levels.forEach((lv, i) => {
+            const h = lv.height || 0;
+            const score = Math.abs(h - TARGET);
+            if(score < bestScore){ bestScore = score; bestIdx = i; }
+        });
+        hls.autoLevelEnabled = false;           // 关闭自适应，固定一档
+        hls.currentLevel = bestIdx;
+        hls.loadLevel = bestIdx;
+        hls.nextLevel = bestIdx;
+    }catch(e){}
+}
+
 function startHlsVideo(video){
     const sources = [fullDecodeXml(video.dataset.src), fullDecodeXml(video.dataset.altSrc)].filter(Boolean);
     const uniqueSources = [...new Set(sources)];
@@ -633,8 +658,9 @@ function startHlsVideo(video){
     const playNow = (retry = true) => {
         video.play().catch(err => {
             console.warn("m3u8播放失败：", err);
-            if(retry && err && err.name !== "NotAllowedError"){
-                // 缓冲不足时自动重试：等待 canplay/loadeddata 或超时后重试
+            if(retry && err){
+                // 无论是缓冲不足还是自动播放被拦截，都等 canplay/loadeddata 后【静默】重试一次
+                // （用户已点击，短暂激活态通常仍有效），避免“一点就提示/点了不出声”的困惑。
                 const retryPlay = ()=>{
                     video.removeEventListener("canplay", retryPlay);
                     video.removeEventListener("loadeddata", retryPlay);
@@ -644,7 +670,7 @@ function startHlsVideo(video){
                 video.addEventListener("loadeddata", retryPlay, {once:true});
                 setTimeout(()=>playNow(false), 450);
             }else{
-                // 仅在用户主动点击播放后才提示错误
+                // 仅在用户主动点击播放后才提示错误（重试耗尽）
                 if(video.dataset.userAttempted === "1"){
                     const msg = getPlayErrorMessage(err, video, "m3u8播放失败");
                     if(msg) showToast(msg);
@@ -698,6 +724,10 @@ function startHlsVideo(video){
             video.dataset.hlsLoaded = "1";
             // 成功解析清单 → 重置致命重试计数（只有「连续」致命才重试，自愈成功即清零）
             delete video.dataset.hlsFatalRetry;
+            // 锁定单一清晰度：用户反馈“播放时频繁切档(选择频率)导致卡顿/重连”，
+            // 这里在客户端关闭 ABR，固定选一个接近 540p 的档位（与代理层 720p 封顶一致、移动端更顺），
+            // 播放过程中不再自动升降档，对应“抓取时就定好一个链接、播放时直接播这个链接”。
+            lockSingleLevel(hls);
             // 预加载模式不自动播放，仅加载数据；正常模式点击一次即播放
             if(video.dataset.preloadMode !== "1"){
                 playNow();
