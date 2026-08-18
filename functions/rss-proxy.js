@@ -2,27 +2,31 @@
 // 仅对“生效 RSS 名单”内的域名提供服务（其余返回 403），与媒体代理保持一致的安全模型。
 // 生效名单 = 内置默认白名单(BUILTIN_RSS_HOSTS)，不依赖 KV 用户名单。
 
+// 与 core.js 的 FORCE_PROXY_HOSTS、media-proxy.js 的 ALLOW_PROXY_HOSTS 保持一致（见 core.js 注释）。
 const BUILTIN_RSS_HOSTS = [
   "twitter.com",
-  "x.com",
-  "t.co",
-  "twimg.com",
-  "video.twimg.com",
-  "pbs.twimg.com",
-  "abs.twimg.com",
-  "xcancel.com",
-  "niter.net",
-  "16k.club",
-  "xxxfollow.com",
-  "media.redgifs.com",
-  "redd.it",
-  "770118.xyz",
-  "phe69",
-  "3go.fun",
-  "rsshub.app",
-  "venexa.site",
-  "aguea.com",
-  "htumeng.com"
+    "x.com",
+    "t.co",
+    "twimg.com",
+    "video.twimg.com",
+    "pbs.twimg.com",
+    "abs.twimg.com",
+    "xcancel.com",
+    "nitter.net",
+    "16k.club",
+    "xxxfollow.com",
+    "media.redgifs.com",
+    "redd.it",
+    "770118.xyz",
+    "phe69",
+    "video.3go.fun",
+    "rsshub.app",
+    "venexa.site",
+    "aguea.com",
+    "htumeng.com",
+    "642p.com",
+    "tutu1.space",
+    "freeshare58.com"
 ];
 
 function normalizeHost(host) {
