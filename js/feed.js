@@ -86,6 +86,10 @@ function showPage(targetDom, titleText) {
             bindVideoPauseObserver();
             initHlsVideo();
             bindScrollLoadMore();
+            if(window.updateUnreadBadge) window.updateUnreadBadge();
+            // 切回主页时做轻量本地更新检测（不重复拉网络）：单源/后台刷新已更新 localCacheArticles，
+            // 若其中有「主页快照未渲染过 + 未读」的新条目，弹「更新N条」浮条引导点击查看。
+            promptHomeUpdateIfAny();
             return;
         }
         renderHomeFromCache();
@@ -100,6 +104,34 @@ function showPage(targetDom, titleText) {
         searchResultBox.innerHTML = "";
     } else if (targetDom === pageAdd) {
         renderKeywordList();
+    }
+    // 切到任意界面后统一刷新未读角标（管理订阅/收藏等也即时反映未读数变化）
+    if(window.updateUnreadBadge) window.updateUnreadBadge();
+}
+
+// 切回主页时的轻量本地更新检测：用本地缓存对比主页快照已渲染的 link 集合，
+// 若存在「未读 + 主页未渲染」的新条目，则弹「更新N条」浮条（沿用 showHomeFresh 回到顶部加载）。
+// 不重复拉网络（单源/后台刷新已更新 localCacheArticles），仅做提示引导。
+// 注意：仅在 showPage 主页「恢复快照」分支调用（即"从其它界面切回主页"时），所以无需判断 currentPage。
+function promptHomeUpdateIfAny(){
+    const renderedLinks = new Set();
+    articleBox.querySelectorAll(".tweet-card").forEach(c=>{
+        if(c.dataset.link) renderedLinks.add(c.dataset.link);
+    });
+    const fresh = (localCacheArticles || []).filter(item =>
+        item && item.link &&
+        !sessionStartReadSet.has(item.link) &&
+        !readLinkSet.has(item.link) &&
+        !renderedLinks.has(item.link)
+    );
+    if(fresh.length > 0){
+        showUpdateFloat(`更新${fresh.length}条内容，点击查看`, ()=>{
+            filterSourceUrl = "";
+            homeIsCached = false;
+            homeArticleHtml = "";
+            renderedArticleCount = 0;
+            showHomeFresh();
+        });
     }
 }
 
@@ -256,6 +288,7 @@ function renderHomeFromCache() {
     renderPageNum = 1;
     renderPagedList(true);
     bindScrollLoadMore();
+    if(window.updateUnreadBadge) window.updateUnreadBadge();
 }
 
 async function renderSingleFeedFromSource(sourceUrl){
@@ -353,6 +386,7 @@ window.mergeNewData = async function(){
     renderedArticleCount = 0;
     renderPagedList(true);
     bindScrollLoadMore();
+    if(window.updateUnreadBadge) window.updateUnreadBadge();
 }
 
 function renderPagedList(reset = false){

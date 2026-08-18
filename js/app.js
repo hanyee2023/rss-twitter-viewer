@@ -170,7 +170,9 @@ function bindAllCardEvent(){
             });
         }, { rootMargin: "-90% 0px 0px 0px" });
     }
-    document.querySelectorAll(".tweet-card").forEach(card => {
+    // 已读观察器只观察【主页容器】内的卡片：单源模式(articleBoxSingle)、收藏(favPanel)的卡片
+    // 完全不被 observe，从根本上保证「单源/收藏界面不标记已读」（readObserver 回调另有守卫双保险）。
+    articleBox.querySelectorAll(".tweet-card").forEach(card => {
         readObserver.observe(card);
     });
 }

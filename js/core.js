@@ -419,7 +419,34 @@ function markCardRead(card){
     if(!link || readLinkSet.has(link)) return;
     readLinkSet.add(link);
     saveReadLinks();
+    updateUnreadBadge();
 }
+
+// 主页按钮右上角的「未读总数」红色数字角标：实时反映当前缓存中尚未标记为已读的条目数。
+// 语义与管理订阅各源角标完全一致（都是 readLinkSet 之外的条目），即「全局真实未读数」。
+// 在滚动标记已读、后台刷新出新内容、切换页面、渲染主页/合并数据时都会刷新。
+function updateUnreadBadge(){
+    if(!btnHome) return;
+    let total = 0;
+    if(Array.isArray(localCacheArticles)){
+        for(const item of localCacheArticles){
+            if(item && item.link && !readLinkSet.has(item.link)) total++;
+        }
+    }
+    let badge = btnHome.querySelector(".unread-badge");
+    if(total > 0){
+        if(!badge){
+            badge = document.createElement("span");
+            badge.className = "unread-badge";
+            btnHome.appendChild(badge);
+        }
+        badge.textContent = total > 99 ? "99+" : String(total);
+        badge.style.display = "";
+    }else if(badge){
+        badge.style.display = "none";
+    }
+}
+window.updateUnreadBadge = updateUnreadBadge;
 
 function markReadByScroll(){
     if(currentPage !== pageHome) return;
@@ -433,7 +460,10 @@ function markReadByScroll(){
             changed = true;
         }
     });
-    if(changed) saveReadLinks();
+    if(changed){
+        saveReadLinks();
+        updateUnreadBadge();
+    }
 }
 
 function loadArticleCacheFromStorage(){
