@@ -42,11 +42,10 @@ function initVideoObserver(){
                 }
                 // 封面回退：主图加载失败时自动切到直连/备用代理（原生 poster 无 onerror）
                 ensurePosterFallback(video);
-                // 优化7：m3u8 代理视频进入视口时预加载首段分片（点击即播）
-                if(video.classList.contains("media-video") && !video.dataset.hlsLoaded
-                    && video.dataset.proxyVideo === "1" && preloadCount < MAX_PRELOAD){
-                    preloadHlsFirstFrag(video);
-                }
+                // 注：m3u8 不做预加载（与老版本一致）。
+                // 之前的「视口即预热整条短视频/前30s」会在视口含多个视频时产生大量并发
+                // media-proxy 请求，挤占 Cloudflare Function + 拖慢整体加载/播放速度。
+                // 点击播放时由 hls.js 实时拉取即可（老版本实测 1 秒开播，无需预热）。
                 // 优化5：内存优化恢复 - 滑回视口时恢复之前释放的视频
                 if(video.dataset.savedTime && !video.src){
                     restoreVideoFromMem(video);
@@ -79,63 +78,10 @@ function initVideoObserver(){
     }, {threshold:0.01, rootMargin: "100px 0px 250px 0px"});
 }
 
-// 优化7：m3u8 代理视频进入视口时"全量预热"——按视频时长智能决定预加载量
-// 旧版"载完第1段就 stopLoad"是短视频卡几十秒的根因：用户点击时还得从源站冷拉剩余分片
-// 新版策略：
-//   - 进入视口后启动 HLS，持续缓冲直到视频完整下完（短视频<30s 会一次性预热完）
-//   - 长视频缓冲到 30s 后自动停止（够秒开，省流量）
-//   - 单条预热最多 15s 防源站卡死
-//   - 用户主动滚动出视口/点击其他视频时由 pauseOtherVideos / videoObserver 取消
-function preloadHlsFirstFrag(video){
-    if(video.dataset.hlsLoaded || video.dataset.preloading) return;
-    if(preloadCount >= MAX_PRELOAD) return;
-    if(!(window.Hls && Hls.isSupported())) return;
-
-    preloadCount++;
-    video.dataset.preloading = "1";
-    video.dataset.preloadMode = "1";
-    // 预热目标：短视频整条下完，长视频只下前 30s（够秒开 + 不浪费流量）
-    video.dataset.prewarmCap = "30";
-    startHlsVideo(video);
-
-    const releaseSlot = () => {
-        preloadCount = Math.max(0, preloadCount - 1);
-        video.dataset.preloading = "0";
-    };
-
-    // 硬性预算：单条预热最多 15s（防源站卡死时无限等），到点就停
-    const budgetMs = 15000;
-    const budgetTimer = setTimeout(()=>{
-        if(video.dataset.preloading === "1"){
-            if(video.hlsInstance){ try { video.hlsInstance.stopLoad(); } catch(e){} }
-            releaseSlot();
-            if(video.hlsInstance){
-                video.hlsInstance.off(Hls.Events.FRAG_LOADED, onFragLoaded);
-            }
-        }
-    }, budgetMs);
-
-    // 每片加载完检查一次：短视频已完整缓冲 → 提前停止；长视频到 30s 也会被 hls.js 自然停止
-    const onFragLoaded = () => {
-        if(!video.duration || !Number.isFinite(video.duration) || video.duration <= 0) return;
-        if(video.buffered.length === 0) return;
-        const bufferedEnd = video.buffered.end(video.buffered.length - 1);
-        const capSec = parseFloat(video.dataset.prewarmCap || "30");
-        const target = Math.min(video.duration, capSec);
-        if(bufferedEnd >= target - 0.5){
-            if(video.hlsInstance){ try { video.hlsInstance.stopLoad(); } catch(e){} }
-            releaseSlot();
-            clearTimeout(budgetTimer);
-            if(video.hlsInstance){
-                video.hlsInstance.off(Hls.Events.FRAG_LOADED, onFragLoaded);
-            }
-        }
-    };
-
-    if(video.hlsInstance){
-        video.hlsInstance.on(Hls.Events.FRAG_LOADED, onFragLoaded);
-    }
-}
+// 注：m3u8 预加载（preloadHlsFirstFrag）已移除，与老版本行为一致。
+// 原因：视口含多个 m3u8 视频时并发预热会瞬间产生大量 media-proxy 请求，
+// 挤占 Cloudflare Function 配额并拖累整体加载/播放速度（实测从 1s 开播退化为 25s+）。
+// 点击播放时由 hls.js 实时拉取清单+分片即可，无需预热。
 
 // 取消预加载（滑出视口或超时时调用）
 function cancelHlsPreload(video){
@@ -230,10 +176,7 @@ function resumeNearbyPreload(){
         if(v.preload !== "auto"){
             v.preload = "metadata";
         }
-        if(v.classList.contains("media-video") && !v.dataset.hlsLoaded
-            && v.dataset.proxyVideo === "1" && preloadCount < MAX_PRELOAD){
-            preloadHlsFirstFrag(v);
-        }
+        // 注：m3u8 预加载已移除（与老版本一致），原因见 videoObserver 处注释
     });
 }
 
@@ -664,29 +607,14 @@ function startHlsVideo(video){
             try{ video.hlsInstance.destroy(); }catch(e){}
             video.hlsInstance = null;
         }
-        // 仅「通过 twitter-rss.js 添加的推特订阅」视频施加 720p 自适应策略
-        const isProxyVid = video.dataset.proxyVideo === "1";
-        const isTwRssVid = video.dataset.twitterRss === "1";
-        // 预热模式：把 hls.js 的缓冲上限收紧到预热目标，让 hls.js 自然停在目标位置不浪费流量
-        const prewarmCapSec = parseFloat(video.dataset.prewarmCap || "0");
-        const isPrewarm = prewarmCapSec > 0;
-        const bufLen = isPrewarm ? Math.min(prewarmCapSec, 30) : 60;
-        const bufMax = isPrewarm ? Math.min(prewarmCapSec, 30) : 120;
+        // hls.js 配置：对齐老版本简洁配置（老版本在 Cloudflare Function 代理下
+        // 实测 1 秒开播，无需手动降初始带宽估计/强制 720p 封顶等保守 ABR 设置）。
+        // 保留：enableWorker / capLevelToPlayerSize / storage=null 等无副作用项。
         const hls = new Hls({
             enableWorker: true,
-            lowLatencyMode: false,
-            maxBufferLength: bufLen,
-            maxMaxBufferLength: bufMax,
-            maxBufferSize: 60 * 1000 * 1000,
-            maxBufferHole: 0.5,
-            // startLevel 设为 -1：交给 ABR 从最低码率起步，弱网也能秒开（hls.js 默认即此行为）
-            startLevel: -1,
+            lowLatencyMode: true,         // 短片段起播更快（老版本即此值）
+            maxBufferLength: 30,
             capLevelToPlayerSize: true,
-            // 推特订阅（代理带宽有限）：初始带宽估计约 500Kbps（≈360p），起播更快
-            // 其他视频：给更高初始估计（≈1.5Mbps），不人为压低清晰度
-            abrEwmaDefaultEstimate: isTwRssVid ? 500000 : 1500000,
-            abrBandWidthFactor: 0.95,
-            abrBandWidthUpFactor: 0.7,
             storage: null,
             autoStartLoad: true
         });
@@ -705,19 +633,9 @@ function startHlsVideo(video){
             hls.loadSource(streamUrl);
         });
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            // 自适应码率（ABR）：代理层已保留 720p 及以下多档变体。
-            // 起播从最低档（最快出画面），由 hls.js 按带宽自动升降，上限封顶 720p。
-            // 不再强制最低 480p——那正是 1080p 代理视频“点了不播、也不报错”的根因（带宽撑不起被卡死）。
-            // 仅推特订阅视频封顶 720p：直连、其他平台代理视频不做限制，保留全清晰度
-            if(isTwRssVid && hls.levels && hls.levels.length > 0){
-                let maxLevelIdx = 0;
-                for(let i = 0; i < hls.levels.length; i++){
-                    const h = hls.levels[i].height || 0;
-                    if(h <= 720) maxLevelIdx = i;   // 上限封顶 720p，省流量又够清晰
-                }
-                hls.autoLevelCapping = maxLevelIdx;
-            }
-            hls.startLevel = -1;       // 交给 ABR：从最低码率起步，弱网也能秒开
+            // 清单解析成功：直接开始缓冲并播放。
+            // 720p 封顶/强制起始档由代理层 filterMasterPlaylist 完成（带 src=twrss 时自动剔除 >720p），
+            // 客户端不再二次限制，避免与代理层重复叠加导致起播被压到过低码率。
             hls.startLoad();
             video.dataset.hlsLoaded = "1";
             // 成功解析清单 → 重置致命重试计数（只有「连续」致命才重试，自愈成功即清零）
