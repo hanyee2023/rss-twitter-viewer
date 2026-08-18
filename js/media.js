@@ -79,8 +79,13 @@ function initVideoObserver(){
     }, {threshold:0.01, rootMargin: "100px 0px 250px 0px"});
 }
 
-// 优化7：m3u8 代理视频预加载首段分片（进入视口时静默加载，点击即播）
-// 调用 startHlsVideo 但不自动播放，首段加载后停止下载，节省带宽
+// 优化7：m3u8 代理视频进入视口时"全量预热"——按视频时长智能决定预加载量
+// 旧版"载完第1段就 stopLoad"是短视频卡几十秒的根因：用户点击时还得从源站冷拉剩余分片
+// 新版策略：
+//   - 进入视口后启动 HLS，持续缓冲直到视频完整下完（短视频<30s 会一次性预热完）
+//   - 长视频缓冲到 30s 后自动停止（够秒开，省流量）
+//   - 单条预热最多 15s 防源站卡死
+//   - 用户主动滚动出视口/点击其他视频时由 pauseOtherVideos / videoObserver 取消
 function preloadHlsFirstFrag(video){
     if(video.dataset.hlsLoaded || video.dataset.preloading) return;
     if(preloadCount >= MAX_PRELOAD) return;
@@ -88,32 +93,48 @@ function preloadHlsFirstFrag(video){
 
     preloadCount++;
     video.dataset.preloading = "1";
-
-    // 标记为预加载模式，startHlsVideo 内部会识别并跳过自动播放
     video.dataset.preloadMode = "1";
+    // 预热目标：短视频整条下完，长视频只下前 30s（够秒开 + 不浪费流量）
+    video.dataset.prewarmCap = "30";
     startHlsVideo(video);
 
-    // 首段加载完成后停止继续下载
-    const onFragLoaded = () => {
-        if(video.hlsInstance){
-            video.hlsInstance.stopLoad();
-        }
+    const releaseSlot = () => {
         preloadCount = Math.max(0, preloadCount - 1);
         video.dataset.preloading = "0";
-        if(video.hlsInstance){
-            video.hlsInstance.off(Hls.Events.FRAG_LOADED, onFragLoaded);
+    };
+
+    // 硬性预算：单条预热最多 15s（防源站卡死时无限等），到点就停
+    const budgetMs = 15000;
+    const budgetTimer = setTimeout(()=>{
+        if(video.dataset.preloading === "1"){
+            if(video.hlsInstance){ try { video.hlsInstance.stopLoad(); } catch(e){} }
+            releaseSlot();
+            if(video.hlsInstance){
+                video.hlsInstance.off(Hls.Events.FRAG_LOADED, onFragLoaded);
+            }
+        }
+    }, budgetMs);
+
+    // 每片加载完检查一次：短视频已完整缓冲 → 提前停止；长视频到 30s 也会被 hls.js 自然停止
+    const onFragLoaded = () => {
+        if(!video.duration || !Number.isFinite(video.duration) || video.duration <= 0) return;
+        if(video.buffered.length === 0) return;
+        const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+        const capSec = parseFloat(video.dataset.prewarmCap || "30");
+        const target = Math.min(video.duration, capSec);
+        if(bufferedEnd >= target - 0.5){
+            if(video.hlsInstance){ try { video.hlsInstance.stopLoad(); } catch(e){} }
+            releaseSlot();
+            clearTimeout(budgetTimer);
+            if(video.hlsInstance){
+                video.hlsInstance.off(Hls.Events.FRAG_LOADED, onFragLoaded);
+            }
         }
     };
+
     if(video.hlsInstance){
         video.hlsInstance.on(Hls.Events.FRAG_LOADED, onFragLoaded);
     }
-
-    // 3 秒超时保护（网络太慢就取消，避免占用预加载名额）
-    setTimeout(() => {
-        if(video.dataset.preloading === "1"){
-            cancelHlsPreload(video);
-        }
-    }, 3000);
 }
 
 // 取消预加载（滑出视口或超时时调用）
@@ -245,8 +266,42 @@ function getPlayErrorMessage(err, video, fallback = "视频播放失败"){
     return getVideoErrorMessage(video, fallback);
 }
 
-function getHlsErrorMessage(data, streamUrl){
-    // 错误细分对用户无意义，统一为简洁提示；是否有备用源由调用方决定提示或静默重试
+// 提取 HLS 致命错误的诊断信息：失败分片的真实 URL（解开 media-proxy 包裹）、代理返回的状态码、错误类型
+function _unwrapProxyUrl(u){
+    try{
+        const m = String(u).match(/[?&]url=([^&]+)/);
+        if(m) return decodeURIComponent(m[1]);
+    }catch(e){}
+    return u;
+}
+
+function getHlsFailInfo(data){
+    let rawUrl = "";
+    if(data && data.frag){
+        if(data.frag.url) rawUrl = data.frag.url;
+        else if(data.frag.baseurl) rawUrl = data.frag.baseurl + (data.frag.relurl || "");
+    }else if(data && data.response && data.response.url){
+        rawUrl = data.response.url;
+    }
+    const code = (data && data.response && data.response.code) || "";
+    const type = data ? data.type : "";
+    const details = data ? data.details : "";
+    // 优先给“解开代理包裹后的真实分片地址”，方便一眼看出是哪个 host / 哪条分片失败
+    const url = _unwrapProxyUrl(rawUrl);
+    return {rawUrl, url, code, type, details};
+}
+
+function getHlsErrorMessage(data, streamUrl, info){
+    // 错误细分对用户无意义，统一为简洁提示；但网络类错误带上代理返回的状态码，便于定位
+    // （403=域名未进白名单被代理拒绝；502=源站拉取失败/超时；其它=解码或格式问题）
+    info = info || {};
+    if(info.type === Hls.ErrorTypes.NETWORK_ERROR){
+        const code = info.code ? `（代理返回${info.code}）` : "";
+        return `视频加载失败${code}，请稍后重试`;
+    }
+    if(info.type === Hls.ErrorTypes.MEDIA_ERROR){
+        return "视频解码失败，请稍后重试";
+    }
     return "视频加载失败，请稍后重试";
 }
 
@@ -612,11 +667,16 @@ function startHlsVideo(video){
         // 仅「通过 twitter-rss.js 添加的推特订阅」视频施加 720p 自适应策略
         const isProxyVid = video.dataset.proxyVideo === "1";
         const isTwRssVid = video.dataset.twitterRss === "1";
+        // 预热模式：把 hls.js 的缓冲上限收紧到预热目标，让 hls.js 自然停在目标位置不浪费流量
+        const prewarmCapSec = parseFloat(video.dataset.prewarmCap || "0");
+        const isPrewarm = prewarmCapSec > 0;
+        const bufLen = isPrewarm ? Math.min(prewarmCapSec, 30) : 60;
+        const bufMax = isPrewarm ? Math.min(prewarmCapSec, 30) : 120;
         const hls = new Hls({
             enableWorker: true,
             lowLatencyMode: false,
-            maxBufferLength: 60,
-            maxMaxBufferLength: 120,
+            maxBufferLength: bufLen,
+            maxMaxBufferLength: bufMax,
             maxBufferSize: 60 * 1000 * 1000,
             maxBufferHole: 0.5,
             // startLevel 设为 -1：交给 ABR 从最低码率起步，弱网也能秒开（hls.js 默认即此行为）
@@ -660,6 +720,8 @@ function startHlsVideo(video){
             hls.startLevel = -1;       // 交给 ABR：从最低码率起步，弱网也能秒开
             hls.startLoad();
             video.dataset.hlsLoaded = "1";
+            // 成功解析清单 → 重置致命重试计数（只有「连续」致命才重试，自愈成功即清零）
+            delete video.dataset.hlsFatalRetry;
             // 预加载模式不自动播放，仅加载数据；正常模式点击一次即播放
             if(video.dataset.preloadMode !== "1"){
                 playNow();
@@ -667,12 +729,13 @@ function startHlsVideo(video){
         });
         hls.on(Hls.Events.ERROR, (event, data) => {
             if(data && data.fatal){
-                console.warn("HLS致命错误：", data);
+                const info = getHlsFailInfo(data);
+                console.warn("[HLS致命错误诊断] type=", info.type, "code=", info.code, "details=", info.details, "失败分片=", info.url);
                 const nextIndex = sourceIndex + 1;
                 if(nextIndex < uniqueSources.length){
                     // 有备用源，自动切换（静默重试，不打扰用户）
                     if(video.dataset.userAttempted === "1"){
-                        console.warn("m3u8 致命错误，自动切换备用源：", getHlsErrorMessage(data, streamUrl));
+                        console.warn("m3u8 致命错误，自动切换备用源：", getHlsErrorMessage(data, streamUrl, info));
                     }
                     video.dataset.hlsAttempt = String(nextIndex);
                     delete video.dataset.hlsLoaded;
@@ -680,10 +743,30 @@ function startHlsVideo(video){
                     video.hlsInstance = null;
                     startHlsVideo(video);
                 }else{
-                    // 无备用源：收起加载圈，仅在用户主动播放后才提示错误
+                    // 无备用源（推特 m3u8 常态）：先清理损坏实例，避免被复用为“死实例”
+                    // 仅 NETWORK 类错误、且用户主动播放时，做有限次数“销毁+重建”自愈（救回瞬态失败）
+                    const isNetwork = info.type === Hls.ErrorTypes.NETWORK_ERROR;
+                    const tried = Number(video.dataset.hlsFatalRetry || 0);
+                    const MAX_FATAL_RETRY = 2;
+                    if(video.dataset.userAttempted === "1" && isNetwork && tried < MAX_FATAL_RETRY){
+                        video.dataset.hlsFatalRetry = String(tried + 1);
+                        delete video.dataset.hlsLoaded;
+                        try{ hls.destroy(); }catch(e){}
+                        video.hlsInstance = null;
+                        startHlsVideo(video);   // 从头重建，重试这次致命加载
+                        return;
+                    }
+                    // 重试耗尽或无需重试：清理损坏实例（含预加载阶段）→ 下次点击能从头重建，不会复用死实例
+                    delete video.dataset.hlsLoaded;
+                    if(video.dataset.preloading === "1"){
+                        video.dataset.preloading = "0";
+                        preloadCount = Math.max(0, preloadCount - 1);
+                    }
+                    try{ hls.destroy(); }catch(e){}
+                    video.hlsInstance = null;
                     setVideoLoading(video, false);
                     if(video.dataset.userAttempted === "1"){
-                        showToast(getHlsErrorMessage(data, streamUrl));
+                        showToast(getHlsErrorMessage(data, streamUrl, info));
                     }
                 }
             }
