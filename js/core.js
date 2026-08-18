@@ -14,7 +14,7 @@ const MEDIA_PROXY_ENDPOINTS = [
 // 否则会出现“前端判定直连 / 代理层又放行或拦截”的不一致，导致媒体 CORS 失败或加载变慢。
 // 一律用完整域名（如 phe69.com 而非裸名 phe69），裸名无法匹配 *.phe69.com 子域。
 const FORCE_PROXY_HOSTS = [
-     "twitter.com",
+    "twitter.com",
     "x.com",
     "t.co",
     "twimg.com",
@@ -248,6 +248,9 @@ let currentArticleBox = null;  // 当前渲染用的文章容器：主页=articl
 let homeScrollTop = 0;
 let homeArticleHtml = "";
 let homeIsCached = false;
+// 离开主页那一刻 localCacheArticles 已有的链接集合：作为「更新」的唯一基线。
+// 只有离开主页后【新增】到 localCacheArticles 的条目才算「更新」，避免每次切回主页都误报。
+let homeBaselineLinkSet = new Set();
 let singleSourceUrl = "";      // 当前单源浏览的源 URL（用于单源界面内刷新/合并）
 let readObserver = null;
 let updateFloatTimer = null;
@@ -419,34 +422,7 @@ function markCardRead(card){
     if(!link || readLinkSet.has(link)) return;
     readLinkSet.add(link);
     saveReadLinks();
-    updateUnreadBadge();
 }
-
-// 主页按钮右上角的「未读总数」红色数字角标：实时反映当前缓存中尚未标记为已读的条目数。
-// 语义与管理订阅各源角标完全一致（都是 readLinkSet 之外的条目），即「全局真实未读数」。
-// 在滚动标记已读、后台刷新出新内容、切换页面、渲染主页/合并数据时都会刷新。
-function updateUnreadBadge(){
-    if(!btnHome) return;
-    let total = 0;
-    if(Array.isArray(localCacheArticles)){
-        for(const item of localCacheArticles){
-            if(item && item.link && !readLinkSet.has(item.link)) total++;
-        }
-    }
-    let badge = btnHome.querySelector(".unread-badge");
-    if(total > 0){
-        if(!badge){
-            badge = document.createElement("span");
-            badge.className = "unread-badge";
-            btnHome.appendChild(badge);
-        }
-        badge.textContent = total > 99 ? "99+" : String(total);
-        badge.style.display = "";
-    }else if(badge){
-        badge.style.display = "none";
-    }
-}
-window.updateUnreadBadge = updateUnreadBadge;
 
 function markReadByScroll(){
     if(currentPage !== pageHome) return;
@@ -462,7 +438,6 @@ function markReadByScroll(){
     });
     if(changed){
         saveReadLinks();
-        updateUnreadBadge();
     }
 }
 
