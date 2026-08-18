@@ -67,7 +67,11 @@ function showPage(targetDom, titleText) {
 
     if (targetDom === pageHome) {
         // 恢复到【完整主页】：优先用快照（保留上次滚动位置），否则重新渲染
-        if (homeIsCached && homeArticleHtml) {
+        // 关键修复：若快照是「空占位」但本地其实已有缓存文章，说明上次离开主页时正处于
+        // 加载失败/空白态，直接重新从缓存渲染，避免空主页卡死在空快照里。
+        const snapshotIsEmpty = homeIsCached && homeArticleHtml
+            && /empty-tip/.test(homeArticleHtml) && localCacheArticles.length > 0;
+        if (homeIsCached && homeArticleHtml && !snapshotIsEmpty) {
             currentArticleBox = articleBox;
             articleBox.innerHTML = homeArticleHtml;
             // 关键修复：innerHTML 恢复不会保留事件监听器，但会保留 data-* 绑定标记。
@@ -197,6 +201,14 @@ async function refreshAllRSSWithLock(){
     if(rssRefreshPromise) return rssRefreshPromise;
     rssRefreshPromise = (async ()=>{
         const data = await loadAllRSS();
+        // 关键修复：刷新返回空（如 Twitter 代理暂时失败 / 被限流）时，不要清空已有本地缓存。
+        // 否则一次瞬时失败会抹掉全部文章 → 主页空白，且切回主页后卡在空快照里。
+        // 仅当确实拉到了数据，才覆盖缓存；拉取失败则保留旧缓存，仅更新刷新时间戳。
+        if(data.length === 0 && localCacheArticles.length > 0){
+            lastRefreshTime = Date.now();
+            localStorage.setItem(LAST_REFRESH_KEY, String(lastRefreshTime));
+            return localCacheArticles;
+        }
         const cacheData = data.slice(0, ARTICLE_CACHE_LIMIT);
         allArticles = cacheData;
         localCacheArticles = [...cacheData];

@@ -12,7 +12,8 @@ const MEDIA_PROXY_ENDPOINTS = [
 // 这些域名的 RSS 或媒体资源默认走代理。需要新增国外或特殊域名时，加到这里即可。
 // 注意：本名单必须与 media-proxy.js 的 ALLOW_PROXY_HOSTS、rss-proxy.js 的 BUILTIN_RSS_HOSTS 保持一致，
 // 否则会出现“前端判定直连 / 代理层又放行或拦截”的不一致，导致媒体 CORS 失败或加载变慢。
-// 一律用完整域名（如 phe69.com 而非裸名 phe69），裸名无法匹配 *.phe69.com 子域。
+// 匹配规则为 host === key || host.endsWith("." + key)；故裸名（如 phe69）无法匹配真实域名（phe69.com），
+// 这里同时保留 "phe69" 与 "phe69.com" 两个变体，确保该源媒体既能匹配裸名也能匹配完整域名。
 const FORCE_PROXY_HOSTS = [
     "twitter.com",
     "x.com",
@@ -29,7 +30,8 @@ const FORCE_PROXY_HOSTS = [
     "redd.it",
     "770118.xyz",
     "phe69",
-    "video.3go.fun",
+    "phe69.com",
+    "3go.fun",
     "rsshub.app",
     "venexa.site",
     "aguea.com",
