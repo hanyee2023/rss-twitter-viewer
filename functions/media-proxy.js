@@ -1,27 +1,28 @@
 // 与 core.js 的 FORCE_PROXY_HOSTS、rss-proxy.js 的 BUILTIN_RSS_HOSTS 保持一致（见 core.js 注释）。
 const ALLOW_PROXY_HOSTS = [
   "twitter.com",
-  "x.com",
-  "t.co",
-  "twimg.com",
-  "video.twimg.com",
-  "pbs.twimg.com",
-  "abs.twimg.com",
-  "xcancel.com",
-  "nitter.net",
-  "xxxfollow.com",
-  "media.redgifs.com",
-  "770118.xyz",
-  "phe69.com",
-  "3go.fun",
-  "rsshub.app",
-  "venexa.site",
-  "aguea.com",
-  "htumeng.com",
-  "642p.com",
-  "tutu1.space",
-  "16k.club",
-  "redd.it"
+    "x.com",
+    "t.co",
+    "twimg.com",
+    "video.twimg.com",
+    "pbs.twimg.com",
+    "abs.twimg.com",
+    "xcancel.com",
+    "nitter.net",
+    "16k.club",
+    "xxxfollow.com",
+    "media.redgifs.com",
+    "redd.it",
+    "770118.xyz",
+    "phe69",
+    "video.3go.fun",
+    "rsshub.app",
+    "venexa.site",
+    "aguea.com",
+    "htumeng.com",
+    "642p.com",
+    "tutu1.space",
+    "freeshare58.com"
 ];
 
 function normalizeHost(host) {
@@ -327,27 +328,42 @@ export async function onRequest({ request }) {
       // 主播放列表：过滤变体（保留中等码率视频 + 对应音频轨道）
       // 媒体播放列表：直接改写分片 URL
       const processed = filterMasterPlaylist(text, baseUrl, request.url);
-      return new Response(processed, {
-        status: res.status,
-        headers: corsHeaders({
-          "Content-Type": "application/vnd.apple.mpegurl;charset=utf-8",
-          // 修复：删除 Vary:Range（之前 Range 把每个 byte-range 当成不同对象，缓存命中率 0%）
-          // m3u8 清单：浏览器侧 10min + CF 边缘 7 天
-          "Cache-Control": "public, max-age=600, s-maxage=604800"
-        })
-      });
+        return new Response(processed, {
+          status: res.status,
+          headers: corsHeaders({
+            "Content-Type": "application/vnd.apple.mpegurl;charset=utf-8",
+            // m3u8 清单：内容会随新分片更新，不宜长期缓存。浏览器 2min + CF 边缘 1h。
+            "Cache-Control": "public, max-age=120, s-maxage=3600"
+          })
+        });
     }
 
     const headers = new Headers(res.headers);
     headers.set("Access-Control-Allow-Origin", "*");
     headers.set("Access-Control-Allow-Methods", "GET,HEAD,OPTIONS");
     headers.set("Access-Control-Allow-Headers", "*");
-    // 暴露 CF-Cache-Status：方便用户在 DevTools 一眼看到 HIT/MISS，自证缓存命中修复
+    // 暴露 CF-Cache-Status：方便用户在 DevTools 一眼看到 HIT/MISS
     headers.set("Access-Control-Expose-Headers", "Content-Length,Content-Range,Accept-Ranges,Content-Type,CF-Cache-Status,X-Cache-Status");
-    // 修复：删除 Vary:Range 让分片按 URL 命中缓存（不再因不同 Range 字节区间分别缓存）
-    //      CF 边缘 7 天；浏览器侧 24 小时（短于 7 天避免与边缘策略冲突）
-    headers.set("Cache-Control", "public, max-age=86400, s-maxage=604800, immutable");
-    headers.delete("Vary");
+
+    // 缓存策略（关键修复，解决「越用越卡 / 2-3秒就卡 / 加载超时」）：
+    // 代理视频是 fMP4 分片，浏览器/HLS 常带 Range 头请求（含初始化分片的小范围请求）。
+    // 之前「删除 Vary:Range + immutable + 7天 s-maxage」会把第一个到达的 *部分* 206 响应
+    // 按 URL 缓存 7 天；之后任意 Range 请求都命中这同一个被截断的 206 → 分片内容错乱 →
+    // 解码每 2-3 秒卡一次、最终触发加载超时。且 immutable 让浏览器 24h 内永不重新校验，
+    // 一旦污染无法自愈，缓存越积越满 → 越用越卡（早快午慢同理）。
+    // 修复：Range 请求（206）保留 Vary:Range、只给较短 TTL —— 保证命中到的一定是「对应区间」的正确字节；
+    //       非 Range 的完整 200 响应才给长缓存 + immutable（分片内容不变，可安全长期缓存、提速重播）。
+    if (range) {
+      // 部分响应：每个 Range 单独缓存，短 TTL，不 immutable —— 杜绝截断污染
+      headers.set("Cache-Control", "public, max-age=300, s-maxage=3600");
+      headers.set("Vary", "Range");
+    } else {
+      // 完整响应：内容不可变，长缓存 + immutable，提速重播/重复观看
+      // 清掉上游 Vary（如 Accept-Encoding），完整对象无需按编码分缓存
+      headers.delete("Vary");
+      headers.set("Cache-Control", "public, max-age=86400, s-maxage=604800, immutable");
+    }
+    // 注：不再无差别删除 Vary（Range 分支必须保留 Vary:Range）；仅删除 Transfer-Encoding 由运行时重算
     headers.delete("Transfer-Encoding");
 
     return new Response(res.body, { status: res.status, headers });
