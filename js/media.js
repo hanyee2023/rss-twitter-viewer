@@ -139,7 +139,9 @@ function initVideoObserver(){
 //   3) 滑出视口的视频立刻 cancelHlsPreload，把并发额度让给新进入中心的视频。
 // 效果：你最可能点的那个视频在点击前就已缓冲好 → 起播即顺（贴近本地直连体验），
 //       又不会像旧版那样 N 个视频同时预热把 media-proxy 打爆（25s+ 退化）。
-const MAX_PRELOAD = 2;
+// 注：MAX_PRELOAD 在 core.js 统一声明（共享顶层常量），此处不再重复声明，避免
+//     两份经典脚本重复声明顶层 const 触发 SyntaxError，导致本文件整体解析失败、
+//     onload 链中断、主页空白（即用户遇到的“代码冲突/暂无内容”）。
 
 // 视频中心相对视口中心的纵向偏移（绝对值越小越靠近中心，越优先预热）
 function _centerOffset(video){
