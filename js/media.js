@@ -27,59 +27,6 @@ function ensurePosterFallback(video){
     tryNext();
 }
 
-// ===== 图片 / 视频预览图 懒加载（限流版，rootMargin 预载）=====
-// 解决一对矛盾：① 开屏不一次性下载全部图（避免挤爆代理）；② 滑到之前已在「视口外 500px」预载好，回看秒显不卡。
-// 渲染时网格图只写 data-src（不写 src）、视频预览图只写 data-poster（不写 poster 属性）→ 不下载；
-// 下面的观察器在元素临近视口时把真实地址填回去，触发加载。兜底链（onerror / ensurePosterFallback）原样生效。
-let lazyMediaObserver = null;
-function getLazyMediaObserver(){
-    if(lazyMediaObserver) return lazyMediaObserver;
-    lazyMediaObserver = new IntersectionObserver((entries, obs) => {
-        entries.forEach(entry => {
-            if(!entry.isIntersecting) return;
-            const el = entry.target;
-            if(el.tagName === "IMG" && el.dataset.src && el.dataset.lazyDone !== "1"){
-                el.dataset.lazyDone = "1";
-                el.src = el.dataset.src;            // 触发下载；原 onerror 代理/直连兜底照常
-            } else if(el.tagName === "VIDEO" && el.dataset.poster && el.dataset.posterDone !== "1"){
-                el.dataset.posterDone = "1";
-                el.poster = el.dataset.poster;      // 触发封面下载；ensurePosterFallback 仍会接管失败回退
-            }
-            obs.unobserve(el);
-        });
-    }, { root: null, rootMargin: "500px 0px", threshold: 0 });
-    return lazyMediaObserver;
-}
-
-function observeLazyMediaEl(el){
-    const obs = getLazyMediaObserver();
-    if(el.matches && el.matches('img.grid-img[data-src]:not([data-lazy-done])')){ obs.observe(el); return true; }
-    if(el.matches && el.matches('video[data-poster]:not([data-poster-done])')){ obs.observe(el); return true; }
-    return false;
-}
-
-// 自动接管所有新插入的卡片（主页 / 收藏 / 搜索 / 订阅 / 分页追加），无需各插入点手动调用。
-// 只扫描「新增子树」，不全局重扫，长信息流滚动也不会变慢。
-function initLazyMedia(){
-    if(typeof MutationObserver === "undefined"){ observeLazyMediaEl(document); return; }
-    const mo = new MutationObserver(mutations => {
-        for(const m of mutations){
-            m.addedNodes.forEach(n => {
-                if(n.nodeType !== 1) return;
-                if(observeLazyMediaEl(n)) return;          // 新增的就是目标元素
-                if(n.querySelectorAll){                     // 新增的是容器，扫其内部
-                    n.querySelectorAll('img.grid-img[data-src]:not([data-lazy-done])').forEach(el => observeLazyMediaEl(el));
-                    n.querySelectorAll('video[data-poster]:not([data-poster-done])').forEach(el => observeLazyMediaEl(el));
-                }
-            });
-        }
-    });
-    mo.observe(document.body || document.documentElement, { childList: true, subtree: true });
-    // 处理脚本加载前已存在的卡片
-    document.querySelectorAll('img.grid-img[data-src]:not([data-lazy-done])').forEach(el => observeLazyMediaEl(el));
-    document.querySelectorAll('video[data-poster]:not([data-poster-done])').forEach(el => observeLazyMediaEl(el));
-}
-
 function initVideoObserver(){
     if(videoObserver) return;
     videoObserver = new IntersectionObserver((entries)=>{

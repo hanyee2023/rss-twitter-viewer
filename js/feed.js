@@ -511,7 +511,9 @@ function buildCard(item, isFav = false){
     const posterImg = item.videoPoster || (imgs.length > 0 ? imgs[0] : "");
     const posterProxy = posterImg ? getProxyUrl(posterImg, isFav, "large") : "";
     const posterDirect = posterImg ? twimgSizedDirect(cleanMediaUrl(posterImg), "large") : "";
-    const posterAttr = posterProxy ? `data-poster="${escapeAttr(posterProxy)}"` : ""; // 懒加载：仅写 data-poster，由 media.js 的 lazyMediaObserver 在临近视口时再填回 poster 属性，避免开屏一次性下载全部封面
+    // 原生 poster（代理优先）：浏览器内置显示封面，不依赖 JS 观察器，杜绝视频黑屏；
+    // 代理封面失败时由 initVideoObserver 触发的 ensurePosterFallback 自动回退直连/备用代理。
+    const posterAttr = posterProxy ? `poster="${escapeAttr(posterProxy)}"` : (posterDirect ? `poster="${escapeAttr(posterDirect)}"` : "");
     const posterDirectAttr = posterDirect ? `data-poster-direct="${escapeAttr(posterDirect)}"` : "";
     const posterFallbacksArr = posterImg && hostMatched(posterImg) ? getMediaProxyCandidates(posterImg, isFav, "large").slice(1) : [];
     const posterFallbacksAttr = posterFallbacksArr.length > 0 ? `data-poster-proxy-fallbacks="${escapeAttr(JSON.stringify(posterFallbacksArr))}"` : "";
@@ -539,7 +541,9 @@ function buildCard(item, isFav = false){
     const posterImg = item.videoPoster || (imgs.length > 0 ? imgs[0] : "");
     const posterProxy = posterImg ? getProxyUrl(posterImg, isFav, "large") : "";
     const posterDirect = posterImg ? twimgSizedDirect(cleanMediaUrl(posterImg), "large") : "";
-    const posterAttr = posterProxy ? `data-poster="${escapeAttr(posterProxy)}"` : ""; // 懒加载：仅写 data-poster，由 media.js 的 lazyMediaObserver 在临近视口时再填回 poster 属性，避免开屏一次性下载全部封面
+    // 原生 poster（代理优先）：浏览器内置显示封面，不依赖 JS 观察器，杜绝视频黑屏；
+    // 代理封面失败时由 initVideoObserver 触发的 ensurePosterFallback 自动回退直连/备用代理。
+    const posterAttr = posterProxy ? `poster="${escapeAttr(posterProxy)}"` : (posterDirect ? `poster="${escapeAttr(posterDirect)}"` : "");
     const posterDirectAttr = posterDirect ? `data-poster-direct="${escapeAttr(posterDirect)}"` : "";
     const posterFallbacksArr = posterImg && hostMatched(posterImg) ? getMediaProxyCandidates(posterImg, isFav, "large").slice(1) : [];
     const posterFallbacksAttr = posterFallbacksArr.length > 0 ? `data-poster-proxy-fallbacks="${escapeAttr(JSON.stringify(posterFallbacksArr))}"` : "";
@@ -578,13 +582,14 @@ function buildCard(item, isFav = false){
                 const rest = total - 4;
                 overlay = `<div class="img-overlay-more">+${rest}张</div>`;
             }
+            // 原生懒加载（loading=lazy）+ 代理优先：走媒体代理跨域取图，失败由 onerror 回退直连
             const imgProxy = getProxyUrl(src, isFav) + "&twname=medium";
             const imgDirect = cleanMediaUrl(src);
             const imgIsProxy = hostMatched(src);
             const imgFallbacksAttr = imgIsProxy ? getProxyFallbacksAttr(src, isFav) : "";
             const imgSrc = imgIsProxy ? imgProxy : imgDirect;
             mediaHtml += `<div class="grid-img-box">
-                <img class="grid-img" ${imgIsProxy ? 'crossorigin="anonymous"' : ""} referrerpolicy="no-referrer" decoding="async" data-imggroup='${escapeAttr(JSON.stringify(imgs))}' data-direct-src="${escapeAttr(imgDirect)}" data-src="${escapeAttr(imgSrc)}" ${imgFallbacksAttr} onerror="if(!fallbackMediaProxy(this) && this.dataset.directSrc && this.src!==this.dataset.directSrc){this.src=this.dataset.directSrc;}">${overlay}
+                <img class="grid-img" ${imgIsProxy ? 'crossorigin="anonymous"' : ""} referrerpolicy="no-referrer" decoding="async" loading="lazy" data-imggroup='${escapeAttr(JSON.stringify(imgs))}' data-direct-src="${escapeAttr(imgDirect)}" src="${escapeAttr(imgSrc)}" ${imgFallbacksAttr} onerror="if(!fallbackMediaProxy(this) && this.dataset.directSrc && this.src!==this.dataset.directSrc){this.src=this.dataset.directSrc;}">${overlay}
             </div>`;
         })
         mediaHtml += `</div></div>`;
