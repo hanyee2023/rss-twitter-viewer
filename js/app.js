@@ -428,7 +428,14 @@ function parseRSS(xml, sourceName, sourceUrl, cat){
             if(cleaned) m3u8List.push(cleaned);
         };
         const addImg = (arr, url) => {
-            const cleaned = cleanMediaUrl(url);
+            let cleaned = cleanMediaUrl(url);
+            if(!cleaned) return;
+            // 归一化：去掉 Twitter 图片尺寸后缀(:large/:orig 等)与尺寸查询参数，
+            // 让同一张图的不同尺寸变体去重为一张，避免单图条目显示成「两张一样的图」。
+            cleaned = cleaned
+                .replace(/:(large|orig|small|medium|thumb|mini|900x900|4096x4096)(?=$|[?&])/i, '')
+                .replace(/[?&](format|name|width|height)=[^&]*/gi, '')
+                .replace(/\?$/, '');
             if(cleaned) arr.push(cleaned);
         };
 
