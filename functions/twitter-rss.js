@@ -359,6 +359,21 @@ async function parseNitterHtml(html, username, maxItems, nitterBase) {
 
     if (!text) continue;
 
+    // 检测转推（RT）：Nitter 在 tweet-badge 中以「转推了 @originalUser」显示原作者，
+    // 而 tweet-content 本身通常不含 RT 前缀，故主动提取原作者拼到标题前，
+    // 否则转推的「原始作者」信息会丢失，前端标题看不出是谁的内容。
+    let rtAuthor = '';
+    const rtMatch = block.match(/(转推|Retweet)[^]*?<a[^>]*>([^<]*)<\/a>/i);
+    if (rtMatch) {
+      rtAuthor = (rtMatch[2] || '').replace(/^@/, '').trim();
+    }
+    let finalText = text;
+    // 避免与 tweet-content 已自带「RT @user」前缀的推文重复拼接
+    const alreadyRT = /^rt\s*@/i.test(text);
+    if (rtAuthor && !alreadyRT) {
+      finalText = 'RT @' + rtAuthor + ': ' + text;
+    }
+
     // 提取日期
     // 优先从 <a title="Aug 14, 2026 · 3:08 AM UTC"> 解析精确时间
     // 回退到 <span class="tweet-date">10h</span> 相对时间
@@ -546,7 +561,7 @@ async function parseNitterHtml(html, username, maxItems, nitterBase) {
 
     items.push(
       '<item>\n' +
-      '<title>' + escapeXml(text.slice(0, 100)) + (text.length > 100 ? '…' : '') + '</title>\n' +
+      '<title>' + escapeXml(finalText.slice(0, 100)) + (finalText.length > 100 ? '…' : '') + '</title>\n' +
       '<link>' + tweetLink + '</link>\n' +
       '<description><![CDATA[' + desc + ']]></description>\n' +
       '<pubDate>' + pubDate + '</pubDate>\n' +
