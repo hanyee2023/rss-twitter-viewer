@@ -222,6 +222,18 @@ function decodeNitterProxyUrl(proxyUrl) {
   return url;
 }
 
+// 归一化 Twitter 图片 URL：去掉尺寸后缀（:large/:orig/:small 等）与尺寸相关查询参数，
+// 让同一张图的不同尺寸变体被视为「同一张」。
+// 修复：Nitter 的 <a class="still-image" href> 与内部 <img src> 常指向带/不带 :large 后缀的两种代理地址，
+// 解码后文本不同，导致后端把同一张图当成两张重复写入 description，前端显示成「两张一样的图」。
+function normalizeTwImgUrl(url) {
+  if (!url) return url;
+  return url
+    .replace(/:(large|orig|small|medium|thumb|mini|900x900|4096x4096)(?=$|[?&])/i, '')
+    .replace(/[?&](format|name|width|height)=[^&]*/gi, '')
+    .replace(/\?$/, '');
+}
+
 // 宽松判断页面是否含有推文时间线（兼容不同 Nitter 实例/改版的类名）
 // 旧版仅认 timeline-item，xcancel 等改版后可能换类名，导致整源被误判为空
 function hasTimeline(html) {
@@ -421,7 +433,7 @@ async function parseNitterHtml(html, username, maxItems, nitterBase) {
     let imgMatch;
     while ((imgMatch = imageRegex.exec(block)) !== null) {
       const originalUrl = decodeNitterProxyUrl(imgMatch[1]);
-      if (originalUrl) imageUrls.push(originalUrl);
+      if (originalUrl) imageUrls.push(normalizeTwImgUrl(originalUrl));
     }
 
     // 提取视频和对应的 poster（预览图）
@@ -505,11 +517,12 @@ async function parseNitterHtml(html, username, maxItems, nitterBase) {
       // 只有提取到视频 URL 才算视频条目（避免把纯图片 attachment 误认为视频）
       if (videoUrl) {
         videoUrls.push(videoUrl);
-        videoPosters.push(posterUrl || '');
+        videoPosters.push(posterUrl ? normalizeTwImgUrl(posterUrl) : '');
       } else if (posterUrl) {
         // 有 poster 但没有视频 URL：可能视频不可用，把 poster 当作普通图片
-        if (!imageUrls.includes(posterUrl)) {
-          imageUrls.push(posterUrl);
+        const normPoster = normalizeTwImgUrl(posterUrl);
+        if (!imageUrls.includes(normPoster)) {
+          imageUrls.push(normPoster);
         }
       }
     }
@@ -546,9 +559,9 @@ async function parseNitterHtml(html, username, maxItems, nitterBase) {
     // 排除视频 poster（已在 <video poster="..."> 中输出，避免前端 imgs[0] 取到 poster 而非普通图片）
     const usedPosterUrls = new Set();
 
-    // 先收集视频 poster URL，后面输出图片时跳过
+    // 先收集视频 poster URL（归一化），后面输出图片时跳过
     for (let i = 0; i < videoUrls.length; i++) {
-      if (videoPosters[i]) usedPosterUrls.add(videoPosters[i]);
+      if (videoPosters[i]) usedPosterUrls.add(normalizeTwImgUrl(videoPosters[i]));
     }
 
     for (const imgUrl of imageUrls) {
