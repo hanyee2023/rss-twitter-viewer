@@ -363,9 +363,24 @@ async function parseNitterHtml(html, username, maxItems, nitterBase) {
     // 而 tweet-content 本身通常不含 RT 前缀，故主动提取原作者拼到标题前，
     // 否则转推的「原始作者」信息会丢失，前端标题看不出是谁的内容。
     let rtAuthor = '';
-    const rtMatch = block.match(/(转推|Retweet)[^]*?<a[^>]*>([^<]*)<\/a>/i);
-    if (rtMatch) {
-      rtAuthor = (rtMatch[2] || '').replace(/^@/, '').trim();
+    // 仅从「推文头部区」（tweet-content 之前，含 tweet-badge）检测转推，
+    // 切勿扫描整条正文——正文里出现「转推」二字（中文极常见）会被误判，
+    // 并错误抓到最近的 <a href> 把作者认错。
+    const headerPart = block.split(/<div class="tweet-content/i)[0] || '';
+    if (/转推|Retweet/i.test(headerPart)) {
+      // 优先从 badge 链接的 href 取 handle（用户名）。部分 Nitter 镜像 badge 文本是「显示名/昵称」
+      // （如 Elon Musk），若直接取文本会导致标题里 @ 后面跟着昵称而非用户名。
+      // href 路径首段永远是用户名（如 /elonmusk 或 /elonmusk/status/123），可靠。
+      const rtHrefMatch = headerPart.match(/<a[^>]*href="\/([A-Za-z0-9_]+)/i);
+      if (rtHrefMatch) {
+        rtAuthor = rtHrefMatch[1];
+      } else {
+        // 兜底：从 badge 文本取（去掉可能的 @ 前缀）
+        const rtTextMatch = headerPart.match(/<a[^>]*>([^<]*)<\/a>/i);
+        if (rtTextMatch) {
+          rtAuthor = (rtTextMatch[1] || '').replace(/^@/, '').trim();
+        }
+      }
     }
     let finalText = text;
     // 避免与 tweet-content 已自带「RT @user」前缀的推文重复拼接
