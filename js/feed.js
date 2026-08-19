@@ -506,6 +506,20 @@ function getPureText(str){
     return text || "无标题";
 }
 
+// 标题富文本化：先取纯文本，再转义 HTML（防 XSS），最后把 @用户名 包成蓝色 mention。
+// 这样「RT @原作者」「转载 @xxx」等前缀文字会原样保留，@用户名 部分显示为蓝色，
+// 方便用户一眼看出转推/引用的原始作者。
+// 注意：必须先 escapeHtml 再插入 <span>，正则只匹配 @ 后跟合法 handle 字符，杜绝注入。
+function formatTitleHtml(rawTitle){
+    const text = getPureText(rawTitle) || "";
+    if(!text) return "无标题";
+    // 转推/转载统一前缀：中文「转载@」归一为「RT @」
+    const unified = text.replace(/转载\s*@/g, "RT @");
+    const escaped = escapeHtml(unified);
+    // 推特 handle 规则：@ 后跟字母/数字/下划线（兼容部分含中文显示名的情况）
+    return escaped.replace(/@([A-Za-z0-9_一-龥]+)/g, '<span class="mention">@$1</span>');
+}
+
 function sanitizeIframeHtml(iframeHtml) {
     const box = document.createElement("template");
     box.innerHTML = iframeHtml || "";
@@ -625,7 +639,7 @@ function buildCard(item, isFav = false){
     }
 }
 
-    const titleRaw = escapeHtml(getPureText(item.title));
+    const titleHtml = formatTitleHtml(item.title);
     const isCollected = favList.some(f=>f.link === item.link);
     const favTxt = isCollected ? "已收藏" : "收藏";
     const favCls = isCollected ? "btn-fav collected" : "btn-fav";
@@ -657,7 +671,7 @@ function buildCard(item, isFav = false){
                 <div class="source-name-text">${sourceNameText}</div>
             </div>
             <div class="card-title-wrap">
-                <div class="card-title">${titleRaw}</div>
+                <div class="card-title">${titleHtml}</div>
                 <button class="title-toggle-btn">展开</button>
             </div>
             ${mediaHtml}
@@ -677,7 +691,7 @@ function buildCard(item, isFav = false){
                 <div class="source-name-text">${sourceNameText}</div>
             </div>
             <div class="card-title-wrap">
-                <div class="card-title">${titleRaw}</div>
+                <div class="card-title">${titleHtml}</div>
                 <button class="title-toggle-btn">展开</button>
             </div>
             ${mediaHtml}
