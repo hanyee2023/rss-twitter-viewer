@@ -10,22 +10,16 @@
 const DEFAULT_MAX_ITEMS = 50;   // 每源每次返回上限：原 20，提高到 50 以保留更多历史未读（约 5 天/源 @10条）
 const ABSOLUTE_MAX_ITEMS = 100; // ?max= 硬上限：原 50，提高到 100（保留调优空间）
 
-// Nitter 实例列表（按优先级排序：服务端实测可用 + HTML 结构一致排前）
-// 2026-08-17 服务端实测（node fetch 直接抓原始 HTML 验证，非浏览器/代理视角）：
-//   ✅ asia.aguea.com      —— 标准 Nitter 结构(timeline-item/tweet-body)，解析出 12 条带媒体条目，
-//                            媒体走 venexa.site（图片）+ /video/<hash>/https://video.twimg.com/...（视频），
-//                            解码器已支持；无需代理即可被服务端 fetch 到，排第一。
-//   ✅ aguea.net           —— 用户实测无需代理、可播放；服务端侧可能被 Cloudflare 验证页(Security Check)拦截，
-//                            作为回退（失败时 fast-fail 落到下一个实例），不影响主链路。
-//   ✅ nitter.catsarch.com —— 标准 Nitter 结构，与 asia.aguea.com 同构；服务端(Cloudflare 边缘)通常可达，
-//                            作冗余兜底。若 asia.aguea.com + aguea.net 均失效，仍能出内容。
-//                            注：用户浏览器侧访问 xcancel/catsarch 可能需代理，但服务端 fetch 走 Cloudflare 网络，
-//                            与用户本地网络无关，故保留为兜底实例（如不需要可删除此行）。
-//   ❌ xcancel.com        —— 服务端 fetch 在本环境不可达（需代理），且部分改版丢 timeline-item 标记，已移出主链。
-//   ❌ nitter.kareem.one  —— 502 Bad gateway，已移除。
-//   ❌ vanlett-cn.net      —— 不可达（域名失效/被墙）。
-//   ❌ asia.aguea.net      —— 注意是 .net；用户此前实测的是 .com，.net 在本环境返回 Security Check，统一用 .com。
+// Nitter 实例列表（按优先级排序）
+// 2026-08-18 重大调整：xcancel.com 提回第一优先源。
+//   理由：用户实测 xcancel 能正常播放 mp4 视频。xcancel 输出 <source src=mp4> + <a class="video-download" href=mp4>，
+//   mp4 走前端原生 <video> 播放，无 hls.js 分片/ABR/清单解析，顺畅且少错误。
+//   xcancel 默认取最高分辨率 mp4（1080p），twitter-rss.js 的 pickBestResolutionMp4 会降选 480~720p。
+//   xcancel 需要代理才能访问，但服务端 fetch 走 Cloudflare 边缘网络，与用户本地网络无关。
+//   asia.aguea.com 作为兜底：它只吐 m3u8（data-url），走 hls.js，结构兼容已验证。
+//   失败时 fast-fail 落到下一个实例，不影响主链路。
 const NITTER_INSTANCES = [
+  'https://xcancel.com',
   'https://asia.aguea.com',
   'https://aguea.net',
   'https://nitter.catsarch.com',
@@ -455,7 +449,6 @@ async function parseNitterHtml(html, username, maxItems, nitterBase) {
       // 避免匹配到 <div class="attachments">（容器），后者不包含单个媒体项
       if (!/<div class="attachment["\s>]/i.test(attBlock)) continue;
 
-      let videoUrl = '';
       let posterUrl = '';
 
       // 提取 video 标签上的 poster
@@ -475,42 +468,45 @@ async function parseNitterHtml(html, username, maxItems, nitterBase) {
       }
 
       // 提取视频 URL
-      // 优先 m3u8（HLS 自适应）：data-url 属性里的 m3u8 清单体积小、起播快、弱网也不卡，
-      // 且经前端 hls.js 代理播放稳定（实测 m3u8 可播、MP4 不可播——MP4 是 video.twimg.com 的
-      // amplify 大文件，易超出代理 8s 超时而失败）。仅当不存在 m3u8 时才回退到 MP4。
-      const dataUrlMatch = attBlock.match(/<video[^>]*\sdata-url="([^"]+)"[^>]*>/i);
-      if (dataUrlMatch) {
-        const m3u8Url = decodeNitterProxyUrl(dataUrlMatch[1]);
-        if (m3u8Url && /\.m3u8/i.test(m3u8Url)) {
-          videoUrl = m3u8Url;
+      // 优先 MP4（原生 <video> 播放，无 hls.js 分片/ABR，顺畅且少错误）：
+      //   xcancel.com 输出 <source src="mp4"> + <a class="video-download" href="mp4">
+      //   从 source 标签和 video-download 链接收集所有 MP4 候选，选 480~720p（不取 1080p 避免吃网速）。
+      // 仅当无 MP4 时才回退到 m3u8（asia.aguea.com 只吐 m3u8，作为兜底走 hls.js）。
+      const mp4Candidates = [];
+
+      // <source> 标签（xcancel 的 mp4 模式）
+      const sourceMatch = attBlock.match(/<source[^>]*\ssrc="([^"]+)"[^>]*>/i);
+      if (sourceMatch) {
+        const mp4Url = decodeNitterProxyUrl(sourceMatch[1]);
+        if (mp4Url && /\.mp4/i.test(mp4Url)) {
+          mp4Candidates.push(mp4Url);
         }
       }
 
-      // 没有 m3u8 时，从 <source> 标签 + video-download 链接收集 MP4 候选（保留兜底）
-      const mp4Candidates = [];
+      // video-download 链接（xcancel 的下载链接，取最高码率 mp4）
+      const downloadRegex = /<a[^>]*class="video-download"[^>]*href="([^"]+)"/gi;
+      let dlMatch;
+      while ((dlMatch = downloadRegex.exec(attBlock)) !== null) {
+        const dlUrl = decodeNitterProxyUrl(dlMatch[1]);
+        if (dlUrl && /\.mp4/i.test(dlUrl) && !mp4Candidates.includes(dlUrl)) {
+          mp4Candidates.push(dlUrl);
+        }
+      }
+
+      let videoUrl = '';
+      if (mp4Candidates.length > 0) {
+        // 从 MP4 候选中选 480~720p（不取 1080p，避免吃网速）
+        videoUrl = pickBestResolutionMp4(mp4Candidates);
+      }
+
+      // 无 MP4 时回退到 m3u8（asia.aguea.com 等 HLS-only 实例）
       if (!videoUrl) {
-        // <source> 标签
-        const sourceMatch = attBlock.match(/<source[^>]*\ssrc="([^"]+)"[^>]*>/i);
-        if (sourceMatch) {
-          const mp4Url = decodeNitterProxyUrl(sourceMatch[1]);
-          if (mp4Url && /\.mp4/i.test(mp4Url)) {
-            mp4Candidates.push(mp4Url);
+        const dataUrlMatch = attBlock.match(/<video[^>]*\sdata-url="([^"]+)"[^>]*>/i);
+        if (dataUrlMatch) {
+          const m3u8Url = decodeNitterProxyUrl(dataUrlMatch[1]);
+          if (m3u8Url && /\.m3u8/i.test(m3u8Url)) {
+            videoUrl = m3u8Url;
           }
-        }
-
-        // video-download 链接
-        const downloadRegex = /<a[^>]*class="video-download"[^>]*href="([^"]+)"/gi;
-        let dlMatch;
-        while ((dlMatch = downloadRegex.exec(attBlock)) !== null) {
-          const dlUrl = decodeNitterProxyUrl(dlMatch[1]);
-          if (dlUrl && /\.mp4/i.test(dlUrl) && !mp4Candidates.includes(dlUrl)) {
-            mp4Candidates.push(dlUrl);
-          }
-        }
-
-        // 从候选中选择最接近 720p 的 MP4
-        if (mp4Candidates.length > 0) {
-          videoUrl = pickBestResolutionMp4(mp4Candidates);
         }
       }
 
