@@ -573,8 +573,8 @@ function buildCard(item, isFav = false){
     const videoFallbacksAttr = videoFallbacks.length > 0 ? `data-proxy-fallbacks="${escapeAttr(JSON.stringify(videoFallbacks))}"` : "";
     const twRssAttr = isTwRss ? ' data-twitter-rss="1"' : "";
 
-    mediaHtml = `<div class="video-single-wrap">
-        <video class="media-video" data-m3u8="1" ${proxyVideoAttr}${twRssAttr} preload="none" playsinline ${posterAttr} ${posterDirectAttr} ${posterFallbacksAttr} data-src="${escapeAttr(firstSrc)}" data-alt-src="${escapeAttr(altSrc)}" ${videoFallbacksAttr}>
+      mediaHtml = `<div class="video-single-wrap">
+          <video class="media-video" data-m3u8="1" ${proxyVideoAttr}${twRssAttr} preload="none" playsinline ${posterAttr} ${posterDirectAttr} ${posterFallbacksAttr} data-src="${escapeAttr(firstSrc)}" data-alt-src="${escapeAttr(altSrc)}" ${videoFallbacksAttr}>
 </video>${mediaControlsHtml()}</div>`;
 }else if(item.videoUrl){
     // MP4视频：单独class media-video-mp4，完全脱离HLS逻辑
