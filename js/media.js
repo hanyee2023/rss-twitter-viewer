@@ -50,17 +50,16 @@ function initVideoObserver(){
                 }
             }else{
                 _visibleVideos.delete(video);
+                video.pause();
+                if(video.hlsInstance){
+                    video.hlsInstance.stopLoad();
+                }
+                // 预加载中的视频滑出视口：取消预加载
+                if(video.dataset.preloading === "1"){
+                    cancelHlsPreload(video);
+                }
+                // ③ 离屏即停缓冲：未播放的视频彻底停掉后台下载，省流量/降 CPU
                 if(video.dataset.userAttempted !== "1"){
-                    // 未主动播放的视频离屏：暂停 + 停缓冲 + 拆 src，省流量/降 CPU
-                    video.pause();
-                    if(video.hlsInstance){
-                        video.hlsInstance.stopLoad();
-                    }
-                    // 预加载中的视频滑出视口：取消预加载
-                    if(video.dataset.preloading === "1"){
-                        cancelHlsPreload(video);
-                    }
-                    // ③ 离屏即停缓冲：未播放的视频彻底停掉后台下载，省流量/降 CPU
                     video.preload = "none";
                     // MP4：摘掉 src 真正终止后台下载（HLS 已 stopLoad/销毁）
                     if(video.classList.contains("media-video-mp4") && video.src && !video.dataset.savedSrc){
@@ -70,7 +69,7 @@ function initVideoObserver(){
                         video.load();
                     }
                 }
-                // 用户已主动播放的视频离屏：保留播放/缓冲，不无脑暂停（修复「播放几秒自动暂停」）
+                // 优化5：内存优化 - 长视频滑出视口且播放较多时释放内存
                 tryReleaseVideoMemory(video);
             }
         })
@@ -112,8 +111,6 @@ function startHlsPreload(video){
 // 每批可见性变化后调用：选出离中心最近、且未点过/未建实例的 MAX_PRELOAD 个视频进行预热，
 // 其余超出额度的预载立即取消，把并发额度让给更靠近中心的视频。
 function managePreloads(){
-    // 存在正在播放的视频时，把所有带宽让给它：不做任何预载，避免抢带宽/浪费流量（问题3）
-    if(currentPlayingVideo) return;
     const candidates = [];
     _visibleVideos.forEach(v=>{
         if(v.dataset.userAttempted === "1") return;
@@ -260,9 +257,7 @@ function getVideoErrorMessage(video, fallback = "视频播放失败"){
 function setVideoLoading(video, on){ /* no-op */ }
 
 function getPlayErrorMessage(err, video, fallback = "视频播放失败"){
-    // 自动播放被拦截（NotAllowedError）或中断（AbortError）均为瞬时态：
-    // 用户手势内的 play() 往往随后自愈成功，弹提示反而造成“提示出现又正常播放”的错觉，故不提示。
-    if(err && err.name === "NotAllowedError") return "";
+    if(err && err.name === "NotAllowedError") return "请再点一次播放";
     if(err && err.name === "AbortError") return "";
     return getVideoErrorMessage(video, fallback);
 }
@@ -332,7 +327,6 @@ function toggleVideoPlay(video){
         pauseOtherVideos(video);
         // 已预加载的视频（HLS 已 stopLoad）重新拉起缓冲，避免点了却一直黑屏
         if(video.hlsInstance) video.hlsInstance.startLoad();
-        currentPlayingVideo = video; // 标记当前播放视频，managePreloads 据此让出带宽
         video.play().catch(err => {
             setVideoLoading(video, false);
             console.warn("视频播放失败：", err);
@@ -347,7 +341,6 @@ function toggleVideoPlay(video){
         setVideoLoading(video, false);
         video.pause();
         if(video.hlsInstance) video.hlsInstance.stopLoad();
-        if(currentPlayingVideo === video) currentPlayingVideo = null;
         // 播放停止：恢复附近视频预加载，继续滑动不卡
         resumeNearbyPreload();
     }
@@ -650,6 +643,18 @@ function startHlsVideo(video){
         pauseOtherVideos(video);
     }
 
+    // 缓冲超时保护：用户主动点击后若 12 秒仍无元数据（时长），说明代理卡死/源失效，
+    // 明确报错并收起加载圈，避免“按钮变了却一直黑屏、也不提示”的困惑。
+    if(video.dataset.userAttempted === "1"){
+        if(video._loadTimeout) clearTimeout(video._loadTimeout);
+        video._loadTimeout = setTimeout(() => {
+            if(video.dataset.userAttempted === "1" && !video.dataset.loadedMeta){
+                setVideoLoading(video, false);
+                showToast("视频缓冲超时，请稍后重试");
+            }
+        }, 12000);
+    }
+
     const playNow = (retry = true) => {
         video.play().catch(err => {
             console.warn("m3u8播放失败：", err);
@@ -767,8 +772,6 @@ function startHlsVideo(video){
                     video.hlsInstance = null;
                     setVideoLoading(video, false);
                     if(video.dataset.userAttempted === "1"){
-                        // 唯一保留的失败提示：hls.js 致命错误、且备用源/自愈重试均耗尽
-                        // → 链接真正失效（极少数情况），统一提示，不再做本地标记/占位（易误伤）。
                         showToast(getHlsErrorMessage(data, streamUrl, info));
                     }
                 }
@@ -826,9 +829,6 @@ function initHlsVideo(){
         // 播放开始：原生 poster 会自动让位于视频画面；清除缓冲超时计时器
         video.addEventListener("playing", () => {
             if(video._loadTimeout){ clearTimeout(video._loadTimeout); video._loadTimeout = null; }
-        });
-        video.addEventListener("ended", () => {
-            if(currentPlayingVideo === video) currentPlayingVideo = null;
         });
     });
 }

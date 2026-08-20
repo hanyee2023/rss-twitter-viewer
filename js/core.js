@@ -259,10 +259,8 @@ let scrollObserver = null;
 let loadLock = false;
 let currentPreviewImgs = [];
 let videoObserver = null;
-let currentPlayingVideo = null; // 当前正在播放的视频；存在时 managePreloads 不做任何预载，把带宽让给播放中的视频
 let preloadCount = 0;
 const MAX_PRELOAD = 2;
-
 let filterSourceUrl = "";
 let localCacheArticles = [];
 let hasNewUpdate = false;
