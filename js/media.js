@@ -319,9 +319,9 @@ function toggleVideoPlay(video){
     };
     if(video.classList.contains("media-video") && !video.dataset.hlsLoaded){
         showImmediateFeedback();
-        // 关键修复（解决“点击播放弹提示/点了不出声”）：在【用户点击手势】内同步发起播放意图。
-        // 即便此刻 HLS 尚未解析出数据源，浏览器也会记住“用户想播放”，待清单解析+缓冲就绪后自动续播，
-        // 从而规避异步 play() 被自动播放策略拦截（表现为 NotAllowedError → “请再点一次播放”）。
+        // 用户主动（重新）点击：按干净状态重新起播
+        // 关键修复（解决"点击播放弹提示/点了不出声"）：在【用户点击手势】内同步发起播放意图，
+        // 规避异步 play() 被自动播放策略拦截（NotAllowedError）
         const gp = video.play();
         if(gp && gp.catch) gp.catch(()=>{});
         startHlsVideo(video);
@@ -616,36 +616,20 @@ function bindCustomMediaControls(video){
     updateMediaControls(video);
 }
 
-// 锁定单一清晰度：关闭 hls.js 的 ABR 自适应，固定选一个接近 540p 的档位
-// （代理层已剔除 >720p，剩余档位均 ≤720p）。移动端代理播放更稳定、不再播放中反复升降档。
-function lockSingleLevel(hls){
-    try{
-        const levels = hls.levels || [];
-        if(levels.length <= 1) return;          // 只有一档无需锁定
-        const TARGET = 540;
-        let bestIdx = 0, bestScore = Infinity;
-        levels.forEach((lv, i) => {
-            const h = lv.height || 0;
-            const score = Math.abs(h - TARGET);
-            if(score < bestScore){ bestScore = score; bestIdx = i; }
-        });
-        hls.autoLevelEnabled = false;           // 关闭自适应，固定一档
-        hls.currentLevel = bestIdx;
-        hls.loadLevel = bestIdx;
-        hls.nextLevel = bestIdx;
-    }catch(e){}
-}
+// m3u8 播放已大幅简化（4.8 版）：
+//   - 删除 lockSingleLevel（锁单档）：改为交给 hls.js ABR 自动选档，代理层 filterMasterPlaylist 已封顶 720p
+//   - 删除重试/cache-bust/解除锁定整套逻辑：致命错误只做一次——销毁实例 + 弹一次提示
+//   - 理由：前几轮叠加的"自愈重试"反而制造了"提示出现又正常播放"的误报，且复杂度无法维护
+//   mp4 走原生 <video>（无 hls.js），m3u8 仅在 asia.aguea.com 兜底时走此简化路径
 
 function startHlsVideo(video){
-    const sources = [fullDecodeXml(video.dataset.src), fullDecodeXml(video.dataset.altSrc)].filter(Boolean);
-    const uniqueSources = [...new Set(sources)];
+    const rawSources = [fullDecodeXml(video.dataset.src), fullDecodeXml(video.dataset.altSrc)].filter(Boolean);
+    const uniqueSources = [...new Set(rawSources)];
     let sourceIndex = Number(video.dataset.hlsAttempt || 0);
     const streamUrl = uniqueSources[sourceIndex] || uniqueSources[0];
     if(!streamUrl) return;
 
-    // 仅在「用户真正点击播放」时集中带宽（暂停/停止其它视频）；
-    // 预载阶段（userAttempted 未置位）不调用，避免一启动预载就把其它预载视频的缓冲也停掉，
-    // 否则限流预载无法让最多 MAX_PRELOAD 个视频同时缓冲（与你选的 C 目标冲突）。
+    // 仅在「用户真正点击播放」时集中带宽（暂停/停止其它视频）
     if(video.dataset.userAttempted === "1"){
         pauseOtherVideos(video);
     }
@@ -654,8 +638,7 @@ function startHlsVideo(video){
         video.play().catch(err => {
             console.warn("m3u8播放失败：", err);
             if(retry && err){
-                // 无论是缓冲不足还是自动播放被拦截，都等 canplay/loadeddata 后【静默】重试一次
-                // （用户已点击，短暂激活态通常仍有效），避免“一点就提示/点了不出声”的困惑。
+                // 缓冲不足或自动播放被拦截：等 canplay 后静默重试一次
                 const retryPlay = ()=>{
                     video.removeEventListener("canplay", retryPlay);
                     video.removeEventListener("loadeddata", retryPlay);
@@ -665,7 +648,7 @@ function startHlsVideo(video){
                 video.addEventListener("loadeddata", retryPlay, {once:true});
                 setTimeout(()=>playNow(false), 450);
             }else{
-                // 仅在用户主动点击播放后才提示错误（重试耗尽）
+                // 重试仍失败：仅在用户主动点击后才提示
                 if(video.dataset.userAttempted === "1"){
                     const msg = getPlayErrorMessage(err, video, "m3u8播放失败");
                     if(msg) showToast(msg);
@@ -686,19 +669,16 @@ function startHlsVideo(video){
             try{ video.hlsInstance.destroy(); }catch(e){}
             video.hlsInstance = null;
         }
-        // hls.js 配置：对齐老版本简洁配置（老版本在 Cloudflare Function 代理下
-        // 实测 1 秒开播，无需手动降初始带宽估计/强制 720p 封顶等保守 ABR 设置）。
-        // 保留：enableWorker / capLevelToPlayerSize / storage=null 等无副作用项。
+        // 最小化配置：不锁档、不 worker、低延迟、加厚缓冲
         const hls = new Hls({
             enableWorker: true,
-            lowLatencyMode: true,         // 短片段起播更快（老版本即此值）
-            maxBufferLength: 60,          // 加厚缓冲（30→60）：抗代理抖动，播放更顺、不轻易放几秒卡一下
+            lowLatencyMode: true,
+            maxBufferLength: 60,
             capLevelToPlayerSize: true,
             storage: null,
             autoStartLoad: true
         });
         video.hlsInstance = hls;
-        // 拿到元数据即清除加载圈（已能播放）；同时设定缓冲超时保护，避免“点了不播也不报错”
         if(!video._metaBound){
             video._metaBound = true;
             video.addEventListener("loadedmetadata", () => {
@@ -712,18 +692,8 @@ function startHlsVideo(video){
             hls.loadSource(streamUrl);
         });
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            // 清单解析成功：直接开始缓冲并播放。
-            // 720p 封顶/强制起始档由代理层 filterMasterPlaylist 完成（带 src=twrss 时自动剔除 >720p），
-            // 客户端不再二次限制，避免与代理层重复叠加导致起播被压到过低码率。
             hls.startLoad();
             video.dataset.hlsLoaded = "1";
-            // 成功解析清单 → 重置致命重试计数（只有「连续」致命才重试，自愈成功即清零）
-            delete video.dataset.hlsFatalRetry;
-            // 锁定单一清晰度：用户反馈“播放时频繁切档(选择频率)导致卡顿/重连”，
-            // 这里在客户端关闭 ABR，固定选一个接近 540p 的档位（与代理层 720p 封顶一致、移动端更顺），
-            // 播放过程中不再自动升降档，对应“抓取时就定好一个链接、播放时直接播这个链接”。
-            lockSingleLevel(hls);
-            // 预加载模式不自动播放，仅加载数据；正常模式点击一次即播放
             if(video.dataset.preloadMode !== "1"){
                 playNow();
             }
@@ -731,33 +701,17 @@ function startHlsVideo(video){
         hls.on(Hls.Events.ERROR, (event, data) => {
             if(data && data.fatal){
                 const info = getHlsFailInfo(data);
-                console.warn("[HLS致命错误诊断] type=", info.type, "code=", info.code, "details=", info.details, "失败分片=", info.url);
+                console.warn("[HLS致命错误] type=", info.type, "code=", info.code, "details=", info.details, "url=", info.url);
                 const nextIndex = sourceIndex + 1;
                 if(nextIndex < uniqueSources.length){
-                    // 有备用源，自动切换（静默重试，不打扰用户）
-                    if(video.dataset.userAttempted === "1"){
-                        console.warn("m3u8 致命错误，自动切换备用源：", getHlsErrorMessage(data, streamUrl, info));
-                    }
+                    // 有备用源（altSrc），静默切换一次
                     video.dataset.hlsAttempt = String(nextIndex);
                     delete video.dataset.hlsLoaded;
                     try{ hls.destroy(); }catch(e){}
                     video.hlsInstance = null;
                     startHlsVideo(video);
                 }else{
-                    // 无备用源（推特 m3u8 常态）：先清理损坏实例，避免被复用为“死实例”
-                    // 仅 NETWORK 类错误、且用户主动播放时，做有限次数“销毁+重建”自愈（救回瞬态失败）
-                    const isNetwork = info.type === Hls.ErrorTypes.NETWORK_ERROR;
-                    const tried = Number(video.dataset.hlsFatalRetry || 0);
-                    const MAX_FATAL_RETRY = 2;
-                    if(video.dataset.userAttempted === "1" && isNetwork && tried < MAX_FATAL_RETRY){
-                        video.dataset.hlsFatalRetry = String(tried + 1);
-                        delete video.dataset.hlsLoaded;
-                        try{ hls.destroy(); }catch(e){}
-                        video.hlsInstance = null;
-                        startHlsVideo(video);   // 从头重建，重试这次致命加载
-                        return;
-                    }
-                    // 重试耗尽或无需重试：清理损坏实例（含预加载阶段）→ 下次点击能从头重建，不会复用死实例
+                    // 无备用源：销毁实例，弹一次提示，不重试
                     delete video.dataset.hlsLoaded;
                     if(video.dataset.preloading === "1"){
                         video.dataset.preloading = "0";
@@ -767,8 +721,6 @@ function startHlsVideo(video){
                     video.hlsInstance = null;
                     setVideoLoading(video, false);
                     if(video.dataset.userAttempted === "1"){
-                        // 唯一保留的失败提示：hls.js 致命错误、且备用源/自愈重试均耗尽
-                        // → 链接真正失效（极少数情况），统一提示，不再做本地标记/占位（易误伤）。
                         showToast(getHlsErrorMessage(data, streamUrl, info));
                     }
                 }
