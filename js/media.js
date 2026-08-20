@@ -50,16 +50,17 @@ function initVideoObserver(){
                 }
             }else{
                 _visibleVideos.delete(video);
-                video.pause();
-                if(video.hlsInstance){
-                    video.hlsInstance.stopLoad();
-                }
-                // 预加载中的视频滑出视口：取消预加载
-                if(video.dataset.preloading === "1"){
-                    cancelHlsPreload(video);
-                }
-                // ③ 离屏即停缓冲：未播放的视频彻底停掉后台下载，省流量/降 CPU
                 if(video.dataset.userAttempted !== "1"){
+                    // 未主动播放的视频离屏：暂停 + 停缓冲 + 拆 src，省流量/降 CPU
+                    video.pause();
+                    if(video.hlsInstance){
+                        video.hlsInstance.stopLoad();
+                    }
+                    // 预加载中的视频滑出视口：取消预加载
+                    if(video.dataset.preloading === "1"){
+                        cancelHlsPreload(video);
+                    }
+                    // ③ 离屏即停缓冲：未播放的视频彻底停掉后台下载，省流量/降 CPU
                     video.preload = "none";
                     // MP4：摘掉 src 真正终止后台下载（HLS 已 stopLoad/销毁）
                     if(video.classList.contains("media-video-mp4") && video.src && !video.dataset.savedSrc){
@@ -69,7 +70,7 @@ function initVideoObserver(){
                         video.load();
                     }
                 }
-                // 优化5：内存优化 - 长视频滑出视口且播放较多时释放内存
+                // 用户已主动播放的视频离屏：保留播放/缓冲，不无脑暂停（修复「播放几秒自动暂停」）
                 tryReleaseVideoMemory(video);
             }
         })
@@ -111,6 +112,8 @@ function startHlsPreload(video){
 // 每批可见性变化后调用：选出离中心最近、且未点过/未建实例的 MAX_PRELOAD 个视频进行预热，
 // 其余超出额度的预载立即取消，把并发额度让给更靠近中心的视频。
 function managePreloads(){
+    // 存在正在播放的视频时，把所有带宽让给它：不做任何预载，避免抢带宽/浪费流量（问题3）
+    if(currentPlayingVideo) return;
     const candidates = [];
     _visibleVideos.forEach(v=>{
         if(v.dataset.userAttempted === "1") return;
@@ -233,6 +236,14 @@ function resumeNearbyPreload(){
     managePreloads();
 }
 
+// 将已判定不可播的视频卡片替换为「视频来源已失效」占位（不删除 DOM，避免「刷到突然消失」）
+function replaceWithUnplayableTip(video){
+    const wrap = video.closest(".video-single-wrap");
+    if(!wrap) return;
+    wrap.innerHTML = '<div class="video-unplayable-tip">该视频来源已失效</div>';
+    wrap.classList.add("is-unplayable");
+}
+
 function getVideoErrorMessage(video, fallback = "视频播放失败"){
     const err = video && video.error;
     if(!err) return fallback;
@@ -327,6 +338,7 @@ function toggleVideoPlay(video){
         pauseOtherVideos(video);
         // 已预加载的视频（HLS 已 stopLoad）重新拉起缓冲，避免点了却一直黑屏
         if(video.hlsInstance) video.hlsInstance.startLoad();
+        currentPlayingVideo = video; // 标记当前播放视频，managePreloads 据此让出带宽
         video.play().catch(err => {
             setVideoLoading(video, false);
             console.warn("视频播放失败：", err);
@@ -341,6 +353,7 @@ function toggleVideoPlay(video){
         setVideoLoading(video, false);
         video.pause();
         if(video.hlsInstance) video.hlsInstance.stopLoad();
+        if(currentPlayingVideo === video) currentPlayingVideo = null;
         // 播放停止：恢复附近视频预加载，继续滑动不卡
         resumeNearbyPreload();
     }
@@ -773,6 +786,9 @@ function startHlsVideo(video){
                     setVideoLoading(video, false);
                     if(video.dataset.userAttempted === "1"){
                         showToast(getHlsErrorMessage(data, streamUrl, info));
+                        // 用户主动播放且致命错误重试耗尽 → 标记不可播并替换为占位（问题1）
+                        markUnplayable(video.dataset.cardLink);
+                        replaceWithUnplayableTip(video);
                     }
                 }
             }
@@ -829,6 +845,9 @@ function initHlsVideo(){
         // 播放开始：原生 poster 会自动让位于视频画面；清除缓冲超时计时器
         video.addEventListener("playing", () => {
             if(video._loadTimeout){ clearTimeout(video._loadTimeout); video._loadTimeout = null; }
+        });
+        video.addEventListener("ended", () => {
+            if(currentPlayingVideo === video) currentPlayingVideo = null;
         });
     });
 }

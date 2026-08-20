@@ -259,8 +259,39 @@ let scrollObserver = null;
 let loadLock = false;
 let currentPreviewImgs = [];
 let videoObserver = null;
+let currentPlayingVideo = null; // 当前正在播放的视频；存在时 managePreloads 不做任何预载，把带宽让给播放中的视频
 let preloadCount = 0;
 const MAX_PRELOAD = 2;
+
+// ─── 不可播视频记录 ───────────────────────────────────────────────────────────
+// 仅当「用户点击播放」且 hls.js 致命错误重试耗尽，才把该视频 link 记入 unplayableMap，
+// 渲染时直接显示「视频来源已失效」占位（不再显示黑色播放器 + 点开才提示）。
+// 设计要点（回应误判/整源失效/突然消失三类担忧）：
+//   1) 预载阶段（未点击）即便探测到一次失败也不标记、不藏卡片 → 不会「刷到突然消失」；
+//   2) 整源/nitter 实例失效时 RSS 本身解析不到，视频不渲染，根本不触发逐条屏蔽；
+//   3) 记录带 24h TTL，订阅源/实例修复后过期自动恢复，重新尝试播放。
+const UNPLAYABLE_TTL = 24 * 60 * 60 * 1000; // 24 小时
+let unplayableMap = {};
+function loadUnplayableMap(){
+    try{ unplayableMap = JSON.parse(localStorage.getItem("rss_unplayable_links") || "{}"); }catch(e){ unplayableMap = {}; }
+    const now = Date.now();
+    for(const k in unplayableMap){ if(now - unplayableMap[k] > UNPLAYABLE_TTL) delete unplayableMap[k]; }
+}
+function isUnplayable(link){
+    if(!link) return false;
+    if(!unplayableMap || Object.keys(unplayableMap).length === 0) loadUnplayableMap();
+    const t = unplayableMap[link];
+    if(!t) return false;
+    if(Date.now() - t > UNPLAYABLE_TTL){ delete unplayableMap[link]; return false; }
+    return true;
+}
+function markUnplayable(link){
+    if(!link) return;
+    unplayableMap[link] = Date.now();
+    try{ localStorage.setItem("rss_unplayable_links", JSON.stringify(unplayableMap)); }catch(e){}
+}
+loadUnplayableMap();
+
 let filterSourceUrl = "";
 let localCacheArticles = [];
 let hasNewUpdate = false;
