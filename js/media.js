@@ -236,14 +236,6 @@ function resumeNearbyPreload(){
     managePreloads();
 }
 
-// 将已判定不可播的视频卡片替换为「视频来源已失效」占位（不删除 DOM，避免「刷到突然消失」）
-function replaceWithUnplayableTip(video){
-    const wrap = video.closest(".video-single-wrap");
-    if(!wrap) return;
-    wrap.innerHTML = '<div class="video-unplayable-tip">该视频来源已失效</div>';
-    wrap.classList.add("is-unplayable");
-}
-
 function getVideoErrorMessage(video, fallback = "视频播放失败"){
     const err = video && video.error;
     if(!err) return fallback;
@@ -268,7 +260,9 @@ function getVideoErrorMessage(video, fallback = "视频播放失败"){
 function setVideoLoading(video, on){ /* no-op */ }
 
 function getPlayErrorMessage(err, video, fallback = "视频播放失败"){
-    if(err && err.name === "NotAllowedError") return "请再点一次播放";
+    // 自动播放被拦截（NotAllowedError）或中断（AbortError）均为瞬时态：
+    // 用户手势内的 play() 往往随后自愈成功，弹提示反而造成“提示出现又正常播放”的错觉，故不提示。
+    if(err && err.name === "NotAllowedError") return "";
     if(err && err.name === "AbortError") return "";
     return getVideoErrorMessage(video, fallback);
 }
@@ -656,18 +650,6 @@ function startHlsVideo(video){
         pauseOtherVideos(video);
     }
 
-    // 缓冲超时保护：用户主动点击后若 12 秒仍无元数据（时长），说明代理卡死/源失效，
-    // 明确报错并收起加载圈，避免“按钮变了却一直黑屏、也不提示”的困惑。
-    if(video.dataset.userAttempted === "1"){
-        if(video._loadTimeout) clearTimeout(video._loadTimeout);
-        video._loadTimeout = setTimeout(() => {
-            if(video.dataset.userAttempted === "1" && !video.dataset.loadedMeta){
-                setVideoLoading(video, false);
-                showToast("视频缓冲超时，请稍后重试");
-            }
-        }, 12000);
-    }
-
     const playNow = (retry = true) => {
         video.play().catch(err => {
             console.warn("m3u8播放失败：", err);
@@ -785,10 +767,9 @@ function startHlsVideo(video){
                     video.hlsInstance = null;
                     setVideoLoading(video, false);
                     if(video.dataset.userAttempted === "1"){
+                        // 唯一保留的失败提示：hls.js 致命错误、且备用源/自愈重试均耗尽
+                        // → 链接真正失效（极少数情况），统一提示，不再做本地标记/占位（易误伤）。
                         showToast(getHlsErrorMessage(data, streamUrl, info));
-                        // 用户主动播放且致命错误重试耗尽 → 标记不可播并替换为占位（问题1）
-                        markUnplayable(video.dataset.cardLink);
-                        replaceWithUnplayableTip(video);
                     }
                 }
             }

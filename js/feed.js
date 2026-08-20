@@ -547,11 +547,6 @@ function buildCard(item, isFav = false){
     let mediaHtml = "";
 
             if (item.isM3u8Video === true) {
-    const cardLink = item.link || "";
-    if(isUnplayable(cardLink)){
-        // 该视频来源已失效（点击播放致命错误重试耗尽才标记），直接渲染占位，不显示播放器
-        mediaHtml = `<div class="video-unplayable-tip">该视频来源已失效</div>`;
-    } else {
     // M3U8视频，保留原有标记，仅给HLS调用
     const imgs = [...new Set(item.media.imgs || [])];
     // 优先使用 videoPoster（从 <video poster="..."> 属性提取的视频缩略图）
@@ -579,9 +574,8 @@ function buildCard(item, isFav = false){
     const twRssAttr = isTwRss ? ' data-twitter-rss="1"' : "";
 
       mediaHtml = `<div class="video-single-wrap">
-          <video class="media-video" data-m3u8="1" ${proxyVideoAttr}${twRssAttr} preload="none" playsinline ${posterAttr} ${posterDirectAttr} ${posterFallbacksAttr} data-card-link="${escapeAttr(cardLink)}" data-src="${escapeAttr(firstSrc)}" data-alt-src="${escapeAttr(altSrc)}" ${videoFallbacksAttr}>
+          <video class="media-video" data-m3u8="1" ${proxyVideoAttr}${twRssAttr} preload="none" playsinline ${posterAttr} ${posterDirectAttr} ${posterFallbacksAttr} data-src="${escapeAttr(firstSrc)}" data-alt-src="${escapeAttr(altSrc)}" ${videoFallbacksAttr}>
 </video>${mediaControlsHtml()}</div>`;
-    }
 }else if(item.videoUrl){
     // MP4视频：单独class media-video-mp4，完全脱离HLS逻辑
     const imgs = [...new Set(item.media.imgs || [])];
