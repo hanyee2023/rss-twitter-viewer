@@ -15,7 +15,7 @@ const ALLOW_PROXY_HOSTS = [
   "redd.it",
   "770118.xyz",
   "phe69",
-  "phe69.com",
+  "viet69z.sex",
   "3go.fun",
   "rsshub.app",
   "venexa.site",
