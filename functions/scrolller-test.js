@@ -80,13 +80,21 @@ async function scrolllerFetch(sub, filter, limit) {
   const started = Date.now();
   let status = 0, text = "";
   try {
+    const headers = {
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+      "User-Agent": UA
+    };
+    // 仅当请求从 CF Pages 调用 API 时，需要 Origin/Referer
+    // Scrolller 后端会校验这两个头，否则返回 404
+    const origin = request.headers.get("origin");
+    const referer = request.headers.get("referer") || url.origin + url.pathname;
+    headers["Origin"] = origin || "https://api.scrolller.com";
+    headers["Referer"] = referer;
+
     const res = await fetch(SCROLLLER_API, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "User-Agent": UA
-      },
+      headers,
       body: JSON.stringify(payload)
     });
     status = res.status;
