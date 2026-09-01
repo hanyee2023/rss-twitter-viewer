@@ -11,7 +11,7 @@
  */
 
 const SCROLLLER_API = "https://api.scrolller.com/api/v2/graphql";
-const VERSION = "scrolller-test v5 (极简重写版)";
+const VERSION = "scrolller-test v6 (+authorization: null 修复)";
 
 // CF Pages Functions 标准入口
 export async function onRequest({ request }) {
@@ -35,15 +35,19 @@ export async function onRequest({ request }) {
       }
     }
   }`;
-  const payload = { query, variables: { url: sub.startsWith("/r/") ? sub : "/r/" + sub, filter: flt || null } };
+  const payload = {
+    query,
+    variables: { url: sub.startsWith("/r/") ? sub : "/r/" + sub, filter: flt || null },
+    authorization: null
+  };
 
-  // 准备请求头（带 Origin/Referer 防 Scrolller 404）
+  // 准备请求头（带 Origin/Referer + authorization=null 公开调用）
   const reqHeaders = {
     "Content-Type": "application/json",
     "Accept": "application/json",
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Origin": (request.headers.get("origin") || "https://api.scrolller.com"),
-    "Referer": (request.headers.get("referer") || "https://api.scrolller.com/")
+    "Origin": (request.headers.get("origin") || "https://scrolller.com"),
+    "Referer": (request.headers.get("referer") || "https://scrolller.com/")
   };
 
   // 2. 调 Scrolller
