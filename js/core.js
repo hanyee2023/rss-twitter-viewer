@@ -38,7 +38,10 @@ const FORCE_PROXY_HOSTS = [
     "htumeng.com",
     "642p.com",
     "tutu1.space",
-    "freeshare58.com"
+    "freeshare58.com",
+    "jhfduadgiyhas.com",
+    "000355.xyz",
+    "919129.xyz"
 ];
 
 function normalizeUrl(rawUrl) {
