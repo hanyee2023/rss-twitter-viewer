@@ -256,8 +256,27 @@ function getVideoErrorMessage(video, fallback = "视频播放失败"){
     }
 }
 
-// 加载圈已移除：点击播放后主按钮图标即切换为“暂停”，已是足够反馈，不需要转圈
-function setVideoLoading(video, on){ /* no-op */ }
+// 缓冲中指示：在 video 的父容器内叠加一个轻量“缓冲中…”遮罩。
+// 用于区分“正在缓冲(网络/代理)”与“真卡死(代码)”，配合右上角延迟面板一起定位问题。
+function setVideoLoading(video, on){
+    if(!video || !video.parentElement) return;
+    const parent = video.parentElement;
+    let el = parent.querySelector(":scope > .video-buffering");
+    if(on){
+        if(!el){
+            el = document.createElement("div");
+            el.className = "video-buffering";
+            el.innerHTML = '<span class="vb-spinner"></span><span class="vb-text">缓冲中…</span>';
+            if(getComputedStyle(parent).position === "static"){
+                parent.style.position = "relative";
+            }
+            parent.appendChild(el);
+        }
+        el.style.display = "flex";
+    }else if(el){
+        el.style.display = "none";
+    }
+}
 
 function getPlayErrorMessage(err, video, fallback = "视频播放失败"){
     // 自动播放被拦截（NotAllowedError）或中断（AbortError）均为瞬时态：
@@ -399,6 +418,8 @@ function bindSlowNetworkDetect(video){
         waitingTimes = waitingTimes.filter(t => now - t < 10000);
         waitingTimes.push(now);
         // 10 秒内出现 3 次以上 waiting，认为网络较慢
+        // 缓冲等待时给出明确“缓冲中”指示，便于区分“在缓冲(网络/代理)”还是“真卡死(代码)”
+        setVideoLoading(video, true);
         if(waitingTimes.length >= 3 && !video.dataset.slowWarnShown){
             video.dataset.slowWarnShown = "1";
             slowWarned = true;
@@ -408,6 +429,9 @@ function bindSlowNetworkDetect(video){
 
     // 播放顺畅一段时间后重置计数（用户可能切换到了好网络）
     video.addEventListener("playing", () => {
+        // 恢复播放即关闭“缓冲中”指示，并重置 HLS 自愈计数（新一轮播放从干净状态开始）
+        setVideoLoading(video, false);
+        if(video.dataset.hlsSelfHeal) delete video.dataset.hlsSelfHeal;
         if(slowWarned) return;
         const now = Date.now();
         waitingTimes = waitingTimes.filter(t => now - t < 10000);
@@ -672,7 +696,7 @@ function startHlsVideo(video){
         // 最小化配置：不锁档、不 worker、低延迟、加厚缓冲
         const hls = new Hls({
             enableWorker: true,
-            lowLatencyMode: true,
+            lowLatencyMode: false,
             maxBufferLength: 60,
             capLevelToPlayerSize: true,
             storage: null,
@@ -699,30 +723,55 @@ function startHlsVideo(video){
             }
         });
         hls.on(Hls.Events.ERROR, (event, data) => {
-            if(data && data.fatal){
-                const info = getHlsFailInfo(data);
-                console.warn("[HLS致命错误] type=", info.type, "code=", info.code, "details=", info.details, "url=", info.url);
-                const nextIndex = sourceIndex + 1;
-                if(nextIndex < uniqueSources.length){
-                    // 有备用源（altSrc），静默切换一次
-                    video.dataset.hlsAttempt = String(nextIndex);
-                    delete video.dataset.hlsLoaded;
-                    try{ hls.destroy(); }catch(e){}
-                    video.hlsInstance = null;
-                    startHlsVideo(video);
-                }else{
-                    // 无备用源：销毁实例，弹一次提示，不重试
-                    delete video.dataset.hlsLoaded;
-                    if(video.dataset.preloading === "1"){
-                        video.dataset.preloading = "0";
-                        preloadCount = Math.max(0, preloadCount - 1);
-                    }
-                    try{ hls.destroy(); }catch(e){}
-                    video.hlsInstance = null;
-                    setVideoLoading(video, false);
-                    if(video.dataset.userAttempted === "1"){
-                        showToast(getHlsErrorMessage(data, streamUrl, info));
-                    }
+            if(!data || !data.fatal) return;
+            const info = getHlsFailInfo(data);
+            console.warn("[HLS致命错误] type=", info.type, "code=", info.code, "details=", info.details, "url=", info.url);
+
+            // —— 第一层：自愈重试（同一源，不切源）——
+            // 偶发分片超时/代理抖动会抛致命错误，直接 destroy 会让视频“播几秒就硬停”。
+            // 优先用 hls.js 内置自愈：网络错误重拉、媒体错误恢复，限 3 次。
+            let healCount = Number(video.dataset.hlsSelfHeal || 0);
+            if(healCount < 3){
+                video.dataset.hlsSelfHeal = String(healCount + 1);
+                if(data.type === Hls.ErrorTypes.NETWORK_ERROR){
+                    console.warn("[HLS自愈] NETWORK_ERROR -> startLoad() 第" + (healCount + 1) + "次");
+                    hls.startLoad();
+                    return;
+                }
+                if(data.type === Hls.ErrorTypes.MEDIA_ERROR){
+                    console.warn("[HLS自愈] MEDIA_ERROR -> recoverMediaError() 第" + (healCount + 1) + "次");
+                    hls.recoverMediaError();
+                    return;
+                }
+                // 其他致命错误：兜底重拉一次
+                console.warn("[HLS自愈] 其他致命错误 -> startLoad() 第" + (healCount + 1) + "次");
+                hls.startLoad();
+                return;
+            }
+
+            // —— 第二层：自愈用尽，走原逻辑（切备用源 / 放弃提示）——
+            const nextIndex = sourceIndex + 1;
+            if(nextIndex < uniqueSources.length){
+                // 有备用源（altSrc），静默切换一次（重置自愈计数）
+                video.dataset.hlsAttempt = String(nextIndex);
+                delete video.dataset.hlsLoaded;
+                delete video.dataset.hlsSelfHeal;
+                try{ hls.destroy(); }catch(e){}
+                video.hlsInstance = null;
+                startHlsVideo(video);
+            }else{
+                // 无备用源：销毁实例，弹一次提示，不重试
+                delete video.dataset.hlsLoaded;
+                delete video.dataset.hlsSelfHeal;
+                if(video.dataset.preloading === "1"){
+                    video.dataset.preloading = "0";
+                    preloadCount = Math.max(0, preloadCount - 1);
+                }
+                try{ hls.destroy(); }catch(e){}
+                video.hlsInstance = null;
+                setVideoLoading(video, false);
+                if(video.dataset.userAttempted === "1"){
+                    showToast(getHlsErrorMessage(data, streamUrl, info));
                 }
             }
         });
