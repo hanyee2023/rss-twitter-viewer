@@ -284,12 +284,54 @@ function corsHeaders(extra = {}) {
   };
 }
 
+async function handlePing(request) {
+  const cf = request.cf || {};
+  const clientRtt = (typeof cf.clientTcpRtt === "number") ? Math.round(cf.clientTcpRtt) : null;
+  const colo = cf.colo || null;
+  // 代理→源站探测：HEAD 一个稳定的 twimg 资源并计时；失败/超时不阻断，容错返回 null
+  let upstreamRtt = null, upstreamOk = false;
+  try {
+    const t0 = Date.now();
+    const probe = await fetch("https://abs.twimg.com/favicon.ico", {
+      method: "HEAD",
+      redirect: "follow",
+      signal: AbortSignal.timeout(5000)
+    });
+    upstreamRtt = Date.now() - t0;
+    upstreamOk = probe.ok;
+  } catch (e) {
+    upstreamRtt = null;
+    upstreamOk = false;
+  }
+  const body = JSON.stringify({
+    clientRtt,
+    upstreamRtt,
+    upstreamOk,
+    colo,
+    ts: Date.now()
+  });
+  return new Response(body, {
+    status: 200,
+    headers: corsHeaders({
+      "Content-Type": "application/json;charset=utf-8",
+      "Cache-Control": "no-store"
+    })
+  });
+}
+
 export async function onRequest({ request }) {
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders() });
   }
 
   const urlObj = new URL(request.url);
+
+  // 延迟探测接口：返回 本机→代理(clientTcpRtt) 与 代理→源站(upstreamRtt) 的实时延迟，
+  // 让用户能区分“自己的网络 / 代理网络 / 代码判断”导致的卡顿。前端每数秒轮询一次。
+  if (urlObj.searchParams.get("ping") !== null) {
+    return handlePing(request);
+  }
+
   let targetUrl = urlObj.searchParams.get("url");
   if (!targetUrl || !isHttpUrl(targetUrl)) {
     return new Response("缺少或非法url参数", { status: 400, headers: corsHeaders() });
