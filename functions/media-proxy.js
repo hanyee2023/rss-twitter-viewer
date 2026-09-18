@@ -284,32 +284,48 @@ function corsHeaders(extra = {}) {
   };
 }
 
+// 实时吞吐测量：在实际媒体流转发时更新。
+// 模块级变量在 CF isolate 内复用，温态（停留页面后）持续有效；
+// 冷启动/无播放时为 null，前端显示 “--”。
+let _lastSpeedMbps = null;
+let _lastSpeedTs = 0;
+
+// 将上游响应体包一层 TransformStream，统计转发字节数与耗时，得到代理实测下载速率(MB/s)。
+function streamWithSpeed(upstreamResp, status, headers) {
+  const body = upstreamResp.body;
+  if (!body) {
+    return new Response(null, { status, headers });
+  }
+  let total = 0;
+  let t0 = 0;
+  const ts = new TransformStream({
+    transform(chunk, controller) {
+      if (t0 === 0) t0 = Date.now();
+      if (chunk && chunk.byteLength) total += chunk.byteLength;
+      controller.enqueue(chunk);
+    },
+    flush() {
+      const dt = (Date.now() - t0) / 1000;
+      // 仅当数据量足够、耗时合理时更新，避免极短分片造成的噪声
+      if (dt > 0.05 && total > 4096) {
+        _lastSpeedMbps = (total / 1e6) / dt; // MB/s
+        _lastSpeedTs = Date.now();
+      }
+    }
+  });
+  return new Response(body.pipeThrough(ts), { status, headers });
+}
+
+// 延迟/速率探测接口：返回 Cloudflare 实测的代理下载速率(MB/s)。
+// 该速率由 streamWithSpeed 在真实转发视频流时测量，反映“代理水管粗细”，比本地计算更准。
 async function handlePing(request) {
   const cf = request.cf || {};
-  const clientRtt = (typeof cf.clientTcpRtt === "number") ? Math.round(cf.clientTcpRtt) : null;
   const colo = cf.colo || null;
-  // 代理→源站探测：HEAD 一个稳定的 twimg 资源并计时；失败/超时不阻断，容错返回 null
-  let upstreamRtt = null, upstreamOk = false;
-  try {
-    const t0 = Date.now();
-    const probe = await fetch("https://abs.twimg.com/favicon.ico", {
-      method: "HEAD",
-      redirect: "follow",
-      signal: AbortSignal.timeout(5000)
-    });
-    upstreamRtt = Date.now() - t0;
-    upstreamOk = probe.ok;
-  } catch (e) {
-    upstreamRtt = null;
-    upstreamOk = false;
-  }
-  const body = JSON.stringify({
-    clientRtt,
-    upstreamRtt,
-    upstreamOk,
-    colo,
-    ts: Date.now()
-  });
+  const fresh = (Date.now() - _lastSpeedTs) < 10000;
+  const speedMbps = (_lastSpeedMbps !== null && fresh)
+    ? Math.round(_lastSpeedMbps * 10) / 10
+    : null;
+  const body = JSON.stringify({ speedMbps, colo, ts: Date.now() });
   return new Response(body, {
     status: 200,
     headers: corsHeaders({
@@ -412,7 +428,8 @@ export async function onRequest({ request }) {
     // 注：不再无差别删除 Vary（Range 分支必须保留 Vary:Range）；仅删除 Transfer-Encoding 由运行时重算
     headers.delete("Transfer-Encoding");
 
-    return new Response(res.body, { status: res.status, headers });
+    // 用带速率测量的流式转发：既保持边收边发（流式），又实时记录代理下载速率供前端展示
+    return streamWithSpeed(res, res.status, headers);
   } catch (err) {
     return new Response("媒体代理失败：" + err.message, { status: 502, headers: corsHeaders() });
   }
