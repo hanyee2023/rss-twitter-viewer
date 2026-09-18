@@ -1,6 +1,7 @@
-// 右上角实时延迟面板：周期性请求代理 ping 接口，更新“本机/代理”两段延迟。
-// 本机 = 你(浏览器) → 代理(CF边缘) 的 RTT；代理 = 代理 → 推特源站(twimg) 的 RTT。
-// 仅做被动展示，失败/取不到时保持 “--”，不打扰用户。
+// 右上角实时速率面板：周期请求代理 ping 接口，显示 Cloudflare 实测的代理下载速率(MB/s)。
+// 速率由代理在实际转发视频流时测量并返回（见 media-proxy.js 的 streamWithSpeed），
+// 反映“代理水管粗细”，比本地用 buffered 计算的更准（不会在缓冲满时掉到 0）。
+// 仅被动展示，取不到时保持 “--”，不打扰用户。
 (function () {
   "use strict";
 
@@ -16,22 +17,22 @@
     return null;
   }
 
-  function paint(el, ms) {
-    if (el === null) return;
-    if (ms === null || ms === undefined || !Number.isFinite(ms)) {
+  function paint(el, mbps) {
+    if (!el) return;
+    if (mbps === null || mbps === undefined || !Number.isFinite(mbps)) {
       el.textContent = "--";
       el.className = "lat-na";
       return;
     }
-    el.textContent = Math.round(ms) + "ms";
-    el.className = ms < 150 ? "lat-ok" : (ms < 400 ? "lat-warn" : "lat-bad");
+    // 720p 视频自身码率约 0.3~0.8 MB/s；据此分级，仅供参考
+    el.textContent = mbps.toFixed(1) + " MB/s";
+    el.className = mbps >= 0.5 ? "lat-ok" : (mbps >= 0.15 ? "lat-warn" : "lat-bad");
   }
 
   async function tick() {
     const base = getProxyBase();
-    const elClient = document.getElementById("latClient");
-    const elProxy = document.getElementById("latProxy");
-    if (!base || !elClient || !elProxy) return;
+    const el = document.getElementById("latSpeed");
+    if (!base || !el) return;
 
     const sep = base.indexOf("?") >= 0 ? "&" : "?";
     const url = base + sep + "ping=1";
@@ -42,12 +43,10 @@
       clearTimeout(timer);
       if (!res.ok) throw new Error("ping http " + res.status);
       const data = await res.json();
-      paint(elClient, data.clientRtt);
-      paint(elProxy, data.upstreamRtt);
+      paint(el, (typeof data.speedMbps === "number") ? data.speedMbps : null);
     } catch (e) {
       clearTimeout(timer);
-      // 取不到不强制改写已有值，避免面板乱跳；仅在仍是初始态时标 N/A 提示
-      // （保持 -- 即可，无需抛错）
+      // 取不到保持 --，不强制改写、不打扰
     }
   }
 
