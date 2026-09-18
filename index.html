@@ -759,10 +759,8 @@ body{
   <h1 id="pageTitle">RSS媒体阅读器</h1>
   <span class="beta-tag">4.8</span>
 </div>
-<div id="netLatency" class="net-latency" title="实时网络延迟：本机=你到代理，代理=代理到推特源站">
-  <span class="lat-item">本机 <b id="latClient" class="lat-na">--</b></span>
-  <span class="lat-sep">·</span>
-  <span class="lat-item">代理 <b id="latProxy" class="lat-na">--</b></span>
+<div id="netLatency" class="net-latency" title="Cloudflare 实测的代理下载速率(MB/s)：代理在真实转发视频流时测量，反映“代理水管粗细”。播放时 -- 表示流已停滞；720p 流畅时通常 0.3~0.8 MB/s（即视频自身码率）；明显高于此值说明正在预热/追缓冲。停留页面后会因连接保活与边缘缓存而变稳。">
+  <span class="lat-item">速率 <b id="latSpeed" class="lat-na">--</b></span>
 </div>
 </header>
 
