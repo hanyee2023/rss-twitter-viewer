@@ -36,7 +36,7 @@ body{
     z-index: 9999;
     display:flex;
     align-items:center;
-    justify-content:space-between;
+    justify-content:center;
     padding: 0 12px;
     box-sizing: border-box;
 }
@@ -62,25 +62,6 @@ body{
     font-weight:600;
     white-space:nowrap;
 }
-
-/* 右上角实时延迟面板 */
-.net-latency{
-    display:flex;
-    align-items:center;
-    gap:6px;
-    font-size:12px;
-    color:#444;
-    margin-left:auto;
-    user-select:none;
-    white-space:nowrap;
-}
-.lat-item{ display:flex; align-items:center; gap:3px; }
-.lat-item b{ font-weight:600; font-variant-numeric:tabular-nums; }
-.lat-sep{ color:#bbb; }
-.lat-ok{ color:#28a745; }
-.lat-warn{ color:#f0ad4e; }
-.lat-bad{ color:#e24c4c; }
-.lat-na{ color:#9aa0a6; }
 
 /* 视频缓冲中遮罩（P0-3：区分“在缓冲”与“真卡死”） */
 .video-buffering{
@@ -759,9 +740,6 @@ body{
   <h1 id="pageTitle">RSS媒体阅读器</h1>
   <span class="beta-tag">4.8</span>
 </div>
-<div id="netLatency" class="net-latency" title="Cloudflare 实测的代理下载速率(MB/s)：代理在真实转发视频流时测量，反映“代理水管粗细”。播放时 -- 表示流已停滞；720p 流畅时通常 0.3~0.8 MB/s（即视频自身码率）；明显高于此值说明正在预热/追缓冲。停留页面后会因连接保活与边缘缓存而变稳。">
-  <span class="lat-item">速率 <b id="latSpeed" class="lat-na">--</b></span>
-</div>
 </header>
 
 <div class="main-wrap">
@@ -907,6 +885,5 @@ body{
 <script src="js/media.js"></script>
 <script src="js/feed.js"></script>
 <script src="js/app.js"></script>
-<script src="js/ping.js"></script>
 
 </body></html>
