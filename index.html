@@ -36,7 +36,9 @@ body{
     z-index: 9999;
     display:flex;
     align-items:center;
-    justify-content:center;
+    justify-content:space-between;
+    padding: 0 12px;
+    box-sizing: border-box;
 }
 
 .title-wrap {
@@ -60,6 +62,39 @@ body{
     font-weight:600;
     white-space:nowrap;
 }
+
+/* 右上角实时延迟面板 */
+.net-latency{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    font-size:12px;
+    color:#444;
+    margin-left:auto;
+    user-select:none;
+    white-space:nowrap;
+}
+.lat-item{ display:flex; align-items:center; gap:3px; }
+.lat-item b{ font-weight:600; font-variant-numeric:tabular-nums; }
+.lat-sep{ color:#bbb; }
+.lat-ok{ color:#28a745; }
+.lat-warn{ color:#f0ad4e; }
+.lat-bad{ color:#e24c4c; }
+.lat-na{ color:#9aa0a6; }
+
+/* 视频缓冲中遮罩（P0-3：区分“在缓冲”与“真卡死”） */
+.video-buffering{
+    position:absolute; top:0; left:0; right:0; bottom:0;
+    display:none; align-items:center; justify-content:center; gap:8px;
+    background:rgba(0,0,0,0.30); color:#fff; font-size:13px;
+    z-index:50; pointer-events:none;
+}
+.vb-spinner{
+    width:16px; height:16px; border:2px solid rgba(255,255,255,.4);
+    border-top-color:#fff; border-radius:50%;
+    animation:vb-spin .7s linear infinite;
+}
+@keyframes vb-spin{ to{ transform:rotate(360deg); } }
 
 /* 卡片样式 */
 .tweet-card{
@@ -724,6 +759,11 @@ body{
   <h1 id="pageTitle">RSS媒体阅读器</h1>
   <span class="beta-tag">4.8</span>
 </div>
+<div id="netLatency" class="net-latency" title="实时网络延迟：本机=你到代理，代理=代理到推特源站">
+  <span class="lat-item">本机 <b id="latClient" class="lat-na">--</b></span>
+  <span class="lat-sep">·</span>
+  <span class="lat-item">代理 <b id="latProxy" class="lat-na">--</b></span>
+</div>
 </header>
 
 <div class="main-wrap">
@@ -869,5 +909,6 @@ body{
 <script src="js/media.js"></script>
 <script src="js/feed.js"></script>
 <script src="js/app.js"></script>
+<script src="js/ping.js"></script>
 
 </body></html>
