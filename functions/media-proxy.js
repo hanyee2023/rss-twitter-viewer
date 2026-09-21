@@ -26,7 +26,8 @@ const ALLOW_PROXY_HOSTS = [
   "freeshare58.com",
   "jhfduadgiyhas.com",
   "000355.xyz",
-  "919129.xyz"
+  "919129.xyz",
+  "2025pic.net"
 ];
 
 function normalizeHost(host) {
