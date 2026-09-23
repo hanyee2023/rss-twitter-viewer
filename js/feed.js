@@ -360,7 +360,11 @@ async function renderSingleFeedFromSource(sourceUrl){
                     currentArticles = [...list]; // 用户已离开单源界面，仅更新数据
                 }else{
                     currentArticles = [...newItems, ...currentArticles];
-                    articleBoxSingle.insertAdjacentHTML("afterbegin", renderCardList(newItems));
+                    // 增量更新：同样用 .masonry-page 包裹前插，保持瀑布流结构、不破坏后续列平衡
+                    const preBlock = document.createElement("div");
+                    preBlock.className = "masonry-page";
+                    preBlock.innerHTML = renderCardList(newItems);
+                    articleBoxSingle.insertBefore(preBlock, articleBoxSingle.firstChild);
                     renderedArticleCount += newItems.length;
                     bindAllCardEvent();
                     bindVideoPauseObserver();
@@ -439,7 +443,11 @@ function renderPagedList(reset = false){
     const nextCount = Math.min(renderPageNum * PAGE_SIZE, currentArticles.length);
     const appendList = currentArticles.slice(renderedArticleCount, nextCount);
     if(appendList.length > 0){
-        currentArticleBox.insertAdjacentHTML("beforeend", renderCardList(appendList));
+        // 瀑布流：每批次包进独立的 .masonry-page（宽屏下多列），避免追加新内容时整列重排/卡片乱跳
+        const pageBlock = document.createElement("div");
+        pageBlock.className = "masonry-page";
+        pageBlock.innerHTML = renderCardList(appendList);
+        currentArticleBox.appendChild(pageBlock);
         renderedArticleCount = nextCount;
     }
     const remain = currentArticles.length - renderedArticleCount;
