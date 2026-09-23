@@ -4,7 +4,7 @@
 
 当前版本：`4.9 稳定版`
 
-<img width="390" height="848" alt="1" src="https://github.com/user-attachments/assets/84abcdf1-6814-4861-93ec-5bc7740c3c6f" /><img width="392" height="849" alt="5" src="https://github.com/user-attachments/assets/40bf5151-3aab-48f6-a6df-85b507f4d13f" /><img width="391" height="851" alt="4" src="https://github.com/user-attachments/assets/20ebe23a-acf7-4248-9d51-9beedba66ef1" /><img width="391" height="851" alt="3" src="https://github.com/user-attachments/assets/3aaa09a5-3188-46ca-a041-306540ecd3f9" /><img width="390" height="850" alt="2" src="https://github.com/user-attachments/assets/1ddcacfa-09e9-4693-8487-da8833975343" />
+<img width="195" height="424" alt="1" src="https://github.com/user-attachments/assets/84abcdf1-6814-4861-93ec-5bc7740c3c6f" /><img width="195" height="424" alt="2" src="https://github.com/user-attachments/assets/1ddcacfa-09e9-4693-8487-da8833975343" /><img width="195" height="424" alt="3" src="https://github.com/user-attachments/assets/3aaa09a5-3188-46ca-a041-306540ecd3f9" /><img width="195" height="424" alt="4" src="https://github.com/user-attachments/assets/20ebe23a-acf7-4248-9d51-9beedba66ef1" /><img width="195" height="424" alt="5" src="https://github.com/user-attachments/assets/40bf5151-3aab-48f6-a6df-85b507f4d13f" />
 
 ## 功能特点
 
