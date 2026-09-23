@@ -743,36 +743,40 @@ body{
     .bottom-nav-bar{
         max-width: min(100%, 1024px);
     }
-    /* 推文流双列瀑布流：信息密度翻倍，充分利用近方屏 */
+    /* 推文流：真·瀑布流（masonry）。
+       横屏/竖屏卡片高度不同，用多列分栏让各自独立成列，不再因网格“等行高”
+       而在矮卡（横屏）下方留白；每批次用独立 .masonry-page 包裹，追加新内容时
+       不会整列重排、卡片乱跳。 */
     #articleBox,
     #articleBoxSingle{
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        column-gap: 12px;
-        row-gap: 12px;
-        align-items: start;
+        display: block;
         padding: 0 12px;
     }
-    /* 双列下卡片改为独立卡片样式，避免底边线在两列间断裂 */
+    .masonry-page{
+        column-count: 2;
+        column-gap: 12px;
+    }
+    /* 卡片独立样式 + 禁止被分栏截断，形成连续瀑布流 */
     .tweet-card{
         border-bottom: none;
         border-radius: 10px;
         border: 1px solid #ececec;
         box-shadow: 0 1px 3px rgba(0,0,0,.06);
-        margin-bottom: 0;
+        margin-bottom: 12px;
+        break-inside: avoid;
     }
-    /* 提示/空状态/加载更多 跨整行，避免挤在某一列 */
-    #articleBox > .load-more-tip,
-    #articleBox > .bottom-tip,
-    #articleBox > .empty-tip,
-    #articleBox > .error-tip,
-    #articleBox > .update-tip-bar,
-    #articleBoxSingle > .load-more-tip,
-    #articleBoxSingle > .bottom-tip,
-    #articleBoxSingle > .empty-tip,
-    #articleBoxSingle > .error-tip,
-    #articleBoxSingle > .update-tip-bar{
-        grid-column: 1 / -1;
+    /* 收藏 / 搜索：一次性渲染，直接多列瀑布流 */
+    #favPanel,
+    #searchResultBox{
+        column-count: 2;
+        column-gap: 12px;
+        padding: 0 12px;
+    }
+    /* 多列容器中需跨整行的元素（提示/空状态），避免被挤到某一列 */
+    .masonry-page > .empty-tip,
+    #favPanel > .empty-tip, #searchResultBox > .empty-tip,
+    #favPanel > .load-more-tip, #favPanel > .bottom-tip{
+        column-span: all;
     }
 }
 </style>
