@@ -1,8 +1,8 @@
 # RSS媒体阅读器
 
-一个单文件版本地 RSS 媒体阅读器，适合个人自用。页面直接在浏览器中运行，支持添加 RSS 订阅源、聚合展示图文/视频内容、收藏、搜索、已读隐藏、订阅导入导出，以及针对部分国外媒体资源的代理播放。
+一个轻量级本地 RSS 媒体阅读器，适合个人自用。前端为纯静态页面（浏览器直接运行），后端代理由 Cloudflare Pages Functions 提供。支持添加 RSS 订阅源、聚合展示图文 / 视频内容、收藏、搜索、已读隐藏、订阅导入导出，以及针对部分国外媒体资源的代理播放。
 
-当前版本：`Beta4.5`
+当前版本：`4.9 稳定版`
 
 ## 功能特点
 
@@ -10,25 +10,25 @@
 - 支持图片类 RSS 和视频类 RSS
 - 支持一键导入、导出订阅源 JSON
 - 首页聚合展示所有订阅内容，并按发布时间从新到旧排列
-- 支持图片宫格展示和大图预览
+- 支持图片宫格展示和大图预览（滑动切换）
 - 支持 MP4 视频播放
 - 支持 m3u8 视频播放，基于 HLS.js
-- MP4 和 m3u8 使用统一的自定义控制栏
-- 支持播放 / 暂停、进度条、剩余时长、静音、全屏
+- MP4 和 m3u8 使用统一的自定义控制栏（播放 / 暂停、进度条、缓冲指示、剩余时长、静音、全屏）
 - 支持收藏内容
 - 支持关键词搜索标题
 - 支持已读隐藏，避免下次打开重复显示已读内容
 - 支持本地文章缓存，二次打开可先显示上次内容
 - 支持 RSS 分批加载，减少大量订阅源同时请求造成的卡顿
 - 支持推特 / X / twimg 等指定域名媒体资源代理
+- 视频缓冲自愈：HLS 致命错误自动恢复，显著降低"播放几秒自动暂停 / 有时长不播"的概率
 
 ## 使用方式
 
-直接打开 `index.html` 即可使用。
+直接打开 `index.html` 即可使用（需配合部署后的 Functions 代理才能播放被墙的媒体资源）。
 
-如果部署到 Cloudflare Pages、GitHub Pages 或其他静态网页服务，也可以直接访问部署后的页面。
+如果部署到 Cloudflare Pages、GitHub Pages 或其他静态网页服务，也可以直接访问部署后的页面。本项目使用 Cloudflare Pages Functions 作为 RSS 拉取与媒体代理后端，需绑定 Cloudflare 账号并配置 Pages 项目。
 
-首次使用时，在“添加订阅”页面粘贴 RSS 地址，然后选择订阅类型：
+首次使用时，在"添加订阅"页面粘贴 RSS 地址，然后选择订阅类型：
 
 - 图片类 RSS
 - 视频类 RSS
@@ -74,7 +74,6 @@ const MEDIA_PROXY_ENDPOINT = "https://rss-twitter-viewer.pages.dev/media-proxy";
 
 > 安全：写入接口 `/proxy-config` 需要管理令牌，令牌在服务端环境变量 `PROXY_ADMIN_TOKEN` 中设置，界面里输入的令牌须与它一致；未设置则拒绝写入，防止被当开放代理滥用。
 
-
 普通国内图片、MP4、m3u8 链接会优先由浏览器直接加载。匹配到上述域名的媒体链接会通过 `media-proxy` 代理。
 
 Twitter 订阅通过 Nitter 实例（asia.aguea.com）获取推文内容，媒体链接自动替换为 Twitter 官方 CDN 域名（`pbs.twimg.com`、`video.twimg.com`），通过代理加载以获得更快的速度。
@@ -84,10 +83,20 @@ Twitter 订阅通过 Nitter 实例（asia.aguea.com）获取推文内容，媒�
 m3u8 视频使用 HLS.js 播放，已针对代理视频场景优化：
 
 - 关闭低延迟模式（`lowLatencyMode: false`），使用标准点播缓冲策略
-- 缓冲长度提升至 60 秒（`maxBufferLength: 60`），最大 120 秒，减少长视频卡顿
+- 缓冲长度 `maxBufferLength: 30` 秒，回退缓冲 `backBufferLength: 30` 秒，平衡卡顿与内存占用（旧版为 60 秒，已下调以减少长视频内存压力）
 - 自适应码率从低级别开始（`startLevel: -1`），快速起播避免黑屏
-- 根据播放器尺寸自动限制最高分辨率（`capLevelToPlayerSize: true`）
+- 根据播放器尺寸自动限制最高分辨率（`capLevelToPlayerSize: true`，最高 720p），避免高码率拖垮弱网
+- **致命错误自愈**：NETWORK_ERROR 自动 `startLoad()`、MEDIA_ERROR 自动 `recoverMediaError()`，最多重试 3 次，显著降低"播几秒自动暂停 / 有时长不播"的概率
+- **缓冲遮罩**：加载等待时显示半透明"缓冲中"提示，区分"正在缓冲"与"真卡死"
 - 代理视频采用两次点击模式：第一次加载 manifest，第二次点击播放
+
+## 布局与适配
+
+- 移动端**单列**布局，卡片宽度自适应，无双列瀑布流
+- 折叠屏展开态也以单列呈现，避免"左侧优先加载"带来的割裂感与卡片乱跳
+- 顶部 / 底部悬浮栏为磨砂玻璃固定栏，普通手机上自动贴合屏幕边缘
+
+> 说明：早期版本曾尝试折叠屏双列瀑布流（横竖屏卡片高度差会导致留白 / 乱跳），经使用验证体验不佳，已在 `4.9` 稳定版中取消，回归简洁稳定的单列。
 
 ## 性能优化
 
@@ -107,6 +116,16 @@ const RSS_CONCURRENCY = 5;
 ```
 
 如果订阅源较多但手机性能一般，建议保持在 `3` 到 `5` 之间。
+
+## 部署说明（Cloudflare Pages）
+
+1. Fork / 克隆本仓库到 GitHub
+2. 在 Cloudflare Pages 新建项目，连接该仓库（构建命令留空，输出目录按 Pages 默认即可）
+3. 配置 KV 命名空间 `RSS_CACHE`（用于持久化用户自定义代理域名与备份数据）
+4. 设置环境变量 `PROXY_ADMIN_TOKEN`（代理域名管理写入接口的鉴权令牌）
+5. 部署后，`functions/` 下的 Pages Functions 自动生效，`_redirects` 负责把 `/media-proxy`、`/rss-proxy`、`/download-backup` 等路径路由到对应 Function
+
+> 注意：`functions/` 为 Cloudflare Pages Functions（非 Workers），共用同一运行时与 CPU 限制；媒体代理为纯流式转发，不做额外转码。
 
 ## 当前限制
 
@@ -129,8 +148,20 @@ const RSS_CONCURRENCY = 5;
 ## 文件说明
 
 ```text
-index.html   主程序文件，包含页面结构、样式和全部脚本
-README.md    项目说明文档
+README.md               项目说明文档
+_redirects              Cloudflare Pages 路由规则（将代理路径指向 Functions）
+index.html              前端主页面（页面结构 + 样式 + 引入 js/ 下的脚本）
+functions/              后端代理（Cloudflare Pages Functions）
+    media-proxy.js      媒体资源代理（m3u8 / MP4 / 图片 流式转发 + m3u8 分片改写）
+    rss-proxy.js        RSS 拉取代理
+    twitter-rss.js      Twitter / X 订阅内容获取（Nitter 实例）
+    download-backup.js  数据备份下载
+js/                     前端脚本
+    core.js             数据层（订阅 / 收藏 / 已读 / localStorage）
+    media.js            视频播放（HLS 配置、自定义控制栏、缓冲自愈）
+    feed.js             订阅加载与卡片渲染（分批追加、增量前插）
+    app.js              页面交互与路由
+    scrolller-test.js   Scrolller 测试用脚本（调试）
 ```
 
 ## 后续可优化方向
@@ -139,7 +170,8 @@ README.md    项目说明文档
 - 将卡片事件改为事件委托，减少重复绑定
 - 增加 Cloudflare KV 缓存 RSS，减少弱网环境下的实时请求
 - 支持多设备同步收藏和已读记录
-- 优化 m3u8 代理，对分片链接进行自动改写
+- 视频清晰度手动切换（360 / 480 / 720）
+- 自托管 HLS.js，去除对 unpkg CDN 的依赖
 
 ## 免责声明
 
