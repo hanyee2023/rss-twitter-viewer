@@ -697,7 +697,7 @@ function startHlsVideo(video){
         const hls = new Hls({
             enableWorker: true,
             lowLatencyMode: false,
-            maxBufferLength: 30,
+            maxBufferLength: 60,
             backBufferLength: 30,
             capLevelToPlayerSize: true,
             storage: null,
