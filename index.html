@@ -3,7 +3,63 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>RSS媒体阅读器</title>
-<script src="https://unpkg.com/hls.js@1.5.7/dist/hls.min.js"></script>
+<!-- 早期错误收集器（5.0.1）：必须放在所有脚本之前，包括下面的 hls.js。
+     原因：hls.js 从 CDN 加载，且 core/media/feed/app 四个脚本的顶层执行，
+     都发生在 log.js 注册 window 错误监听之前。若 CDN 不可达或脚本崩溃，
+     运行日志里将一片空白、无从排查。这里先无条件把错误暂存内存，
+     等 log.js 就绪后由 window.__setErrorSink 回灌进日志。 -->
+<script>
+(function(){
+    var MAX = 50;                    // 内存暂存上限，防极端情况下刷屏
+    var buf = window.__earlyErrors = [];
+    var sink = null;                 // log.js 就绪后接管
+
+    function stamp(rec){
+        rec.where = rec.where ? ("启动期 " + rec.where) : "启动期";
+        return rec;
+    }
+    function push(rec){
+        try{
+            if(sink){ sink(rec); return; }
+            buf.push(stamp(rec));
+            if(buf.length > MAX) buf.shift();
+        }catch(e){}
+    }
+    // 供外部主动上报启动期错误（如 hls.js 的 script onerror）
+    window.__reportEarlyError = function(msg, where){
+        push({ msg: String(msg == null ? "" : msg), where: where || "" });
+    };
+    // log.js 调用：接管后续错误，并回灌已暂存记录（按发生顺序）
+    window.__setErrorSink = function(fn){
+        sink = fn;
+        try{
+            var pending = buf.splice(0, buf.length);
+            for(var i = 0; i < pending.length; i++){
+                try{ fn(pending[i]); }catch(e){}
+            }
+        }catch(e){}
+    };
+
+    window.addEventListener("error", function(ev){
+        try{
+            var msg = (ev && ev.message) ? ev.message : "未知错误";
+            if(ev && ev.filename){
+                msg += " (" + (String(ev.filename).split("/").pop() || "") +
+                       (ev.lineno ? (":" + ev.lineno) : "") + ")";
+            }
+            push({ msg: msg, where: "前台" });
+        }catch(e){}
+    });
+    window.addEventListener("unhandledrejection", function(ev){
+        try{
+            var msg = "未处理的异步异常";
+            if(ev && ev.reason){ msg = ev.reason.message || String(ev.reason); }
+            push({ msg: "未处理异常: " + msg, where: "前台" });
+        }catch(e){}
+    });
+})();
+</script>
+<script src="https://unpkg.com/hls.js@1.5.7/dist/hls.min.js" onerror="window.__reportEarlyError && window.__reportEarlyError('关键依赖 hls.js 加载失败（CDN 不可达或超时），所有 m3u8 视频将无法播放', '依赖')"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto;}
 html {
