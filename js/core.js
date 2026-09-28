@@ -487,9 +487,10 @@ function loadArticleCacheFromStorage(){
 }
 
 function saveArticleCacheToStorage(list){
+    const full = list || [];
     const trySave = (limit) => {
         try{
-            const slimList = (list || []).slice(0, limit);
+            const slimList = full.slice(0, limit);
             localStorage.setItem(ARTICLE_CACHE_KEY, JSON.stringify(slimList));
             return true;
         }catch(e){
@@ -501,12 +502,62 @@ function saveArticleCacheToStorage(list){
     // 改为渐进降档；保留 800 档可避免“容量刚好只够 800 时反而掉到 600”的回退。
     const levels = [ARTICLE_CACHE_LIMIT, 1200, 900, 800, 600, 400, 200];
     for(const limit of levels){
-        if(trySave(limit)) return;
+        if(trySave(limit)){
+            maybeEnforceRssCacheBudget();
+            // 返回「本地实际写入的条数」：小于 full.length 说明触发了降档（配额不足）
+            return Math.min(full.length, limit);
+        }
     }
     // 全部失败，清理旧的 RSS 源缓存腾出空间后最后试一次
     cleanExpiredRssCache();
-    if(!trySave(50)){
-        console.warn("保存文章缓存失败：localStorage 容量不足，已尝试降级");
+    if(trySave(50)){
+        maybeEnforceRssCacheBudget();
+        return Math.min(full.length, 50);
+    }
+    console.warn("保存文章缓存失败：localStorage 容量不足，已尝试降级");
+    return 0;
+}
+
+// ===== RSS 源缓存总预算（5.0.1）=====
+// 源缓存与文章缓存是两份副本，只有两者合计才是真实的本地占用。
+// 除 app.js 的「单源条数上限」外，这里再做一道**全局**预算：
+// 所有源缓存的条目合计不得超过 RSS_CACHE_TOTAL_ITEM_BUDGET，超出则按“最旧优先”逐个删除。
+const RSS_CACHE_TOTAL_ITEM_BUDGET = 900;
+let rssCacheBudgetCheckedAt = 0;
+
+function maybeEnforceRssCacheBudget(){
+    // 节流：30 秒内最多整理一次，避免每次保存都遍历解析全部源缓存
+    const now = Date.now();
+    if(now - rssCacheBudgetCheckedAt < 30000) return;
+    rssCacheBudgetCheckedAt = now;
+    try{
+        const entries = [];
+        let total = 0;
+        for(let i = 0; i < localStorage.length; i++){
+            const key = localStorage.key(i);
+            if(!key || !key.startsWith(RSS_CACHE_PREFIX)) continue;
+            let count = 0, t = 0;
+            try{
+                const data = JSON.parse(localStorage.getItem(key) || "{}");
+                count = Array.isArray(data.items) ? data.items.length : 0;
+                t = data.time || 0;
+            }catch(e){
+                localStorage.removeItem(key); // 损坏的缓存直接清理
+                continue;
+            }
+            entries.push({ key: key, count: count, time: t });
+            total += count;
+        }
+        if(total <= RSS_CACHE_TOTAL_ITEM_BUDGET) return;
+        // 越旧的源缓存价值越低（仅在对应源拉取失败时用于回退），优先删除
+        entries.sort((a, b) => a.time - b.time);
+        for(const item of entries){
+            if(total <= RSS_CACHE_TOTAL_ITEM_BUDGET) break;
+            localStorage.removeItem(item.key);
+            total -= item.count;
+        }
+    }catch(e){
+        console.warn("RSS 源缓存预算整理失败：", e);
     }
 }
 

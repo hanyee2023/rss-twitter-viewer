@@ -278,11 +278,20 @@ imgPreviewMask.addEventListener("click", function(e){
 const RSS_CACHE_PREFIX = "rss_cache_";
 const RSS_CACHE_TTL = 24 * 60 * 60 * 1000; // 24小时
 
+// 单个订阅源的本地缓存条数上限（5.0.1 新增）。
+// 为什么需要：RSS 源缓存与「文章缓存」是两份**独立副本** —— 同一批条目会被存两遍。
+// 源缓存原本保存该源的全部条目且 parseRSS 不限条数，体积往往与文章缓存相当，
+// 是 localStorage 配额最主要的浪费来源。
+// 源缓存只用于「该源拉取失败时的回退展示」，保留最新 N 条已完全够用。
+const RSS_CACHE_ITEMS_PER_FEED = 120;
+
 function saveRssCache(url, items){
+    // 统一裁到上限，两处 setItem 都遵守
+    const slimItems = (items || []).slice(0, RSS_CACHE_ITEMS_PER_FEED);
     try{
         const key = RSS_CACHE_PREFIX + url;
         localStorage.setItem(key, JSON.stringify({
-            items: items,
+            items: slimItems,
             time: Date.now()
         }));
     }catch(e){
@@ -291,7 +300,7 @@ function saveRssCache(url, items){
         try{
             const key = RSS_CACHE_PREFIX + url;
             localStorage.setItem(key, JSON.stringify({
-                items: items,
+                items: slimItems,
                 time: Date.now()
             }));
         }catch(e2){

@@ -52,6 +52,8 @@
         failCount: snap.failCount || 0,
         blockedCount: snap.blockedCount || 0,
         hiddenCount: snap.hiddenCount || 0,
+        // 本地实际写入条数（容量不足触发降档时 < itemCount）
+        savedCount: snap.savedCount || 0,
         source: snap.source || ""
       });
       writeReport(todayKey(), r);
@@ -109,9 +111,83 @@
     });
   }
 
+  // ---------- 本地存储读数（5.0.1）----------
+  // 目的：一眼看出「条目数变少」是**源本身没给够**，还是**本地配额被砍（降档）**。
+  //   · 已存 N 条  = localStorage 里 rss_article_cache 的真实条数（可能是降档后的结果）
+  //   · 来源缓存   = 各订阅源回退缓存的合计条数（另一份副本，与文章缓存共享 5MB 配额）
+  //   · 本站占用   = 本域名下所有 localStorage 键（UTF-16 计费，1 字符 = 2 字节）的总和
+  //   · 浏览器上限 = navigator.storage.estimate() 给出的实际可用配额
+  function fmtMB(bytes) {
+    if (!bytes && bytes !== 0) return "—";
+    const mb = bytes / 1024 / 1024;
+    return mb >= 1 ? (mb.toFixed(1) + " MB") : (Math.round(bytes / 1024) + " KB");
+  }
+
+  function measureStorage() {
+    const out = { articleCount: 0, articleBytes: 0, rssFeedCount: 0, rssItemCount: 0, appBytes: 0, allBytes: 0 };
+    try {
+      const raw = localStorage.getItem("rss_article_cache") || "[]";
+      out.articleBytes = raw.length * 2;
+      try {
+        const arr = JSON.parse(raw);
+        out.articleCount = Array.isArray(arr) ? arr.length : 0;
+      } catch (e) { out.articleCount = 0; }
+    } catch (e) { /* ignore */ }
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k) continue;
+        const v = localStorage.getItem(k) || "";
+        const bytes = (k.length + v.length) * 2;
+        out.allBytes += bytes;
+        if (k.indexOf("rss_cache_") === 0) {
+          out.rssFeedCount++;
+          try {
+            const data = JSON.parse(v);
+            out.rssItemCount += (data && Array.isArray(data.items)) ? data.items.length : 0;
+          } catch (e) { /* ignore */ }
+        }
+      }
+      // 本应用自身的键：rss_* / rsslog:* / local_rss_*（含日志报告）
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k) continue;
+        if (/^(rss_|rsslog:|local_rss_)/.test(k)) {
+          out.appBytes += (k.length + (localStorage.getItem(k) || "").length) * 2;
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return out;
+  }
+
+  function renderStorageBar() {
+    const box = el("logStorage");
+    if (!box) return;
+    const m = measureStorage();
+    // 文章缓存是否被降档：与全局上限对比（ARTICLE_CACHE_LIMIT 定义在 core.js，同页共享）
+    const limit = (typeof ARTICLE_CACHE_LIMIT !== "undefined") ? ARTICLE_CACHE_LIMIT : 1500;
+    let ratioNote = "";
+    if (m.articleCount > 0 && m.articleCount < limit) {
+      ratioNote = ' <span class="ls-warn">（低于上限 ' + limit + '，可能已被配额降档）</span>';
+    }
+    box.innerHTML =
+      '<div class="ls-line">本地已存 <b>' + m.articleCount + '</b> 条 / ' + fmtMB(m.articleBytes) + ratioNote + '</div>' +
+      '<div class="ls-line ls-sub">来源缓存 ' + m.rssFeedCount + ' 个源 ｜ 合计 ' + m.rssItemCount + ' 条（与文章缓存共享同一配额）</div>' +
+      '<div class="ls-line ls-sub">本站占用 ' + fmtMB(m.appBytes) + ' ｜ 本域名全部键 ' + fmtMB(m.allBytes) + ' <span id="logQuotaText"></span></div>';
+    // 浏览器实际配额（异步、失败则忽略）
+    if (navigator.storage && navigator.storage.estimate) {
+      navigator.storage.estimate().then(function (est) {
+        const t = el("logQuotaText");
+        if (!t || !est || !est.quota) return;
+        t.textContent = "｜ 浏览器上限 " + fmtMB(est.quota);
+      }, function () { });
+    }
+  }
+
   function renderList() {
     const box = el("logList");
     if (!box) return;
+    renderStorageBar();
     const reports = listReports();
     if (reports.length === 0) {
       box.innerHTML = '<div class="empty-tip">暂无日志报告</div>';
@@ -151,6 +227,7 @@
           " / 已读 " + u.readCount + " / 未读 " + u.unreadCount +
           " / 加载失败 " + u.failCount +
           " / 屏蔽 " + (u.blockedCount || 0) + " / 隐藏 " + (u.hiddenCount || 0) +
+          " / 本地存 " + (u.savedCount || 0) +
           (u.source ? (" / 来源:" + u.source) : "")
         );
       });
@@ -189,7 +266,8 @@
           '<div class="ld-time">' + escapeHtml(u.time) + (u.source ? (" · " + escapeHtml(u.source)) : "") + '</div>' +
           '<div class="ld-stats">条目 ' + u.itemCount + ' ｜ 已读 ' + u.readCount +
           ' ｜ 未读 ' + u.unreadCount + ' ｜ 失败 ' + u.failCount +
-          ' ｜ 屏蔽 ' + (u.blockedCount || 0) + ' ｜ 隐藏 ' + (u.hiddenCount || 0) + '</div>' +
+          ' ｜ 屏蔽 ' + (u.blockedCount || 0) + ' ｜ 隐藏 ' + (u.hiddenCount || 0) +
+          ' ｜ 本地存 ' + (u.savedCount || 0) + '</div>' +
           '</div></div>';
       });
     }
@@ -319,6 +397,8 @@
     markFail: markFail,
     getAndResetFail: getAndResetFail,
     renderList: renderList,
+    renderStorage: renderStorageBar,
+    measureStorage: measureStorage,
     exportAll: exportAll,
     deleteAllReports: deleteAllReports,
     onNewDay: function () { renderList(); }

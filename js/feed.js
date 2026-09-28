@@ -206,7 +206,26 @@ async function refreshAllRSSWithLock(){
     if(rssRefreshPromise) return rssRefreshPromise;
     rssRefreshPromise = (async ()=>{
         const data = await loadAllRSS();
+        // 关键修复：刷新返回空（如 Twitter 代理暂时失败 / 被限流）时，不要清空已有本地缓存。
+        // 否则一次瞬时失败会抹掉全部文章 → 主页空白，且切回主页后卡在空快照里。
+        // 仅当确实拉到了数据，才覆盖缓存；拉取失败则保留旧缓存，仅更新刷新时间戳。
+        const isEmptyResult = (data.length === 0 && localCacheArticles.length > 0);
+        // 本地实际写入条数：容量不足时 saveArticleCacheToStorage 会逐级降档，
+        // 该值会低于 cacheData.length —— 日志里用它区分“源没给够”和“配额被砍”。
+        let savedCount = 0;
+        if(isEmptyResult){
+            lastRefreshTime = Date.now();
+            localStorage.setItem(LAST_REFRESH_KEY, String(lastRefreshTime));
+        }else{
+            const cacheData = data.slice(0, ARTICLE_CACHE_LIMIT);
+            allArticles = cacheData;
+            localCacheArticles = [...cacheData];
+            savedCount = saveArticleCacheToStorage(cacheData);
+            lastRefreshTime = Date.now();
+            localStorage.setItem(LAST_REFRESH_KEY, String(lastRefreshTime));
+        }
         // —— 运行日志（5.0）：记录本次刷新快照（更新时间点/条目/已读/未读/加载失败）——
+        // 注意：快照放在落盘之后，因此 itemCount 是**本次刷新后**的条目数（旧版记的是刷新前的旧值）。
         try {
             if (window.AppLog) {
                 const arts = (typeof localCacheArticles !== "undefined") ? localCacheArticles : [];
@@ -226,25 +245,19 @@ async function refreshAllRSSWithLock(){
                     failCount: failCount,
                     blockedCount: blockedCount,
                     hiddenCount: hiddenCount,
+                    savedCount: savedCount,
                     source: "主页刷新"
                 });
             }
         } catch (e) { /* 日志写入失败不影响正常刷新 */ }
-        // 关键修复：刷新返回空（如 Twitter 代理暂时失败 / 被限流）时，不要清空已有本地缓存。
-        // 否则一次瞬时失败会抹掉全部文章 → 主页空白，且切回主页后卡在空快照里。
-        // 仅当确实拉到了数据，才覆盖缓存；拉取失败则保留旧缓存，仅更新刷新时间戳。
-        if(data.length === 0 && localCacheArticles.length > 0){
-            lastRefreshTime = Date.now();
-            localStorage.setItem(LAST_REFRESH_KEY, String(lastRefreshTime));
-            return localCacheArticles;
-        }
-        const cacheData = data.slice(0, ARTICLE_CACHE_LIMIT);
-        allArticles = cacheData;
-        localCacheArticles = [...cacheData];
-        saveArticleCacheToStorage(cacheData);
-        lastRefreshTime = Date.now();
-        localStorage.setItem(LAST_REFRESH_KEY, String(lastRefreshTime));
-        return cacheData;
+        // 若此刻正停留在日志页，同步刷新「本地存储读数」条
+        try {
+            if (window.AppLog && AppLog.renderStorage &&
+                typeof pageLog !== "undefined" && pageLog && pageLog.style.display !== "none") {
+                AppLog.renderStorage();
+            }
+        } catch (e) { /* ignore */ }
+        return localCacheArticles;
     })();
     try{
         return await rssRefreshPromise;
