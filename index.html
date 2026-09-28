@@ -43,6 +43,8 @@
     window.addEventListener("error", function(ev){
         try{
             var msg = (ev && ev.message) ? ev.message : "未知错误";
+            // 跨域脚本抛错时，浏览器只给无信息的 "Script error."（不含文件名/行号），需注明来源
+            if(/^Script error\.?$/.test(msg)){ msg = "Script error.（跨域脚本抛错，浏览器已隐藏详情）"; }
             if(ev && ev.filename){
                 msg += " (" + (String(ev.filename).split("/").pop() || "") +
                        (ev.lineno ? (":" + ev.lineno) : "") + ")";
@@ -59,7 +61,10 @@
     });
 })();
 </script>
-<script src="https://unpkg.com/hls.js@1.5.7/dist/hls.min.js" onerror="window.__reportEarlyError && window.__reportEarlyError('关键依赖 hls.js 加载失败（CDN 不可达或超时），所有 m3u8 视频将无法播放', '依赖')"></script>
+<!-- hls.js 走 CDN（跨域）。必须加 crossorigin="anonymous"：否则该脚本内部的异常在上报时会被
+     浏览器抹成无任何信息的 "Script error."（不含文件名/行号），日志里完全无法定位。
+     实测 unpkg 返回 Access-Control-Allow-Origin: *，因此加该属性不会导致加载失败。 -->
+<script src="https://unpkg.com/hls.js@1.5.7/dist/hls.min.js" crossorigin="anonymous" onerror="window.__reportEarlyError && window.__reportEarlyError('关键依赖 hls.js 加载失败（CDN 不可达或超时），所有 m3u8 视频将无法播放', '依赖')"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto;}
 html {
