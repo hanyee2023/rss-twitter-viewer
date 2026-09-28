@@ -186,7 +186,7 @@ body{
     overflow-y: auto;
     overflow-x: hidden;
 }
-.page-home,.page-manage,.page-add,.page-fav,.page-search,.page-single{display:none;}
+.page-home,.page-manage,.page-add,.page-fav,.page-search,.page-single,.page-log{display:none;}
 #pageHome,#pageManage,#pageFav,#pageSearch{
     width: 100%;
 }
@@ -731,6 +731,101 @@ body{
     overflow:hidden;
     text-overflow:ellipsis;
 }
+
+/* ===== 运行日志（5.0 新增）===== */
+.page-log{
+    width: 100%;
+    box-sizing: border-box;
+}
+.log-toolbar{
+    display:flex;
+    gap:10px;
+    justify-content:center;
+    padding:12px;
+    position: sticky;
+    top:0;
+    background:#f5f5f5;
+    z-index:5;
+}
+.log-toolbar button{
+    flex:1;
+    max-width:200px;
+    border:none;
+    padding:10px 14px;
+    border-radius:8px;
+    font-size:14px;
+    color:#fff;
+    cursor:pointer;
+}
+#logDeleteAllBtn{background:#c0392b;}
+#logExportBtn{background:#1d9bf0;}
+
+.log-list{margin:0 12px 12px;}
+.log-item{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    background:#fff;
+    border-bottom:1px solid #eee;
+    padding:14px 10px;
+    cursor:pointer;
+}
+.log-item:active{background:#f0f0f0;}
+.log-idx{
+    width:26px;
+    height:26px;
+    flex-shrink:0;
+    border-radius:50%;
+    background:#eef3f8;
+    color:#1d9bf0;
+    font-size:13px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+}
+.log-meta{flex:1;min-width:0;}
+.log-date{font-size:15px;font-weight:600;color:#111;}
+.log-summary{font-size:13px;color:#888;margin-top:2px;}
+.log-arrow{color:#bbb;font-size:22px;flex-shrink:0;}
+
+.log-detail-box{max-width:480px;width:100%;max-height:85vh;overflow-y:auto;}
+.log-detail-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    font-size:16px;
+    font-weight:600;
+    margin-bottom:8px;
+}
+.log-close{
+    border:none;background:transparent;color:#999;
+    font-size:24px;line-height:1;cursor:pointer;padding:0 4px;
+}
+.log-detail-sec-title{
+    font-size:14px;font-weight:600;color:#222;
+    margin:14px 0 6px;padding-left:8px;border-left:3px solid #1d9bf0;
+}
+.log-detail-list{background:#fafafa;border-radius:8px;padding:6px 8px;}
+.log-detail-row{
+    display:flex;gap:8px;padding:8px 4px;border-bottom:1px solid #eee;
+}
+.log-detail-row:last-child{border-bottom:none;}
+.ld-idx{
+    width:22px;height:22px;flex-shrink:0;border-radius:50%;
+    background:#eef3f8;color:#1d9bf0;font-size:12px;
+    display:flex;align-items:center;justify-content:center;
+}
+.ld-body{flex:1;min-width:0;}
+.ld-time{font-size:13px;color:#444;font-weight:600;}
+.ld-stats{font-size:12px;color:#888;margin-top:2px;}
+.ld-msg{font-size:13px;color:#c0392b;margin-top:2px;word-break:break-all;}
+.log-empty{color:#999;font-size:13px;padding:8px 4px;}
+.log-detail-actions{display:flex;gap:10px;margin-top:16px;}
+.log-act-btn{
+    flex:1;border:none;padding:10px;border-radius:8px;font-size:14px;
+    background:#1d9bf0;color:#fff;cursor:pointer;
+}
+.log-act-btn.log-del{background:#c0392b;}
 </style>
 
 </head>
@@ -738,7 +833,7 @@ body{
 <header id="mainHeader">
 <div class="title-wrap">
   <h1 id="pageTitle">RSS媒体阅读器</h1>
-  <span class="beta-tag">4.9</span>
+  <span class="beta-tag">5.0</span>
 </div>
 </header>
 
@@ -792,6 +887,13 @@ body{
             <div id="searchResultBox"></div>
         </div>
     </div>
+    <div class="page-log" id="pageLog" style="display: none;">
+        <div class="log-toolbar">
+            <button id="logDeleteAllBtn">一键删除全部报告</button>
+            <button id="logExportBtn">一键导出报告</button>
+        </div>
+        <div class="log-list" id="logList"><div class="empty-tip">暂无日志报告</div></div>
+    </div>
 </div>
 
 <div class="bottom-nav-bar">
@@ -826,6 +928,15 @@ body{
     <button id="btnFav" class="">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#111111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+        </svg>
+    </button>
+    <button id="btnLog" class="">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#111111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="8" y1="13" x2="16" y2="13"></line>
+            <line x1="8" y1="17" x2="16" y2="17"></line>
+            <line x1="8" y1="9" x2="10" y2="9"></line>
         </svg>
     </button>
 </div>
@@ -885,5 +996,6 @@ body{
 <script src="js/media.js"></script>
 <script src="js/feed.js"></script>
 <script src="js/app.js"></script>
+<script src="js/log.js"></script>
 
 </body></html>
