@@ -376,6 +376,7 @@ const pageAdd = document.getElementById("pageAdd");
 const pageFav = document.getElementById("pageFav");
 const pageSearch = document.getElementById("pageSearch");
 const pageSingle = document.getElementById("pageSingle");
+const pageLog = document.getElementById("pageLog");
 
 const articleBox = document.getElementById("articleBox");
 const articleBoxSingle = document.getElementById("articleBoxSingle");
@@ -390,9 +391,10 @@ const btnManage = document.getElementById("btnManage");
 const btnAdd = document.getElementById("btnAdd");
 const btnFav = document.getElementById("btnFav");
 const btnSearch = document.getElementById("btnSearch");
+const btnLog = document.getElementById("btnLog");
 
 const pageTitle = document.getElementById("pageTitle");
-let allBtns = [btnHome, btnManage, btnAdd, btnFav, btnSearch];
+let allBtns = [btnHome, btnManage, btnAdd, btnFav, btnSearch, btnLog];
 
 const editModal = document.getElementById("editModal");
 const imgPreviewMask = document.getElementById("imgPreviewMask");

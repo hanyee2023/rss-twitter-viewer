@@ -41,6 +41,7 @@ function showPage(targetDom, titleText) {
     pageFav.style.display = "none";
     pageSearch.style.display = "none";
     pageSingle.style.display = "none";
+    pageLog.style.display = "none";
 
     feedPanel.innerHTML = "";
     favPanel.innerHTML = "";
@@ -63,6 +64,7 @@ function showPage(targetDom, titleText) {
     else if (targetDom === pageAdd) btnAdd.classList.add("active");
     else if (targetDom === pageFav) btnFav.classList.add("active");
     else if (targetDom === pageSearch) btnSearch.classList.add("active");
+    else if (targetDom === pageLog) btnLog.classList.add("active");
     // 单源界面不属于任一底部固定 tab，不高亮
 
     if (targetDom === pageHome) {
@@ -108,6 +110,8 @@ function showPage(targetDom, titleText) {
     } else if (targetDom === pageSearch) {
         searchInput.value = "";
         searchResultBox.innerHTML = "";
+    } else if (targetDom === pageLog) {
+        if (window.AppLog) AppLog.renderList();
     } else if (targetDom === pageAdd) {
         renderKeywordList();
     }
@@ -196,11 +200,29 @@ btnManage.onclick = () => showPage(pageManage, "管理订阅");
 btnAdd.onclick = () => showPage(pageAdd, "添加订阅");
 btnFav.onclick = () => showPage(pageFav, "我的收藏");
 btnSearch.onclick = () => showPage(pageSearch, "内容搜索");
+btnLog.onclick = () => showPage(pageLog, "运行日志");
 
 async function refreshAllRSSWithLock(){
     if(rssRefreshPromise) return rssRefreshPromise;
     rssRefreshPromise = (async ()=>{
         const data = await loadAllRSS();
+        // —— 运行日志（5.0）：记录本次刷新快照（更新时间点/条目/已读/未读/加载失败）——
+        try {
+            if (window.AppLog) {
+                const arts = (typeof localCacheArticles !== "undefined") ? localCacheArticles : [];
+                const rset = (typeof readLinkSet !== "undefined") ? readLinkSet : new Set();
+                const itemCount = arts.length;
+                const readCount = arts.filter(a => a && a.link && rset.has(a.link)).length;
+                const failCount = AppLog.getAndResetFail();
+                AppLog.recordUpdate({
+                    itemCount: itemCount,
+                    readCount: readCount,
+                    unreadCount: itemCount - readCount,
+                    failCount: failCount,
+                    source: "主页刷新"
+                });
+            }
+        } catch (e) { /* 日志写入失败不影响正常刷新 */ }
         // 关键修复：刷新返回空（如 Twitter 代理暂时失败 / 被限流）时，不要清空已有本地缓存。
         // 否则一次瞬时失败会抹掉全部文章 → 主页空白，且切回主页后卡在空快照里。
         // 仅当确实拉到了数据，才覆盖缓存；拉取失败则保留旧缓存，仅更新刷新时间戳。

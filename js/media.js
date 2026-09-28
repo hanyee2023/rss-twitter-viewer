@@ -387,6 +387,7 @@ function bindVideoErrorRetry(video){
                 if(msg && !video.dataset.errorShown){
                     video.dataset.errorShown = "1";
                     showToast(msg);
+                    if(window.AppLog) AppLog.recordError("视频加载失败: " + (msg||'').slice(0,140), "媒体");
                 }
             }
             return;
@@ -774,6 +775,7 @@ function startHlsVideo(video){
                 if(video.dataset.userAttempted === "1"){
                     showToast(getHlsErrorMessage(data, streamUrl, info));
                 }
+                if(window.AppLog) AppLog.recordError("HLS播放失败(致命错误自愈已用尽): " + String(getHlsErrorMessage(data, streamUrl, info)||'').slice(0,140), "媒体");
             }
         });
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {

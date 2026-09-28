@@ -352,6 +352,11 @@ async function loadAllRSS(){
                 console.warn(`订阅【${f.name}】拉取失败：`, e.message);
                 const errDesc = describeRssError(e);
                 failedFeeds.push({name: f.name, url: f.url, error: errDesc});
+                // 运行日志（5.0）：记录后台订阅加载失败 + 累加失败计数
+                if(window.AppLog){
+                    AppLog.markFail();
+                    AppLog.recordError(`订阅【${f.name}】加载失败：${errDesc}`, "RSS加载");
+                }
                 // 尝试使用本地缓存
                 const cache = getRssCache(f.url);
                 if(cache && cache.items && cache.items.length > 0){
@@ -861,7 +866,11 @@ document.getElementById("confirmAddTwitter").onclick = function(){
         return;
     }
 
-    const twitterRssUrl = location.origin + "/twitter-rss?user=" + username;
+    // 固定使用官方 Pages 域名（不再依赖 location.origin）。
+    // 旧版曾用 location.origin 拼接，导致经自定义域名 mypear.ccwu.cc 访问时，
+    // 生成的 Twitter RSS 订阅地址也指向该自定义域名；该域名在手机端失效后订阅全部无法加载。
+    // 改为固定官方域名后，无论从哪个域名进入，订阅地址始终可用。
+    const twitterRssUrl = "https://rss-twitter-viewer.pages.dev" + "/twitter-rss?user=" + username;
 
     if (feedList.some(item => item.url === twitterRssUrl)) {
         showToast("该 Twitter 订阅已存在");
