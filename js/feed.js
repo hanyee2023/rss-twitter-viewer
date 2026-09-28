@@ -214,11 +214,18 @@ async function refreshAllRSSWithLock(){
                 const itemCount = arts.length;
                 const readCount = arts.filter(a => a && a.link && rset.has(a.link)).length;
                 const failCount = AppLog.getAndResetFail();
+                // 被屏蔽 / 被隐藏条目统计（仅在日志中体现，不影响列表）：
+                //   blockedCount = 命中「屏蔽关键字」的条目数
+                //   hiddenCount  = 被隐藏的「纯文字推特」条目数（无图/无视频/无 iframe）
+                const blockedCount = arts.filter(a => a && hasBlockedKeyword(getPureText(a.title))).length;
+                const hiddenCount = arts.filter(a => a && a.isTwitterRss && isPureTextItem(a)).length;
                 AppLog.recordUpdate({
                     itemCount: itemCount,
                     readCount: readCount,
                     unreadCount: itemCount - readCount,
                     failCount: failCount,
+                    blockedCount: blockedCount,
+                    hiddenCount: hiddenCount,
                     source: "主页刷新"
                 });
             }

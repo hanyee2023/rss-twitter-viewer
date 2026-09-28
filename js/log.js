@@ -50,6 +50,8 @@
         readCount: snap.readCount || 0,
         unreadCount: snap.unreadCount || 0,
         failCount: snap.failCount || 0,
+        blockedCount: snap.blockedCount || 0,
+        hiddenCount: snap.hiddenCount || 0,
         source: snap.source || ""
       });
       writeReport(todayKey(), r);
@@ -147,7 +149,9 @@
         lines.push(
           (i + 1) + ". [" + u.time + "] 条目 " + u.itemCount +
           " / 已读 " + u.readCount + " / 未读 " + u.unreadCount +
-          " / 加载失败 " + u.failCount + (u.source ? (" / 来源:" + u.source) : "")
+          " / 加载失败 " + u.failCount +
+          " / 屏蔽 " + (u.blockedCount || 0) + " / 隐藏 " + (u.hiddenCount || 0) +
+          (u.source ? (" / 来源:" + u.source) : "")
         );
       });
     }
@@ -184,7 +188,8 @@
           '<div class="ld-body">' +
           '<div class="ld-time">' + escapeHtml(u.time) + (u.source ? (" · " + escapeHtml(u.source)) : "") + '</div>' +
           '<div class="ld-stats">条目 ' + u.itemCount + ' ｜ 已读 ' + u.readCount +
-          ' ｜ 未读 ' + u.unreadCount + ' ｜ 失败 ' + u.failCount + '</div>' +
+          ' ｜ 未读 ' + u.unreadCount + ' ｜ 失败 ' + u.failCount +
+          ' ｜ 屏蔽 ' + (u.blockedCount || 0) + ' ｜ 隐藏 ' + (u.hiddenCount || 0) + '</div>' +
           '</div></div>';
       });
     }
