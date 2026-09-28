@@ -36,6 +36,7 @@ const FORCE_PROXY_HOSTS = [
     "venexa.site",
     "aguea.com",
     "htumeng.com",
+    "btumeng.com",
     "642p.com",
     "tutu1.space",
     "freeshare58.com",
