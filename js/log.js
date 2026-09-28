@@ -116,7 +116,13 @@
   //   · 已存 N 条  = localStorage 里 rss_article_cache 的真实条数（可能是降档后的结果）
   //   · 来源缓存   = 各订阅源回退缓存的合计条数（另一份副本，与文章缓存共享 5MB 配额）
   //   · 本站占用   = 本域名下所有 localStorage 键（UTF-16 计费，1 字符 = 2 字节）的总和
-  //   · 浏览器上限 = navigator.storage.estimate() 给出的实际可用配额
+  //   · 已用 / 上限 = 本域名全部键 vs localStorage 硬上限（约 5MB，见下方常量）
+  //
+  // 【重要】navigator.storage.estimate() 给出的 quota 是**大容量存储层**（IndexedDB / Cache /
+  // OPFS）的配额，按磁盘总容量折算（Chrome 通行为总盘约 60%，Chrome 133+ 起甚至会返回
+  // "usage + 10GiB" 这样的公式化假值）。它与 localStorage 毫无关系，**不能当作 localStorage
+  // 的上限**：本层上限恒为约 5MB/origin，写满照样会抛 QuotaExceededError、触发降档。
+  const LOCAL_STORAGE_BUDGET_BYTES = 5 * 1024 * 1024; // 保守口径：按 UTF-16 字节计（若浏览器按 code unit 计，则可存约两倍）
   function fmtMB(bytes) {
     if (!bytes && bytes !== 0) return "—";
     const mb = bytes / 1024 / 1024;
@@ -170,17 +176,32 @@
     if (m.articleCount > 0 && m.articleCount < limit) {
       ratioNote = ' <span class="ls-warn">（低于上限 ' + limit + '，可能已被配额降档）</span>';
     }
+    // 本层真实占用率：分母是 localStorage 硬上限（约 5MB），**不是** estimate() 给出的大配额
+    const pct = Math.round(m.allBytes / LOCAL_STORAGE_BUDGET_BYTES * 100);
+    let pctCls = "ls-ok", pctTip = "";
+    if (pct >= 90) {
+      pctCls = "ls-warn";
+      pctTip = ' <span class="ls-warn">（已接近上限，建议先「一键删除全部报告」腾空间）</span>';
+    } else if (pct >= 70) {
+      pctCls = "ls-amber";
+      pctTip = ' <span class="ls-amber">（占用偏高）</span>';
+    }
     box.innerHTML =
       '<div class="ls-line">本地已存 <b>' + m.articleCount + '</b> 条 / ' + fmtMB(m.articleBytes) + ratioNote + '</div>' +
-      '<div class="ls-line ls-sub">来源缓存 ' + m.rssFeedCount + ' 个源 ｜ 合计 ' + m.rssItemCount + ' 条（与文章缓存共享同一配额）</div>' +
-      '<div class="ls-line ls-sub">本站占用 ' + fmtMB(m.appBytes) + ' ｜ 本域名全部键 ' + fmtMB(m.allBytes) + ' <span id="logQuotaText"></span></div>';
-    // 浏览器实际配额（异步、失败则忽略）
+      '<div class="ls-line ls-sub">来源缓存 ' + m.rssFeedCount + ' 个源 ｜ 合计 ' + m.rssItemCount + ' 条</div>' +
+      '<div class="ls-line ls-sub">本地存储已用 <span class="' + pctCls + '">' + fmtMB(m.allBytes) + ' / 上限约 5 MB（' + pct + '%）</span>' + pctTip + '</div>' +
+      '<div class="ls-line ls-sub">本站占用 ' + fmtMB(m.appBytes) + ' ｜ 本域名全部键 ' + fmtMB(m.allBytes) + ' ｜ 大容量配额 <span id="logQuotaText">—</span>（IndexedDB 用，与本层无关）</div>';
+    // 大容量配额：异步取、仅供对照，与上面那条 5MB 上限无关
+    const setBig = function (txt) {
+      const t = el("logQuotaText");
+      if (t) t.textContent = txt;
+    };
     if (navigator.storage && navigator.storage.estimate) {
       navigator.storage.estimate().then(function (est) {
-        const t = el("logQuotaText");
-        if (!t || !est || !est.quota) return;
-        t.textContent = "｜ 浏览器上限 " + fmtMB(est.quota);
-      }, function () { });
+        setBig((est && est.quota) ? fmtMB(est.quota) : "不可用");
+      }, function () { setBig("不可用"); });
+    } else {
+      setBig("不可用");
     }
   }
 
