@@ -61,10 +61,13 @@
     });
 })();
 </script>
-<!-- hls.js 走 CDN（跨域）。必须加 crossorigin="anonymous"：否则该脚本内部的异常在上报时会被
-     浏览器抹成无任何信息的 "Script error."（不含文件名/行号），日志里完全无法定位。
-     实测 unpkg 返回 Access-Control-Allow-Origin: *，因此加该属性不会导致加载失败。 -->
-<script src="https://unpkg.com/hls.js@1.5.7/dist/hls.min.js" crossorigin="anonymous" onerror="window.__reportEarlyError && window.__reportEarlyError('关键依赖 hls.js 加载失败（CDN 不可达或超时），所有 m3u8 视频将无法播放', '依赖')"></script>
+<!-- hls.js 改为「同源自托管」（v1.5.7），文件为 js/hls.min.js。原因：
+     ① 不再依赖 unpkg CDN —— 国内网络下该 CDN 超时/被拦截会导致所有 m3u8 视频无法播放；
+     ② 同源脚本抛错时浏览器不会遮蔽详情，日志里能直接看到文件名与行号；
+     ③ 版本锁定在自己的仓库，不受 CDN 删版本/改内容影响。
+     升级方式：从 https://unpkg.com/hls.js@<版本>/dist/hls.min.js 下载后覆盖 js/hls.min.js，
+     并同步更新本注释里的版本号。 -->
+<script src="js/hls.min.js" onerror="window.__reportEarlyError && window.__reportEarlyError('关键依赖 hls.js 加载失败（文件缺失或服务器错误），所有 m3u8 视频将无法播放', '依赖')"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto;}
 html {
