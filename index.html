@@ -760,6 +760,20 @@ body{
 #logDeleteAllBtn{background:#c0392b;}
 #logExportBtn{background:#1d9bf0;}
 
+.log-storage{
+    margin:0 12px 10px;
+    padding:10px 12px;
+    background:#fff;
+    border-radius:8px;
+    font-size:12px;
+    line-height:1.7;
+    color:#555;
+    word-break:break-all;
+}
+.log-storage b{color:#1d9bf0;font-size:14px;}
+.log-storage .ls-sub{color:#888;}
+.log-storage .ls-warn{color:#c0392b;}
+
 .log-list{margin:0 12px 12px;}
 .log-item{
     display:flex;
@@ -892,6 +906,7 @@ body{
             <button id="logDeleteAllBtn">一键删除全部报告</button>
             <button id="logExportBtn">一键导出报告</button>
         </div>
+        <div class="log-storage" id="logStorage"></div>
         <div class="log-list" id="logList"><div class="empty-tip">暂无日志报告</div></div>
     </div>
 </div>
