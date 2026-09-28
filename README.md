@@ -2,7 +2,7 @@
 
 一个轻量级本地 RSS 媒体阅读器，适合个人自用。前端为纯静态页面（浏览器直接运行），后端代理由 Cloudflare Pages Functions 提供。支持添加 RSS 订阅源、聚合展示图文 / 视频内容、收藏、搜索、已读隐藏、订阅导入导出，以及针对部分国外媒体资源的代理播放。
 
-当前版本：`4.9 稳定版`
+当前版本：`5.0 稳定版`
 
 <img width="195" height="400" alt="1" src="https://github.com/user-attachments/assets/84abcdf1-6814-4861-93ec-5bc7740c3c6f" /><img width="195" height="400" alt="3" src="https://github.com/user-attachments/assets/3aaa09a5-3188-46ca-a041-306540ecd3f9" /><img width="195" height="400" alt="4" src="https://github.com/user-attachments/assets/20ebe23a-acf7-4248-9d51-9beedba66ef1" /><img width="195" height="400" alt="5" src="https://github.com/user-attachments/assets/40bf5151-3aab-48f6-a6df-85b507f4d13f" />
 
@@ -23,6 +23,7 @@
 - 支持 RSS 分批加载，减少大量订阅源同时请求造成的卡顿
 - 支持推特 / X / twimg 等指定域名媒体资源代理
 - 视频缓冲自愈：HLS 致命错误自动恢复，显著降低"播放几秒自动暂停 / 有时长不播"的概率
+- **运行日志（5.0 新增）**：底部新增「日志」标签页，自动记录每日更新（时间点 / 条目数 / 已读 / 未读 / 加载失败数）与前后台错误，支持单条查看、复制、删除，以及一键导出 / 一键清空
 
 ## 使用方式
 
@@ -70,7 +71,14 @@ const RSS_PROXY_ENDPOINTS = [
 const MEDIA_PROXY_ENDPOINT = "https://rss-twitter-viewer.pages.dev/media-proxy";
 ```
 
-默认需要代理的域名（内置，代码写死、UI 中只读）包括 twitter/x/twimg 系、xcancel、niter、redgifs、rsshub.app、phe69、htumeng.com 等。
+默认需要代理的域名（内置，代码写死、UI 中只读）包括 twitter/x/twimg 系、xcancel、niter、redgifs、rsshub.app、phe69、htumeng.com、btumeng.com 等。
+
+> **新增代理域名的正确做法（当前版本无 UI 可编辑）**：必须**同时**修改以下三处、保持完全一致，缺一处就会出现「前端判定直连→跨域失败」或「代理层 403 拒绝」：
+> 1. `js/core.js` 的 `FORCE_PROXY_HOSTS`（决定前端走代理还是直连）
+> 2. `functions/rss-proxy.js` 的 `BUILTIN_RSS_HOSTS`（RSS 代理服务端白名单）
+> 3. `functions/media-proxy.js` 的 `ALLOW_PROXY_HOSTS`（媒体代理服务端白名单）
+>
+> 当前版本的 `rss-proxy.js` 只认内置白名单，**不读取 KV 用户名单**（`proxy_rss_user`），因此靠写入 KV 无法让新域名生效。下面描述的「代理域名」按钮在**本仓库当前版本中尚未实现**，仅作后续规划。
 
 **扩展代理域名不再需要改代码**：在阅读器底部【管理订阅】与【收藏】之间的「代理域名」按钮，打开的是与「收藏 / 添加订阅」一致的全屏管理页（RSS 代理 与 媒体代理 两区之间用绿色分隔线隔开，按钮统一蓝色），可分别给 **RSS 代理** 和 **媒体代理** 增删域名，点「保存并同步」即写入后端 KV（`RSS_CACHE` 命名空间下的 `proxy_rss_user` / `proxy_media_user` 键），前后端自动生效。
 
@@ -80,12 +88,16 @@ const MEDIA_PROXY_ENDPOINT = "https://rss-twitter-viewer.pages.dev/media-proxy";
 
 Twitter 订阅通过 Nitter 实例（asia.aguea.com）获取推文内容，媒体链接自动替换为 Twitter 官方 CDN 域名（`pbs.twimg.com`、`video.twimg.com`），通过代理加载以获得更快的速度。
 
+### 代理域名（5.0 更新）
+
+Twitter 订阅的 RSS 地址现在**固定使用官方 Pages 域名** `https://rss-twitter-viewer.pages.dev`，不再依赖访问时所在的域名。此前曾用 `location.origin` 拼接，若经自定义域名（如 `mypear.ccwu.cc`）访问，生成的 Twitter RSS 订阅地址也会指向该自定义域名；当该自定义域名在手机端失效时，所有 Twitter 订阅将无法加载。固定为官方域名后，无论以哪个域名进入应用，订阅地址始终可用。媒体 / RSS 代理端点（`RSS_PROXY_ENDPOINTS`、`MEDIA_PROXY_ENDPOINT`）本身也始终指向 `rss-twitter-viewer.pages.dev`。
+
 ## m3u8 播放说明
 
 m3u8 视频使用 HLS.js 播放，已针对代理视频场景优化：
 
 - 关闭低延迟模式（`lowLatencyMode: false`），使用标准点播缓冲策略
-- 缓冲长度 `maxBufferLength: 30` 秒，回退缓冲 `backBufferLength: 30` 秒，平衡卡顿与内存占用（旧版为 60 秒，已下调以减少长视频内存压力）
+- 缓冲长度 `maxBufferLength: 60` 秒，回退缓冲 `backBufferLength: 30` 秒。跨境 / 弱网场景下前向缓冲余量越大越抗抖动，故保留 60 秒（曾下调至 30 秒，实测弱网更易卡顿，已回调）
 - 自适应码率从低级别开始（`startLevel: -1`），快速起播避免黑屏
 - 根据播放器尺寸自动限制最高分辨率（`capLevelToPlayerSize: true`，最高 720p），避免高码率拖垮弱网
 - **致命错误自愈**：NETWORK_ERROR 自动 `startLoad()`、MEDIA_ERROR 自动 `recoverMediaError()`，最多重试 3 次，显著降低"播几秒自动暂停 / 有时长不播"的概率
@@ -99,6 +111,18 @@ m3u8 视频使用 HLS.js 播放，已针对代理视频场景优化：
 - 顶部 / 底部悬浮栏为磨砂玻璃固定栏，普通手机上自动贴合屏幕边缘
 
 > 说明：早期版本曾尝试折叠屏双列瀑布流（横竖屏卡片高度差会导致留白 / 乱跳），经使用验证体验不佳，已在 `4.9` 稳定版中取消，回归简洁稳定的单列。
+
+## 运行日志（5.0 新增）
+
+底部导航在「收藏」右侧新增第六个「日志」按钮，点击进入全屏独立标签页。
+
+- **自动记录**：每次进入应用或跨天（00:00）时，自动生成当天（00:01–23:59）的报告；每次首页刷新都会追加一条「更新」记录。
+- **报告列表**：显示序号、日志日期、简洁摘要（更新次数 / 错误条数）。
+- **详情弹窗**：点击某天报告弹出详情，分两部分：
+  - 一、今日更新：每条更新含时间点、条目数、已读数、未读数、加载失败数。
+  - 二、错误记录（前台 / 后台）：每条含时间、来源（如 `RSS加载`、`媒体`、`前台`）、错误内容。
+- **复制 / 删除**：详情底部提供「复制报告」（复制纯文本）与「删除本条」；列表顶部提供「一键删除全部报告」与「一键导出报告」（导出全部日志为 JSON）。
+- **数据存储**：报告存于浏览器 `localStorage`（键名 `rsslog:YYYY-MM-DD`），不依赖账号，仅本机可见。
 
 ## 性能优化
 
@@ -163,6 +187,7 @@ js/                     前端脚本
     media.js            视频播放（HLS 配置、自定义控制栏、缓冲自愈）
     feed.js             订阅加载与卡片渲染（分批追加、增量前插）
     app.js              页面交互与路由
+    log.js              运行日志（自动记录每日更新与前后台错误、列表 / 详情 / 导出）
     scrolller-test.js   Scrolller 测试用脚本（调试）
 ```
 
