@@ -59,13 +59,48 @@
       writeReport(todayKey(), r);
     } catch (e) { /* ignore */ }
   }
+  // —— 跨域脚本错误（浏览器把详情抹成 "Script error."）的处理 ——
+  // 这类错误的 message 不含文件名/行号，无法直接定位。页面里唯一的跨域脚本是 hls.js，且已加
+  // crossorigin（跨域脚本一旦带 CORS 属性，其内部异常就不再被浏览器遮蔽）。所以若日志里仍出现
+  // 被遮蔽的 Script error.，且 hls.js 已正常加载，即可判定抛错方是页面之外的脚本
+  // （浏览器扩展 / 国产浏览器注入 / 运营商注入），与本应用无关。
+  // 既然它与本应用无关、也不影响任何功能，就**直接丢弃不入库**，避免污染日志。
+  // 仅当 hls.js 本次未加载时保留（那种情况确有依赖缺失，值得留意），并按当天同文案折叠计数。
+  function isScriptErrorText(s) { return s.indexOf("Script error.") === 0; }
+  function isHlsLoaded() { return (typeof window.Hls !== "undefined" && !!window.Hls); }
+  function normalizeScriptError() {
+    return "Script error.（跨域脚本抛错，浏览器已隐藏详情；本应用 hls.js " +
+      (isHlsLoaded() ? "已正常加载，故非本应用所致" : "本次未加载，请先确认是否有「依赖加载失败」记录") + "）";
+  }
+
   function recordError(msg, where) {
     try {
+      const raw = String(msg == null ? "" : msg);
+      const isScriptErr = isScriptErrorText(raw);
+      // 判定为「外部脚本噪音」→ 不记录（详见上方注释）
+      if (isScriptErr && isHlsLoaded()) return;
+      const text = isScriptErr ? normalizeScriptError() : raw;
       const r = ensureToday();
+      if (isScriptErr) {
+        // 当天已有同文案 → 只累加次数，不再新增条目
+        for (let i = 0; i < r.errors.length; i++) {
+          const e = r.errors[i];
+          if (!e || !e.msg) continue;
+          if (e.msg === text || e.msg.indexOf(text + "（当日") === 0) {
+            const mm = /（当日第 (\d+) 次）$/.exec(e.msg);
+            const n = mm ? (parseInt(mm[1], 10) + 1) : 2;
+            e.msg = text + "（当日第 " + n + " 次）";
+            e.lastTime = timeStrOf();
+            e.lastTs = Date.now();
+            writeReport(todayKey(), r);
+            return;
+          }
+        }
+      }
       r.errors.push({
         time: timeStrOf(),
         ts: Date.now(),
-        msg: String(msg == null ? "" : msg),
+        msg: text,
         where: where || ""
       });
       writeReport(todayKey(), r);
@@ -111,17 +146,18 @@
     });
   }
 
-  // ---------- 本地存储读数（5.0.1）----------
+  // ---------- 本地存储读数（5.0）----------
   // 目的：一眼看出「条目数变少」是**源本身没给够**，还是**本地配额被砍（降档）**。
   //   · 已存 N 条  = localStorage 里 rss_article_cache 的真实条数（可能是降档后的结果）
   //   · 来源缓存   = 各订阅源回退缓存的合计条数（另一份副本，与文章缓存共享 5MB 配额）
   //   · 本站占用   = 本域名下所有 localStorage 键（UTF-16 计费，1 字符 = 2 字节）的总和
   //   · 已用 / 上限 = 本域名全部键 vs localStorage 硬上限（约 5MB，见下方常量）
   //
-  // 【重要】navigator.storage.estimate() 给出的 quota 是**大容量存储层**（IndexedDB / Cache /
-  // OPFS）的配额，按磁盘总容量折算（Chrome 通行为总盘约 60%，Chrome 133+ 起甚至会返回
-  // "usage + 10GiB" 这样的公式化假值）。它与 localStorage 毫无关系，**不能当作 localStorage
-  // 的上限**：本层上限恒为约 5MB/origin，写满照样会抛 QuotaExceededError、触发降档。
+  // 【为何不再显示 navigator.storage.estimate().quota】它返回的是**大容量存储层**
+  //（IndexedDB / Cache / OPFS）的配额，按磁盘总容量折算（动辄上百 GB，Chrome 133+ 起甚至返回
+  // "usage + 10GiB" 这类公式化假值），与 localStorage 毫无关系；显示出来只会让人误以为
+  // 「还能存 142 GB」。localStorage 本层上限恒为约 5MB/origin，写满照样抛 QuotaExceededError、
+  // 照常触发降档。故 5.0 起移除该项读数。
   const LOCAL_STORAGE_BUDGET_BYTES = 5 * 1024 * 1024; // 保守口径：按 UTF-16 字节计（若浏览器按 code unit 计，则可存约两倍）
   function fmtMB(bytes) {
     if (!bytes && bytes !== 0) return "—";
@@ -190,19 +226,7 @@
       '<div class="ls-line">本地已存 <b>' + m.articleCount + '</b> 条 / ' + fmtMB(m.articleBytes) + ratioNote + '</div>' +
       '<div class="ls-line ls-sub">来源缓存 ' + m.rssFeedCount + ' 个源 ｜ 合计 ' + m.rssItemCount + ' 条</div>' +
       '<div class="ls-line ls-sub">本地存储已用 <span class="' + pctCls + '">' + fmtMB(m.allBytes) + ' / 上限约 5 MB（' + pct + '%）</span>' + pctTip + '</div>' +
-      '<div class="ls-line ls-sub">本站占用 ' + fmtMB(m.appBytes) + ' ｜ 本域名全部键 ' + fmtMB(m.allBytes) + ' ｜ 大容量配额 <span id="logQuotaText">—</span>（IndexedDB 用，与本层无关）</div>';
-    // 大容量配额：异步取、仅供对照，与上面那条 5MB 上限无关
-    const setBig = function (txt) {
-      const t = el("logQuotaText");
-      if (t) t.textContent = txt;
-    };
-    if (navigator.storage && navigator.storage.estimate) {
-      navigator.storage.estimate().then(function (est) {
-        setBig((est && est.quota) ? fmtMB(est.quota) : "不可用");
-      }, function () { setBig("不可用"); });
-    } else {
-      setBig("不可用");
-    }
+      '<div class="ls-line ls-sub">本站占用 ' + fmtMB(m.appBytes) + ' ｜ 本域名全部键 ' + fmtMB(m.allBytes) + '</div>';
   }
 
   function renderList() {
@@ -425,10 +449,10 @@
     onNewDay: function () { renderList(); }
   };
 
-  // ---------- 错误入库（5.0.1）----------
+  // ---------- 错误入库（5.0）----------
   // 正常情况下由 index.html <head> 的「早期错误收集器」统一分发：
   // 它在所有脚本之前就注册了监听，因此还能覆盖 log.js 加载前发生的错误
-  //（例如 hls.js 的 CDN 加载失败、core/media/feed/app 的顶层异常）。
+  //（例如 hls.js 加载失败、core/media/feed/app 的顶层异常）。
   // 若该收集器不存在（例如仍搭配旧版 index.html），则退化为自行注册监听，
   // 功能不受影响 —— 只是拿不到「启动期」的错误。
   function handleCapturedError(rec) {
@@ -444,9 +468,9 @@
     }
     window.addEventListener("error", function (ev) {
       let msg = (ev && ev.message) ? ev.message : "未知错误";
-      // 跨域脚本抛错时，浏览器只给无信息的 "Script error."（不含文件名/行号），需注明来源
-      if (/^Script error\.?$/.test(msg)) msg = "Script error.（跨域脚本抛错，浏览器已隐藏详情）";
-      if (ev && ev.lineno) msg += " (行" + ev.lineno + ")";
+      // 跨域脚本抛错时浏览器只给无信息的 "Script error."（无文件名/行号）：
+      // 保持原样交给 recordError 统一归一化（补「来源判定」文案 + 按天折叠计数），此处不再重复标注。
+      if (msg.indexOf("Script error.") !== 0 && ev && ev.lineno) msg += " (行" + ev.lineno + ")";
       const where = (ev && ev.filename) ? ("前台 " + (String(ev.filename).split("/").pop() || "")) : "前台";
       recordError(msg, where);
     });
