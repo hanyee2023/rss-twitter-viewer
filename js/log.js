@@ -404,15 +404,36 @@
     onNewDay: function () { renderList(); }
   };
 
-  // 前台（页面）未捕获错误自动入库
-  window.addEventListener("error", function (ev) {
-    let msg = (ev && ev.message) ? ev.message : "未知错误";
-    const where = (ev && ev.filename) ? ("前台 " + (String(ev.filename).split("/").pop() || "")) : "前台";
-    recordError(msg + (ev && ev.lineno ? (" (行" + ev.lineno + ")") : ""), where);
-  });
-  window.addEventListener("unhandledrejection", function (ev) {
-    let msg = "未处理的异步异常";
-    try { msg = (ev && ev.reason && (ev.reason.message || ev.reason)) || msg; } catch (e) {}
-    recordError("未处理异常: " + msg, "前台");
-  });
+  // ---------- 错误入库（5.0.1）----------
+  // 正常情况下由 index.html <head> 的「早期错误收集器」统一分发：
+  // 它在所有脚本之前就注册了监听，因此还能覆盖 log.js 加载前发生的错误
+  //（例如 hls.js 的 CDN 加载失败、core/media/feed/app 的顶层异常）。
+  // 若该收集器不存在（例如仍搭配旧版 index.html），则退化为自行注册监听，
+  // 功能不受影响 —— 只是拿不到「启动期」的错误。
+  function handleCapturedError(rec) {
+    if (!rec || !rec.msg) return;
+    recordError(rec.msg, rec.where || "前台");
+  }
+
+  function installErrorCapture() {
+    if (typeof window.__setErrorSink === "function") {
+      // 接管后续错误，并回灌 log.js 加载前暂存的记录
+      window.__setErrorSink(handleCapturedError);
+      return;
+    }
+    window.addEventListener("error", function (ev) {
+      let msg = (ev && ev.message) ? ev.message : "未知错误";
+      if (ev && ev.lineno) msg += " (行" + ev.lineno + ")";
+      const where = (ev && ev.filename) ? ("前台 " + (String(ev.filename).split("/").pop() || "")) : "前台";
+      recordError(msg, where);
+    });
+    window.addEventListener("unhandledrejection", function (ev) {
+      let msg = "未处理的异步异常";
+      try { msg = (ev && ev.reason && (ev.reason.message || ev.reason)) || msg; } catch (e) {}
+      recordError("未处理异常: " + msg, "前台");
+    });
+  }
+
+  // 必须最后调用：此时 ensureToday() 已执行，回灌的记录才有报告可写入
+  installErrorCapture();
 })();
