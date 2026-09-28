@@ -444,6 +444,8 @@
     }
     window.addEventListener("error", function (ev) {
       let msg = (ev && ev.message) ? ev.message : "未知错误";
+      // 跨域脚本抛错时，浏览器只给无信息的 "Script error."（不含文件名/行号），需注明来源
+      if (/^Script error\.?$/.test(msg)) msg = "Script error.（跨域脚本抛错，浏览器已隐藏详情）";
       if (ev && ev.lineno) msg += " (行" + ev.lineno + ")";
       const where = (ev && ev.filename) ? ("前台 " + (String(ev.filename).split("/").pop() || "")) : "前台";
       recordError(msg, where);
