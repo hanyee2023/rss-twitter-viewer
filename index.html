@@ -61,12 +61,12 @@
     });
 })();
 </script>
-<!-- hls.js 改为「同源自托管」（v1.5.7），文件为 js/hls.min.js。原因：
+<!-- hls.js 改为「同源自托管」（v1.7.3），文件为 js/hls.min.js。原因：
      ① 不再依赖 unpkg CDN —— 国内网络下该 CDN 超时/被拦截会导致所有 m3u8 视频无法播放；
      ② 同源脚本抛错时浏览器不会遮蔽详情，日志里能直接看到文件名与行号；
      ③ 版本锁定在自己的仓库，不受 CDN 删版本/改内容影响。
      升级方式：从 https://unpkg.com/hls.js@<版本>/dist/hls.min.js 下载后覆盖 js/hls.min.js，
-     并同步更新本注释里的版本号。 -->
+     并同步更新本注释里的版本号、以及 js/log.js 里的 HLS_BUNDLED_VERSION。 -->
 <script src="js/hls.min.js" onerror="window.__reportEarlyError && window.__reportEarlyError('关键依赖 hls.js 加载失败（文件缺失或服务器错误），所有 m3u8 视频将无法播放', '依赖')"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto;}
@@ -841,6 +841,24 @@ body{
 .log-storage .ls-amber{color:#b7791f;}
 .log-storage .ls-warn{color:#c0392b;}
 
+/* 顶部「代理 / 网络状态」卡片（5.2）：与存储卡片同宽同风格 */
+.log-conn{
+    margin:0 12px 10px;
+    padding:10px 12px;
+    background:#fff;
+    border-radius:8px;
+    font-size:12px;
+    line-height:1.7;
+    color:#444;
+    word-break:break-all;
+}
+.log-conn .conn-sub{color:#888;}
+.log-conn b{color:#1d9bf0;font-size:13px;}
+.log-conn .conn-ok{color:#1a9c4b;font-weight:700;}
+.log-conn .conn-amber{color:#b7791f;}
+.log-conn .conn-err{color:#c0392b;font-weight:700;}
+.log-conn .conn-wait{color:#999;}
+
 .log-list{margin:0 12px 12px;}
 .log-item{
     display:flex;
@@ -877,6 +895,16 @@ body{
 }
 .today-stats{font-size:13px;color:#444;line-height:1.9;padding:4px 2px;}
 .today-stats b{color:#1d9bf0;font-size:14px;}
+/* 提示区：hls.js 有新版本时的高亮卡片 */
+.hls-notice{
+    font-size:13px;color:#8a5a00;line-height:1.9;
+    background:#fff8e6;border:1px solid #f0dfae;border-radius:8px;padding:8px 10px;
+}
+.hls-notice b{color:#c0392b;font-size:14px;}
+.hls-notice code{
+    background:#fff;border:1px solid #eee;border-radius:3px;
+    padding:0 3px;font-size:12px;color:#555;
+}
 .log-detail-head{
     display:flex;
     align-items:center;
@@ -906,6 +934,7 @@ body{
 .ld-body{flex:1;min-width:0;}
 .ld-time{font-size:13px;color:#444;font-weight:600;}
 .ld-stats{font-size:12px;color:#888;margin-top:2px;}
+.ld-stats b{color:#1d9bf0;font-size:14px;font-weight:700;}
 .ld-msg{font-size:13px;color:#c0392b;margin-top:2px;word-break:break-all;}
 .log-empty{color:#999;font-size:13px;padding:8px 4px;}
 .log-detail-actions{display:flex;gap:10px;margin-top:16px;}
@@ -921,7 +950,7 @@ body{
 <header id="mainHeader">
 <div class="title-wrap">
   <h1 id="pageTitle">RSS媒体阅读器</h1>
-  <span class="beta-tag">5.0</span>
+  <span class="beta-tag">5.2</span>
 </div>
 </header>
 
@@ -981,6 +1010,7 @@ body{
             <button id="logCopyBtn">复制报告</button>
             <button id="logExportBtn">导出报告</button>
         </div>
+        <div class="log-conn" id="logConn"></div>
         <div class="log-storage" id="logStorage"></div>
         <div class="log-list" id="logList"></div>
     </div>
