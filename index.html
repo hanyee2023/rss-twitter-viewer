@@ -821,7 +821,8 @@ body{
     color:#fff;
     cursor:pointer;
 }
-#logDeleteAllBtn{background:#c0392b;}
+#logDeleteBtn{background:#c0392b;}
+#logCopyBtn{background:#27ae60;}
 #logExportBtn{background:#1d9bf0;}
 
 .log-storage{
@@ -869,6 +870,13 @@ body{
 .log-arrow{color:#bbb;font-size:22px;flex-shrink:0;}
 
 .log-detail-box{max-width:480px;width:100%;max-height:85vh;overflow-y:auto;}
+/* 5.1：日志页直接展示今日报告（无弹窗）的容器与统计样式 */
+.log-today-box{
+    background:#fff;border-radius:12px;padding:6px 14px 14px;
+    box-shadow:0 1px 4px rgba(0,0,0,.06);
+}
+.today-stats{font-size:13px;color:#444;line-height:1.9;padding:4px 2px;}
+.today-stats b{color:#1d9bf0;font-size:14px;}
 .log-detail-head{
     display:flex;
     align-items:center;
@@ -969,11 +977,12 @@ body{
     </div>
     <div class="page-log" id="pageLog" style="display: none;">
         <div class="log-toolbar">
-            <button id="logDeleteAllBtn">一键删除全部报告</button>
-            <button id="logExportBtn">一键导出报告</button>
+            <button id="logDeleteBtn">删除报告</button>
+            <button id="logCopyBtn">复制报告</button>
+            <button id="logExportBtn">导出报告</button>
         </div>
         <div class="log-storage" id="logStorage"></div>
-        <div class="log-list" id="logList"><div class="empty-tip">暂无日志报告</div></div>
+        <div class="log-list" id="logList"></div>
     </div>
 </div>
 
