@@ -1,6 +1,7 @@
 // ===== log.js (运行日志) =====
-// 记录每日运行报告：今日更新（时间点/条目/已读/未读/失败）+ 前后台错误。
-// 数据存于 localStorage，每天一份（key: rsslog:YYYY-MM-DD），跨天自动开启新报告。
+// 记录当天运行情况：今日更新（本次更新/累计更新/已读/未读/屏蔽/隐藏）+ 前后台错误。
+// 数据存于 localStorage（key: rsslog:YYYY-MM-DD），**只保留当天一份**：
+// 每天跨入新的一天（00:00 起）旧报告自动删除，页面直接展示今日内容，无列表/弹窗。
 (function () {
   "use strict";
 
@@ -128,15 +129,28 @@
     }
     ks.forEach((k) => localStorage.removeItem(k));
   }
+  // 5.1：日志只保留当天一份。每天 00:00 起旧报告自动清除 ——
+  // 实现方式：初始化时 + 跨天检测触发时，把除今天以外的所有 rsslog:* 键全部删除。
+  // （App 没开着跨天也没关系：下次打开页面初始化时同样会清掉。）
+  function purgeOldReports() {
+    const today = todayKey();
+    const ks = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.indexOf(PREFIX) === 0 && k !== today) ks.push(k);
+    }
+    ks.forEach((k) => { try { localStorage.removeItem(k); } catch (e) {} });
+  }
 
-  // 自动生成：初始化 + 每分钟检测跨天（实现“每日00:00起自动开新报告”）
+  // 自动生成：初始化 + 每分钟检测跨天（实现“每日00:00起自动开新报告并删除旧报告”）
   ensureToday();
+  purgeOldReports();
   let _lastDate = dateStrOf();
   setInterval(function () {
     const d = dateStrOf();
-    if (d !== _lastDate) { _lastDate = d; ensureToday(); if (window.AppLog) AppLog.onNewDay(); }
+    if (d !== _lastDate) { _lastDate = d; ensureToday(); purgeOldReports(); if (window.AppLog) AppLog.onNewDay(); }
   }, 60000);
-  document.addEventListener("visibilitychange", function () { if (!document.hidden) ensureToday(); });
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) { ensureToday(); purgeOldReports(); } });
 
   // ---------- UI ----------
   function el(id) { return document.getElementById(id); }
@@ -207,7 +221,7 @@
     if (!box) return;
     const m = measureStorage();
     // 文章缓存是否被降档：与全局上限对比（ARTICLE_CACHE_LIMIT 定义在 core.js，同页共享）
-    const limit = (typeof ARTICLE_CACHE_LIMIT !== "undefined") ? ARTICLE_CACHE_LIMIT : 1500;
+    const limit = (typeof ARTICLE_CACHE_LIMIT !== "undefined") ? ARTICLE_CACHE_LIMIT : 1000;
     let ratioNote = "";
     if (m.articleCount > 0 && m.articleCount < limit) {
       ratioNote = ' <span class="ls-warn">（低于上限 ' + limit + '，可能已被配额降档）</span>';
@@ -217,110 +231,54 @@
     let pctCls = "ls-ok", pctTip = "";
     if (pct >= 90) {
       pctCls = "ls-warn";
-      pctTip = ' <span class="ls-warn">（已接近上限，建议先「一键删除全部报告」腾空间）</span>';
+      pctTip = ' <span class="ls-warn">（已接近上限，建议先点「删除报告」腾空间）</span>';
     } else if (pct >= 70) {
       pctCls = "ls-amber";
       pctTip = ' <span class="ls-amber">（占用偏高）</span>';
     }
     box.innerHTML =
-      '<div class="ls-line">本地已存 <b>' + m.articleCount + '</b> 条 / ' + fmtMB(m.articleBytes) + ratioNote + '</div>' +
-      '<div class="ls-line ls-sub">来源缓存 ' + m.rssFeedCount + ' 个源 ｜ 合计 ' + m.rssItemCount + ' 条</div>' +
+      '<div class="ls-line">文章缓存（多源合并去重后）<b>' + m.articleCount + '</b> 条 / ' + fmtMB(m.articleBytes) + ratioNote + '</div>' +
+      '<div class="ls-line ls-sub">来源缓存 ' + m.rssFeedCount + ' 个源 ｜ 合计 ' + m.rssItemCount + ' 条（各源原始副本，仅供断网回退，与上行不是同一份数据）</div>' +
       '<div class="ls-line ls-sub">本地存储已用 <span class="' + pctCls + '">' + fmtMB(m.allBytes) + ' / 上限约 5 MB（' + pct + '%）</span>' + pctTip + '</div>' +
       '<div class="ls-line ls-sub">本站占用 ' + fmtMB(m.appBytes) + ' ｜ 本域名全部键 ' + fmtMB(m.allBytes) + '</div>';
   }
 
+  // 5.1：取消列表 + 详情弹窗，改为在日志页直接展示今日报告。
+  // 函数名保留 renderList（feed.js 切页时调用它），行为变为渲染当天内容。
   function renderList() {
     const box = el("logList");
     if (!box) return;
     renderStorageBar();
-    const reports = listReports();
-    if (reports.length === 0) {
-      box.innerHTML = '<div class="empty-tip">暂无日志报告</div>';
-      return;
-    }
-    let html = "";
-    reports.forEach(function (r, idx) {
-      const u = r.updates.length, e = r.errors.length;
-      const summary = "更新 " + u + " 次 ｜ 错误 " + e + " 条";
-      html +=
-        '<div class="log-item" data-key="' + r.key + '">' +
-        '<div class="log-idx">' + (idx + 1) + '</div>' +
-        '<div class="log-meta">' +
-        '<div class="log-date">' + escapeHtml(r.date) + '</div>' +
-        '<div class="log-summary">' + summary + '</div>' +
-        '</div>' +
-        '<div class="log-arrow">›</div>' +
+    const r = ensureToday();
+    const updates = r.updates || [];
+    const errors = r.errors || [];
+
+    // 一、今日更新：本次更新 / 累计更新 / 已读 / 未读 / 屏蔽 / 隐藏
+    let uHtml;
+    if (!updates.length) {
+      uHtml = '<div class="log-empty">（今日暂无更新记录，刷新主页后自动生成）</div>';
+    } else {
+      const last = updates[updates.length - 1];
+      uHtml =
+        '<div class="ld-stats today-stats">本次更新 <b>' + last.itemCount + '</b> 条（[' + escapeHtml(last.time) + ']' +
+        (last.source ? (" " + escapeHtml(last.source)) : "") + '）' +
+        ' ｜ 累计更新 ' + updates.length + ' 次' +
+        ' ｜ 已读 <b>' + last.readCount + '</b>' +
+        ' ｜ 未读 <b>' + last.unreadCount + '</b>' +
+        ' ｜ 屏蔽 ' + (last.blockedCount || 0) +
+        ' ｜ 隐藏 ' + (last.hiddenCount || 0) +
+        ((last.savedCount && last.savedCount < last.itemCount)
+          ? ' ｜ <span class="ls-warn">本地存 ' + last.savedCount + '（已被配额降档）</span>'
+          : '') +
         '</div>';
-    });
-    box.innerHTML = html;
-    Array.prototype.forEach.call(box.querySelectorAll(".log-item"), function (item) {
-      item.onclick = function () { openDetail(item.getAttribute("data-key")); };
-    });
-  }
-
-  function buildReportText(r) {
-    const lines = [];
-    lines.push("运行日志报告 " + r.date + "（00:01 - 23:59）");
-    lines.push("================================");
-    lines.push("一、今日更新");
-    if (!r.updates.length) {
-      lines.push("（无更新记录）");
-    } else {
-      r.updates.forEach(function (u, i) {
-        lines.push(
-          (i + 1) + ". [" + u.time + "] 条目 " + u.itemCount +
-          " / 已读 " + u.readCount + " / 未读 " + u.unreadCount +
-          " / 加载失败 " + u.failCount +
-          " / 屏蔽 " + (u.blockedCount || 0) + " / 隐藏 " + (u.hiddenCount || 0) +
-          " / 本地存 " + (u.savedCount || 0) +
-          (u.source ? (" / 来源:" + u.source) : "")
-        );
-      });
-    }
-    lines.push("");
-    lines.push("二、错误记录（前台 / 后台）");
-    if (!r.errors.length) {
-      lines.push("（无错误记录）");
-    } else {
-      r.errors.forEach(function (er, i) {
-        lines.push((i + 1) + ". [" + er.time + "]" + (er.where ? (" [" + er.where + "]") : "") + " " + er.msg);
-      });
-    }
-    return lines.join("\n");
-  }
-
-  function openDetail(key) {
-    const r = readReport(key);
-    if (!r) return;
-    let mask = el("logDetailModal");
-    if (!mask) {
-      mask = document.createElement("div");
-      mask.id = "logDetailModal";
-      mask.className = "modal-mask";
-      document.body.appendChild(mask);
     }
 
-    let uHtml = "";
-    if (!r.updates.length) {
-      uHtml = '<div class="log-empty">（无更新记录）</div>';
-    } else {
-      r.updates.forEach(function (u, i) {
-        uHtml +=
-          '<div class="log-detail-row"><span class="ld-idx">' + (i + 1) + '</span>' +
-          '<div class="ld-body">' +
-          '<div class="ld-time">' + escapeHtml(u.time) + (u.source ? (" · " + escapeHtml(u.source)) : "") + '</div>' +
-          '<div class="ld-stats">条目 ' + u.itemCount + ' ｜ 已读 ' + u.readCount +
-          ' ｜ 未读 ' + u.unreadCount + ' ｜ 失败 ' + u.failCount +
-          ' ｜ 屏蔽 ' + (u.blockedCount || 0) + ' ｜ 隐藏 ' + (u.hiddenCount || 0) +
-          ' ｜ 本地存 ' + (u.savedCount || 0) + '</div>' +
-          '</div></div>';
-      });
-    }
+    // 二、错误记录
     let eHtml = "";
-    if (!r.errors.length) {
+    if (!errors.length) {
       eHtml = '<div class="log-empty">（无错误记录）</div>';
     } else {
-      r.errors.forEach(function (er, i) {
+      errors.forEach(function (er, i) {
         eHtml +=
           '<div class="log-detail-row"><span class="ld-idx">' + (i + 1) + '</span>' +
           '<div class="ld-body">' +
@@ -330,33 +288,45 @@
       });
     }
 
-    mask.innerHTML =
-      '<div class="modal-box log-detail-box">' +
-      '<div class="log-detail-head"><span>运行日志 · ' + escapeHtml(r.date) + '</span>' +
-      '<button class="log-close" id="logDetailClose">×</button></div>' +
-      '<div class="log-detail-sec-title">一、今日更新</div>' +
-      '<div class="log-detail-list">' + uHtml + '</div>' +
+    box.innerHTML =
+      '<div class="log-today-box">' +
+      '<div class="log-detail-sec-title">一、今日更新</div>' + uHtml +
       '<div class="log-detail-sec-title">二、错误记录（前台 / 后台）</div>' +
       '<div class="log-detail-list">' + eHtml + '</div>' +
-      '<div class="log-detail-actions">' +
-      '<button id="logCopyBtn" class="log-act-btn">复制报告</button>' +
-      '<button id="logDeleteBtn" class="log-act-btn log-del">删除本条</button>' +
-      '</div>' +
       '</div>';
+  }
 
-    mask.style.display = "flex";
-    el("logDetailClose").onclick = function () { mask.style.display = "none"; };
-    mask.onclick = function (e) { if (e.target === mask) mask.style.display = "none"; };
-    el("logCopyBtn").onclick = function () {
-      copyText(buildReportText(r), function (ok) {
-        showLogToast(ok ? "已复制报告内容" : "复制失败，请手动选择");
+  function buildReportText(r) {
+    const lines = [];
+    lines.push("运行日志报告 " + r.date);
+    lines.push("================================");
+    lines.push("一、今日更新");
+    const updates = r.updates || [];
+    if (!updates.length) {
+      lines.push("（今日暂无更新记录）");
+    } else {
+      const last = updates[updates.length - 1];
+      lines.push(
+        "本次更新 " + last.itemCount + " 条（[" + last.time + "]" + (last.source ? (" " + last.source) : "") + "）" +
+        " / 累计更新 " + updates.length + " 次" +
+        " / 已读 " + last.readCount +
+        " / 未读 " + last.unreadCount +
+        " / 屏蔽 " + (last.blockedCount || 0) +
+        " / 隐藏 " + (last.hiddenCount || 0) +
+        ((last.savedCount && last.savedCount < last.itemCount) ? (" / 本地存 " + last.savedCount + "（已被配额降档）") : "")
+      );
+    }
+    lines.push("");
+    lines.push("二、错误记录（前台 / 后台）");
+    const errors = r.errors || [];
+    if (!errors.length) {
+      lines.push("（无错误记录）");
+    } else {
+      errors.forEach(function (er, i) {
+        lines.push((i + 1) + ". [" + er.time + "]" + (er.where ? (" [" + er.where + "]") : "") + " " + er.msg);
       });
-    };
-    el("logDeleteBtn").onclick = function () {
-      deleteReport(key);
-      mask.style.display = "none";
-      renderList();
-    };
+    }
+    return lines.join("\n");
   }
 
   function copyText(text, cb) {
@@ -396,16 +366,17 @@
     setTimeout(function () { t.style.display = "none"; }, 1500);
   }
 
-  function exportAll() {
-    const reports = listReports();
-    const data = { app: "rss-twitter-viewer", version: "5.0", exportedAt: new Date().toISOString(), reports: reports };
+  function exportToday() {
+    const r = ensureToday();
+    const data = { app: "rss-twitter-viewer", version: "5.1", exportedAt: new Date().toISOString(), report: r };
     const jsonStr = JSON.stringify(data, null, 2);
+    const fname = "运行日志_" + r.date + ".json";
     try {
       const blob = new Blob([jsonStr], { type: "application/json;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "运行日志备份.json";
+      a.download = fname;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -414,26 +385,35 @@
       const base64 = btoa(unescape(encodeURIComponent(jsonStr)));
       const a = document.createElement("a");
       a.href = "data:application/json;base64," + base64;
-      a.download = "运行日志备份.json";
+      a.download = fname;
       document.body.appendChild(a);
       a.click();
       a.remove();
     }
-    showLogToast("已导出 " + reports.length + " 份日志");
+    showLogToast("已导出今日报告");
   }
 
-  function deleteAllReports() {
-    if (!confirm("确定删除全部日志报告？此操作不可恢复。")) return;
-    deleteAll();
+  function deleteTodayReport() {
+    if (!confirm("确定删除今日报告？删除后将从零重新累计。")) return;
+    deleteReport(todayKey());
     renderList();
-    showLogToast("已删除全部日志");
+    showLogToast("已删除今日报告");
   }
 
-  // 工具栏按钮（index.html 中已存在）
-  const dAll = el("logDeleteAllBtn");
-  if (dAll) dAll.onclick = deleteAllReports;
+  function copyTodayReport() {
+    const r = ensureToday();
+    copyText(buildReportText(r), function (ok) {
+      showLogToast(ok ? "已复制今日报告" : "复制失败，请手动选择");
+    });
+  }
+
+  // 工具栏按钮（index.html 中已存在）：删除报告 / 复制报告 / 导出报告
+  const dBtn = el("logDeleteBtn");
+  if (dBtn) dBtn.onclick = deleteTodayReport;
+  const cBtn = el("logCopyBtn");
+  if (cBtn) cBtn.onclick = copyTodayReport;
   const exp = el("logExportBtn");
-  if (exp) exp.onclick = exportAll;
+  if (exp) exp.onclick = exportToday;
 
   // 暴露 API 给其它脚本（feed.js / app.js / media.js 在运行时调用）
   window.AppLog = {
@@ -444,8 +424,8 @@
     renderList: renderList,
     renderStorage: renderStorageBar,
     measureStorage: measureStorage,
-    exportAll: exportAll,
-    deleteAllReports: deleteAllReports,
+    exportToday: exportToday,
+    deleteTodayReport: deleteTodayReport,
     onNewDay: function () { renderList(); }
   };
 

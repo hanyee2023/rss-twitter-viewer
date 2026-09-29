@@ -247,7 +247,7 @@ const ARTICLE_CACHE_KEY = "rss_article_cache";
 const BLOCK_KEYWORD_KEY = "rss_block_keywords";
 const LAST_REFRESH_KEY = "rss_last_refresh_time";
 const PAGE_SIZE = 30;
-const ARTICLE_CACHE_LIMIT = 1500; // 全局文章缓存/显示上限：600 → 800 → 1500。localStorage 共享配额约 5MB，超限时由 saveArticleCacheToStorage 逐级降档兜底
+const ARTICLE_CACHE_LIMIT = 1000; // 全局文章缓存/显示上限：600 → 800 → 1500 → 1000（用户定为 1000）。localStorage 共享配额约 5MB，超限时由 saveArticleCacheToStorage 逐级降档兜底
 const FETCH_TIMEOUT = 10000;
 const RSS_CONCURRENCY = 5;
 const AUTO_REFRESH_INTERVAL = 5 * 60 * 1000;
@@ -497,10 +497,8 @@ function saveArticleCacheToStorage(list){
             return false;
         }
     };
-    // 逐步降级：1500 → 1200 → 900 → 800 → 600 → 400 → 200 → 放弃
-    // 旧版为 800 → 300 → 150 → 50，一旦超配额会直接砍到 300，体感像“内容突然少了一大半”。
-    // 改为渐进降档；保留 800 档可避免“容量刚好只够 800 时反而掉到 600”的回退。
-    const levels = [ARTICLE_CACHE_LIMIT, 1200, 900, 800, 600, 400, 200];
+    // 逐步降级：1000 → 800 → 600 → 400 → 200 → 放弃（渐进降档，超配额时尽量多保留）
+    const levels = [ARTICLE_CACHE_LIMIT, 800, 600, 400, 200];
     for(const limit of levels){
         if(trySave(limit)){
             maybeEnforceRssCacheBudget();
