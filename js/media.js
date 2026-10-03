@@ -325,6 +325,28 @@ function getHlsErrorMessage(data, streamUrl, info){
     return "视频加载失败，请稍后重试";
 }
 
+// —— 媒体错误日志：带「订阅来源 + 真实地址 + 域名 + 状态码」，便于定位是哪个源 / 哪个视频 ——
+// 同一 (类型|来源|域名) 15 秒内只记一条，避免同一视频的多个分片连续失败刷屏。
+const _mediaErrSeen = new Map();
+function logMediaError(kind, video, realUrl, extra){
+    if(!window.AppLog) return;
+    let srcName = "";
+    try{
+        const card = video && video.closest ? video.closest(".tweet-card") : null;
+        const nameEl = card ? card.querySelector(".source-name-text") : null;
+        srcName = nameEl ? String(nameEl.textContent || "").trim() : "";
+    }catch(e){}
+    let host = "";
+    try{ host = realUrl ? new URL(realUrl).hostname : ""; }catch(e){}
+    const key = kind + "|" + srcName + "|" + host;
+    const now = Date.now();
+    if(now - (_mediaErrSeen.get(key) || 0) < 15000) return;
+    _mediaErrSeen.set(key, now);
+    const msg = kind + "：源【" + (srcName || "未知来源") + "】域名 " + (host || "未知") +
+        (extra ? (" " + extra) : "") + " 地址 " + String(realUrl || "").slice(0, 160);
+    AppLog.recordError(msg, "媒体");
+}
+
 function toggleVideoPlay(video){
     const wrapEl = video.closest(".video-single-wrap");
     // 点击即给出反馈：按钮切到“暂停”图标 + 显示加载圈，让用户确认点击已生效
@@ -387,7 +409,7 @@ function bindVideoErrorRetry(video){
                 if(msg && !video.dataset.errorShown){
                     video.dataset.errorShown = "1";
                     showToast(msg);
-                    if(window.AppLog) AppLog.recordError("视频加载失败: " + (msg||'').slice(0,140), "媒体");
+                    logMediaError("视频加载失败", video, video.currentSrc || video.dataset.src || "", "原因:" + String(msg||'').slice(0,50));
                 }
             }
             return;
@@ -775,7 +797,7 @@ function startHlsVideo(video){
                 if(video.dataset.userAttempted === "1"){
                     showToast(getHlsErrorMessage(data, streamUrl, info));
                 }
-                if(window.AppLog) AppLog.recordError("HLS播放失败(致命错误自愈已用尽): " + String(getHlsErrorMessage(data, streamUrl, info)||'').slice(0,140), "媒体");
+                logMediaError("HLS播放失败", video, info.url || streamUrl, (info.type === Hls.ErrorTypes.NETWORK_ERROR) ? ("状态" + (info.code || "?")) : "解码/媒体错误");
             }
         });
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {

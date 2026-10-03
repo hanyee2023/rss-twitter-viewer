@@ -355,7 +355,22 @@
   function isIPv6(s) { return String(s || "").indexOf(":") >= 0; }
 
   // 带超时的同源 GET（返回 Response + 文本，便于既解析 JSON 也解析纯文本）
-  function httpGet(url, ms) {
+  // retryOnce：失败（含非 2xx、超时、被回落成 HTML）后换 cache:"reload" 再试一次。
+  // 必要性见 checkConn 注释——页面内 fetch 可能被浏览器中间层偶发拦截，
+  // 而地址栏直接打开却正常，重试能过滤掉这种抖动，避免误报「代理函数未响应」。
+  function httpGet(url, ms, retryOnce) {
+    return httpGetOnce(url, ms, "no-store").then(function (o) {
+      // HTTP 层失败也走重试：先把状态码/HTML 回落识别出来
+      if (retryOnce && (!o.res || !o.res.ok || isHtmlResponse(o))) {
+        return httpGetOnce(url, ms, "reload");
+      }
+      return o;
+    }, function (e) {
+      if (!retryOnce) throw e;
+      return httpGetOnce(url, ms, "reload");
+    });
+  }
+  function httpGetOnce(url, ms, cacheMode) {
     return new Promise(function (resolve, reject) {
       let done = false;
       const ctl = (typeof AbortController !== "undefined") ? new AbortController() : null;
@@ -363,9 +378,9 @@
         if (done) return;
         done = true;
         if (ctl) { try { ctl.abort(); } catch (e) {} }
-        reject(new Error("timeout"));
+        const te = new Error("timeout"); te.isTimeout = true; reject(te);
       }, ms || 8000);
-      const opts = { cache: "no-store" };
+      const opts = { cache: cacheMode || "no-store" };
       if (ctl) opts.signal = ctl.signal;
       let req;
       try { req = fetch(url, opts); } catch (e) { clearTimeout(timer); reject(e); return; }
@@ -412,27 +427,33 @@
     const t = String((o && o.text) || "").trim().toLowerCase();
     return t.indexOf("<!doctype html") === 0 || t.indexOf("<html") === 0;
   }
-  function checkConn() {
+  function checkConn(force) {
     if (_connChecking) return;
     _connChecking = true;
+    if (force) { try { const r0 = ensureToday(); if (r0) delete r0.conn; } catch (e) {} }
     let pingMissing = false; // /ping 未部署（回落成网页）
-    // ① 先问代理函数（能答上 JSON = 代理在线）
-    httpGet("/ping", 6000).then(function (o) {
-      if (!o.res || !o.res.ok) throw new Error("HTTP " + (o.res && o.res.status));
-      if (isHtmlResponse(o)) { pingMissing = true; throw new Error("no /ping endpoint"); }
+    let pingFail = "";       // /ping 失败原因（写进卡片，便于一眼分清「被拦」还是「没推」）
+    // ① 先问代理函数（能答上 JSON = 代理在线）——失败自动重试一次（cache:reload）
+    httpGet("/ping", 6000, true).then(function (o) {
+      if (!o.res || !o.res.ok) { pingFail = "HTTP " + (o.res && o.res.status); throw new Error(pingFail); }
+      if (isHtmlResponse(o)) { pingMissing = true; pingFail = "接口未部署（被回落成网页）"; throw new Error("no /ping endpoint"); }
       let d = null;
       try { d = JSON.parse(o.text); } catch (e) { /* 解析失败也走降级 */ }
-      if (!d || !d.ok) throw new Error("bad body");
+      if (!d || !d.ok) { pingFail = "返回内容异常"; throw new Error("bad body"); }
       return { status: "ok", ip: String(d.ip || ""), colo: String(d.colo || ""), region: String(d.country || ""), city: String(d.city || "") };
-    }).catch(function () {
-      // ② 代理没答上来 → 至少用边缘 trace 拿到 IP / 节点（站点可达）
-      return httpGet("/cdn-cgi/trace", 6000).then(function (o) {
+    }).catch(function (e) {
+      if (!pingFail) pingFail = (e && e.isTimeout) ? "请求超时" : (e && e.message ? String(e.message).slice(0, 40) : "请求失败");
+      // ② 代理没答上来 → 退而用边缘 trace 拿到 IP / 节点（站点可达）
+      //    注意：这里拿到的 colo 只代表「请求落地的边缘节点」，不代表代理函数活着，
+      //    展示时必须与「接入节点」区分，避免被误读成代理故障。
+      return httpGet("/cdn-cgi/trace", 6000, true).then(function (o) {
         if (!o.res || !o.res.ok) throw new Error("HTTP " + (o.res && o.res.status));
         const t = parseTraceText(o.text);
         if (!t.colo && !t.ip) throw new Error("bad trace");
         return {
           status: "degraded",
           pingMissing: pingMissing,
+          pingFail: pingFail,
           ip: String(t.ip || ""), colo: String(t.colo || ""), region: String(t.loc || ""), city: ""
         };
       });
@@ -440,7 +461,7 @@
       rec.ts = Date.now();
       saveConn(rec);
     }, function () {
-      saveConn({ status: "offline", ip: "", colo: "", region: "", city: "", ts: Date.now() });
+      saveConn({ status: "offline", pingFail: pingFail, ip: "", colo: "", region: "", city: "", ts: Date.now() });
     });
   }
   // 10 分钟内不重复检测；到期或从未检测过才发请求
@@ -449,6 +470,20 @@
     const c = r.conn;
     if (c && c.ts && (Date.now() - c.ts) < CONN_TTL) return;
     checkConn();
+  }
+  // 顶部「重新检测」按钮：清掉缓存结果立刻重查（不必干等 10 分钟 TTL）
+  function recheckConn() {
+    if (_connChecking) return;
+    try {
+      const r = ensureToday();
+      if (r) { delete r.conn; writeReport(todayKey(), r); }
+    } catch (e) { /* ignore */ }
+    renderConnThenCheck();
+  }
+  function renderConnThenCheck() {
+    const box = el("logConn");
+    if (box) box.innerHTML = '<div class="conn-line conn-wait">代理状态检测中…</div>';
+    checkConn(true);
   }
   function renderConn() {
     const box = el("logConn");
@@ -468,17 +503,24 @@
       clr = "conn-ok"; label = "代理在线";
       note = ' <span class="conn-sub">（/ping 接口未部署，节点数据取自边缘 trace）</span>';
     } else if (c.status === "degraded") {
-      clr = "conn-amber"; label = "代理异常";
-      note = ' <span class="conn-amber">（站点可达，但代理函数未响应）</span>';
+      // 站点可达、但 /ping 没答上来：措辞必须准确——站点可达 ≠ 代理坏了
+      clr = "conn-amber"; label = "代理函数未响应";
+      note = ' <span class="conn-amber">（站点可达，/ping 失败：' + escapeHtml(c.pingFail || "原因未知") + '）</span>';
     } else {
       clr = "conn-err"; label = "代理离线";
-      note = ' <span class="conn-err">（连不上 Cloudflare，请检查网络）</span>';
+      note = ' <span class="conn-err">（连不上 Cloudflare，请检查网络' + (c.pingFail ? ("，" + escapeHtml(c.pingFail)) : "") + '）</span>';
     }
-    const node = c.colo ? ('接入节点 <b>' + escapeHtml(coloText(c.colo)) + '</b>') : "接入节点未知";
-    let l1 = '<div class="conn-line"><span class="' + clr + '">' + label + '</span> ｜ ' + node + note + '</div>';
+    // 节点名按来源区分：/ping 成功时那是「接入节点」；降级时只代表边缘落地节点，不能叫接入节点
+    const nodeLabel = (c.status === "ok") ? "接入节点" : "边缘节点";
+    const node = c.colo ? (nodeLabel + ' <b>' + escapeHtml(coloText(c.colo)) + '</b>') : (nodeLabel + '未知');
+    const btn = '<span class="conn-retry" id="connRetryBtn">重新检测</span>';
+    let l1 = '<div class="conn-line"><span class="' + clr + '">' + label + '</span> ｜ ' + node + note + btn + '</div>';
     const ipTxt = c.ip ? ('本机公网 IP <b>' + escapeHtml(c.ip) + '</b>（' + (isIPv6(c.ip) ? "IPv6" : "IPv4") + '）') : "本机公网 IP 未知";
-    l1 += '<div class="conn-line conn-sub">' + ipTxt + (c.region ? (' ｜ 识别地区 ' + escapeHtml(ccText(c.region))) : "") + '</div>';
+    l1 += '<div class="conn-line conn-sub">' + ipTxt + (c.region ? (' ｜ 识别地区 ' + escapeHtml(ccText(c.region))) : "") +
+      (c.ts ? (' ｜ 检测于 ' + escapeHtml(timeStrOf(new Date(c.ts)))) : "") + '</div>';
     box.innerHTML = l1;
+    const rb = box.querySelector("#connRetryBtn");
+    if (rb) rb.onclick = function () { recheckConn(); };
   }
 
   // ---------- 自托管 hls.js 版本检查（5.1）----------
@@ -690,10 +732,11 @@
       if (cn.pingMissing) {
         lines.push("代理状态：在线（/ping 接口未部署，节点数据取自边缘 trace）｜ 接入节点：" + (coloText(cn.colo) || "未知") + tail);
       } else {
-        lines.push("代理状态：异常（站点可达，但代理函数未响应）｜ 接入节点：" + (coloText(cn.colo) || "未知") + tail);
+        lines.push("代理状态：代理函数未响应（站点可达，/ping 失败：" + (cn.pingFail || "原因未知") + "）｜ 边缘节点：" +
+          (coloText(cn.colo) || "未知") + tail);
       }
     } else {
-      lines.push("代理状态：离线（连不上 Cloudflare，请检查网络）");
+      lines.push("代理状态：离线（连不上 Cloudflare，请检查网络）" + (cn.pingFail ? ("，/ping 失败：" + cn.pingFail) : ""));
     }
     lines.push("本地存储：可浏览条目 " + measureStorage().articleCount + " 条");
     lines.push("================================");
@@ -780,7 +823,7 @@
 
   function exportToday() {
     const r = ensureToday();
-    const data = { app: "rss-twitter-viewer", version: "5.2", exportedAt: new Date().toISOString(), report: r };
+    const data = { app: "rss-twitter-viewer", version: "5.3", exportedAt: new Date().toISOString(), report: r };
     const jsonStr = JSON.stringify(data, null, 2);
     const fname = "运行日志_" + r.date + ".json";
     try {
@@ -837,6 +880,7 @@
     renderStorage: renderStorageBar,
     renderConn: renderConn,
     checkConn: checkConn,
+    recheckConn: recheckConn,
     measureStorage: measureStorage,
     exportToday: exportToday,
     deleteTodayReport: deleteTodayReport,
