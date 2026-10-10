@@ -189,6 +189,8 @@ function twimgSizedDirect(rawUrl, size) {
     try {
         const u = new URL(rawUrl);
         if (!/twimg\.com$/i.test(u.hostname)) return rawUrl;
+        // 视频封面（ext_tw_video_thumb）用 ?name= 控制尺寸，不能加 :size 路径后缀，否则 "...png:large" 非法
+        if (/ext_tw_video_thumb/i.test(u.pathname)) return rawUrl;
         u.pathname = u.pathname.replace(/:(small|medium|large|orig)$/i, "") + ":" + size;
         u.searchParams.delete("name");
         return u.toString();
