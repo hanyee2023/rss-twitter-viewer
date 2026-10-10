@@ -18,12 +18,42 @@ const ABSOLUTE_MAX_ITEMS = 100; // ?max= 硬上限：原 50，提高到 100（�
 //   xcancel 需要代理才能访问，但服务端 fetch 走 Cloudflare 边缘网络，与用户本地网络无关。
 //   asia.aguea.com 作为兜底：它只吐 m3u8（data-url），走 hls.js，结构兼容已验证。
 //   失败时 fast-fail 落到下一个实例，不影响主链路。
+// Nitter 实例列表（按优先级排序，2026-10-10 复核后更新）
+// 已剔除实测失效/反爬的实例：aguea.net（Anubis 验证）、nitter.catsarch.com（永久关停）、
+//   nitter.kareem.one（上游宕机）、nitter.click（Anubis）、nitter.jaydenha.uk（访问队列）、
+//   shitter.thepixora.com（狗验证）、nitter.cz（非 nitter 部署）。
+// 保留并前置实测可用的实例；xcancel 首选（输出 mp4，原生 <video> 播放最稳）。
 const NITTER_INSTANCES = [
+  'https://xcancel.com',              // 用户实测可播 mp4（首选，原生 <video> 播放最稳）
+  'https://nitter.cf',                // 2026-10-10 实测：返回真实时间线
+  'https://nitter.app',               // 2026-10-10 WebFetch 实测：完整时间线 + hls 播放
+  'https://nitter.space',             // 2026-10-10 WebFetch 实测：完整时间线
+  'https://nitter.tiekoetter.com',    // 2026-10-10 WebFetch 实测：完整时间线 + 视频状态
+  'https://nitter.tromdienste.de',    // 2026-10-10 WebFetch 实测：完整时间线 + hls 播放
+  'https://asia.aguea.com',           // m3u8 兜底源（HLS 路径，实测可访问）
+  'https://nitter.netbub.com',        // 2026-10-10 实测可访问（低优先级兜底）
+  'https://nitter.meowing.monster',   // 2026-10-10 实测可访问（低优先级兜底）
+];
+
+// 健康自检池：?health=1 时并发探测下列全部实例，给出真实可用性报告。
+// 覆盖当前默认实例 + 用户提供的候选实例，便于部署后一键复核（实例随时可能失效）。
+const HEALTH_POOL = [
   'https://xcancel.com',
   'https://asia.aguea.com',
   'https://aguea.net',
   'https://nitter.catsarch.com',
-  'https://nitter.cf',   // 2026-10-10 新增：实测可返回真实时间线，作兜底实例
+  'https://nitter.cf',
+  'https://nitter.kareem.one',
+  'https://nitter.click',
+  'https://nitter.jaydenha.uk',
+  'https://shitter.thepixora.com',
+  'https://nitter.netbub.com',
+  'https://nitter.meowing.monster',
+  'https://nitter.tiekoetter.com',
+  'https://nitter.space',
+  'https://nitter.cz',
+  'https://nitter.tromdienste.de',
+  'https://nitter.app',
 ];
 
 const SYNDICATION_BASE = 'https://syndication.twitter.com/srv/timeline-profile/screen-name/';
@@ -816,6 +846,45 @@ function buildEmptyRss(username, reason) {
   );
 }
 
+// ─── 实例健康自检（?health=1）──────────────────────────────────
+// 在 Cloudflare 边缘网络并发探测 HEALTH_POOL 全部实例，返回真实可用性。
+// 用途：部署后访问 /twitter-rss?health=1 一键复核实例存活，无需本地改代码。
+// 注意：必须在 Cloudflare 上跑才有意义——本地/沙箱网络与实例可达性无关，会误判。
+async function healthCheck() {
+  const probe = async (base) => {
+    const host = base.replace(/^https?:\/\//, '');
+    try {
+      const res = await fetch(base + '/NASA', {
+        headers: { 'User-Agent': FETCH_UA, 'Accept': 'text/html,application/xhtml+xml' },
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!res.ok) return { instance: host, status: 'FAIL', detail: 'HTTP ' + res.status };
+      const html = await res.text();
+      if (html.includes('Just a moment') || (html.includes('cloudflare') && html.includes('challenge')))
+        return { instance: host, status: 'FAIL', detail: 'Cloudflare 验证页' };
+      if (/Upstream is temporarily unavailable|Nitter shutdown|not a bot|Prove You|Access Queue|dogcaptcha/i.test(html))
+        return { instance: host, status: 'FAIL', detail: '反爬/宕机/排队' };
+      if (html.includes('YunoHost') || html.includes('Admin Login'))
+        return { instance: host, status: 'FAIL', detail: '非 nitter 部署' };
+      if (!hasTimeline(html)) return { instance: host, status: 'FAIL', detail: '无时间线结构' };
+      return { instance: host, status: 'OK', detail: '时间线正常' };
+    } catch (e) {
+      return { instance: host, status: 'FAIL', detail: (e && e.message) ? e.message : 'fetch 失败' };
+    }
+  };
+  const results = await Promise.all(HEALTH_POOL.map(probe));
+  const alive = results.filter(r => r.status === 'OK').map(r => r.instance);
+  return new Response(JSON.stringify({
+    checked: results.length,
+    alive: alive.length,
+    aliveInstances: alive,
+    results
+  }, null, 2), {
+    status: 200,
+    headers: corsHeaders({ 'Content-Type': 'application/json; charset=utf-8' })
+  });
+}
+
 // ─── 主入口：多源回退 ──────────────────────────────────────────
 export async function onRequest({ request, env }) {
   if (request.method === 'OPTIONS') {
@@ -823,6 +892,13 @@ export async function onRequest({ request, env }) {
   }
 
   const url = new URL(request.url);
+
+  // 实例健康自检：/twitter-rss?health=1 —— 在 Cloudflare 边缘网络实测全部候选实例，
+  // 直接给出「此刻真实可用性」，避免本地/沙箱网络误判（nitter 实例随时可能宕机/被反爬）。
+  if (url.searchParams.get('health') !== null) {
+    return await healthCheck();
+  }
+
   const username = (url.searchParams.get('user') || '')
     .replace(/[^a-zA-Z0-9_]/g, '')
     .slice(0, 15);

@@ -261,6 +261,10 @@ function applyTwimgSize(url, size) {
   let u;
   try { u = new URL(url); } catch (e) { return url; }
   if (!/twimg\.com$/i.test(u.hostname)) return url;
+  // 推特视频封面（ext_tw_video_thumb）尺寸由 ?name= 参数控制，而非 :size 路径后缀。
+  // 若在此追加 :large 会变成 "...png:large" 非法路径 → 代理抓取 404 → 视频预览图黑屏。
+  // 触发点：feed.js 视频卡片 poster 渲染调用 getProxyUrl(poster,"large") 会带 twname=large。
+  if (/ext_tw_video_thumb/i.test(u.pathname)) return url;
   // 去掉已有的尺寸后缀，避免重复
   u.pathname = u.pathname.replace(/:(small|medium|large|orig)$/i, "");
   // 追加请求的尺寸
