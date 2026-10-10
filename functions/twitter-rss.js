@@ -23,6 +23,7 @@ const NITTER_INSTANCES = [
   'https://asia.aguea.com',
   'https://aguea.net',
   'https://nitter.catsarch.com',
+  'https://nitter.cf',   // 2026-10-10 新增：实测可返回真实时间线，作兜底实例
 ];
 
 const SYNDICATION_BASE = 'https://syndication.twitter.com/srv/timeline-profile/screen-name/';
