@@ -124,8 +124,19 @@ function bindAllCardEvent(){
         btn.onclick = function(e){
             e.stopPropagation();
             const link = this.dataset.link;
-            const target = allArticles.find(i=>i.link === link);
-            if(!target) return;
+            if(!link) return;
+            // 在多个可能的列表里查找目标条目：主页(allArticles)、本地缓存(localCacheArticles)、单源(currentArticles)
+            // 修复：原先只搜 allArticles，单源浏览/搜索结果里的卡片不在其中，
+            // 导致点击收藏时 target 为 undefined、被 if(!target) return 静默吞掉 → 表现为"按钮偶尔点不动"。
+            let target = allArticles.find(i=>i.link === link);
+            if(!target && typeof localCacheArticles !== "undefined") target = localCacheArticles.find(i=>i.link === link);
+            if(!target && typeof currentArticles !== "undefined") target = currentArticles.find(i=>i.link === link);
+            if(!target){
+                // 兜底：用卡片现有信息构造最小对象，保证收藏切换始终有反馈（不再静默无反应）
+                const card = this.closest(".tweet-card");
+                const title = card ? (card.querySelector(".card-title")?.textContent || card.dataset.link || link) : link;
+                target = { link, title };
+            }
             if(!favList.some(f=>f.link === link)){
                 favList.push(target);
                 localStorage.setItem(FAV_KEY, JSON.stringify(favList));
@@ -354,8 +365,21 @@ async function loadAllRSS(){
                     // 成功加载，保存缓存
                     if(items && items.length > 0){
                         saveRssCache(f.url, items);
+                    }else{
+                        // 后端返回了"空结果"RSS：很可能是所有 Nitter 实例失效，
+                        // 诊断原因写在 <channel><description> 里（例如"所有 Nitter 实例均不可用…"）。
+                        // 透传到运行报告，解决"前端提示失败、但运行报告无报错"的矛盾。
+                        let diag = "";
+                        try { if (typeof extractChannelDesc === "function") diag = extractChannelDesc(xmlText); } catch(e) {}
+                        if(diag && /实例|失效|不可用|失败|超时|未识别|验证页/.test(diag)){
+                            if(window.AppLog){
+                                AppLog.markFail();
+                                AppLog.recordError(`订阅【${f.name}】后端诊断失败：${diag}`, "RSS加载");
+                            }
+                            failedFeeds.push({name: f.name, url: f.url, error: diag});
+                        }
                     }
-                    allGroups.push(items);
+                    allGroups.push(items || []);
                 }
             }catch(e){
                 console.warn(`订阅【${f.name}】拉取失败：`, e.message);
