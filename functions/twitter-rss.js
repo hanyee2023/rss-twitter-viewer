@@ -202,7 +202,10 @@ function decodeNitterProxyUrl(proxyUrl) {
 
   // 格式1/2/4: 从 /pic/ 或 /video/ 路径中提取 URL 编码的原始地址
   // 匹配 /pic/xxx/ 或 /video/xxx/ 后面的部分
-  const proxyMatch = url.match(/\/(?:pic|video|thumb)\/[A-Za-z0-9]+\/(.+)$/);
+  // 注意：哈希段 <xxx> 必须是可选的——部分较新实例（nitter.app / nitter.space /
+  // nitter.tiekoetter.com / nitter.tromdienste.de）输出 /pic/https%3A%2F%2Fpbs...（无哈希），
+  // 若强制要求哈希段会导致整条正则不匹配、poster 原样吐出相对地址 → 封面黑屏。
+  const proxyMatch = url.match(/\/(?:pic|video|thumb)\/(?:[A-Za-z0-9]+\/)?(.+)$/);
   if (proxyMatch) {
     let encoded = proxyMatch[1];
     // URL 解码（可能双重编码）
