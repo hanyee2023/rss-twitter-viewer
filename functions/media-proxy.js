@@ -290,6 +290,8 @@ function corsHeaders(extra = {}) {
     "Access-Control-Allow-Methods": "GET,HEAD,OPTIONS",
     "Access-Control-Allow-Headers": "*",
     "Access-Control-Expose-Headers": "Content-Length,Content-Range,Accept-Ranges,Content-Type",
+    // 默认 no-store：错误响应（4xx/5xx）不会被 CF 缓存成永久坏图；成功响应会自行覆盖
+    "Cache-Control": "no-store",
     ...extra
   };
 }
@@ -426,14 +428,21 @@ export async function onRequest({ request }) {
     // 修复：Range 请求（206）保留 Vary:Range、只给较短 TTL —— 保证命中到的一定是「对应区间」的正确字节；
     //       非 Range 的完整 200 响应才给长缓存 + immutable（分片内容不变，可安全长期缓存、提速重播）。
     if (range) {
-      // 部分响应：每个 Range 单独缓存，短 TTL，不 immutable —— 杜绝截断污染
-      headers.set("Cache-Control", "public, max-age=300, s-maxage=3600");
-      headers.set("Vary", "Range");
-    } else {
-      // 完整响应：内容不可变，长缓存 + immutable，提速重播/重复观看
+      // 部分响应（206）：拖动进度条 seek 时浏览器按 Range 请求对应区间的分片。
+      // 绝不能让 CF 边缘按 URL 缓存 206 —— Cloudflare 对带 Vary:Range 的 206 处理不可靠，
+      // 会把上一个区间的 206 错发给本次 seek，导致「跳转拿到错乱字节 → 拖动跳转失败 / 画面卡死」。
+      // 改为 no-store：每次 seek 都向源站（twimg 原生支持 Range）重新请求正确区间，保证 seek 精准。
+      headers.set("Cache-Control", "no-store");
+    } else if (res.status >= 200 && res.status < 400) {
+      // 成功响应（2xx）：内容不可变，长缓存 + immutable，提速重播/重复观看
       // 清掉上游 Vary（如 Accept-Encoding），完整对象无需按编码分缓存
       headers.delete("Vary");
       headers.set("Cache-Control", "public, max-age=86400, s-maxage=604800, immutable");
+    } else {
+      // 错误响应（4xx/5xx，含上游 404/502）：禁止缓存。
+      // 否则源站瞬断/抖动会被 CF 以 immutable 缓存成「永久坏图」（7 天不重验），
+      // 表现为「以前能看、部署后图片/视频一直加载不出」。见 2026-10-13 修复。
+      headers.set("Cache-Control", "no-store");
     }
     // 注：不再无差别删除 Vary（Range 分支必须保留 Vary:Range）；仅删除 Transfer-Encoding 由运行时重算
     headers.delete("Transfer-Encoding");
