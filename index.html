@@ -191,6 +191,8 @@ body{
     animation:vs-shimmer 1.4s linear infinite;
 }
 .grid-img{background:transparent;animation:none;}
+/* 图片加载失败时：停掉骨架屏微光，改为静态灰底占位，避免一直频闪 */
+.grid-img-box.img-failed{animation:none;background:#e8e8e8;}
 
 @keyframes vs-shimmer{to{background-position:-200% 0;}}
 
