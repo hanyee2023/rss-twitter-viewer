@@ -30,20 +30,15 @@ const FORCE_PROXY_HOSTS = [
     "redd.it",
     "770118.xyz",
     "phe69",
-    "viet69z.sex",
+    "phe69.com",
     "3go.fun",
     "rsshub.app",
     "venexa.site",
     "aguea.com",
     "htumeng.com",
-    "btumeng.com",
     "642p.com",
     "tutu1.space",
-    "freeshare58.com",
-    "jhfduadgiyhas.com",
-    "000355.xyz",
-    "919129.xyz",
-    "2025pic.net"
+    "freeshare58.com"
 ];
 
 function normalizeUrl(rawUrl) {
@@ -189,11 +184,6 @@ function twimgSizedDirect(rawUrl, size) {
     try {
         const u = new URL(rawUrl);
         if (!/twimg\.com$/i.test(u.hostname)) return rawUrl;
-        // 视频封面缩略图（*_video_thumb）用 ?name= 控制尺寸，不能加 :size 路径后缀，否则 "...jpg:large" 非法
-        if (/_video_thumb/i.test(u.pathname)) {
-            u.searchParams.set("name", size === "orig" ? "large" : size);
-            return u.toString();
-        }
         u.pathname = u.pathname.replace(/:(small|medium|large|orig)$/i, "") + ":" + size;
         u.searchParams.delete("name");
         return u.toString();
@@ -252,7 +242,7 @@ const ARTICLE_CACHE_KEY = "rss_article_cache";
 const BLOCK_KEYWORD_KEY = "rss_block_keywords";
 const LAST_REFRESH_KEY = "rss_last_refresh_time";
 const PAGE_SIZE = 30;
-const ARTICLE_CACHE_LIMIT = 1000; // 全局文章缓存/显示上限：600 → 800 → 1500 → 1000（用户定为 1000）。localStorage 共享配额约 5MB，超限时由 saveArticleCacheToStorage 逐级降档兜底
+const ARTICLE_CACHE_LIMIT = 800; // 全局文章缓存上限：原 600，提高到 800（约 2 天 @400条/天），localStorage 约 2-3MB 安全范围内
 const FETCH_TIMEOUT = 10000;
 const RSS_CONCURRENCY = 5;
 const AUTO_REFRESH_INTERVAL = 5 * 60 * 1000;
@@ -382,7 +372,6 @@ const pageAdd = document.getElementById("pageAdd");
 const pageFav = document.getElementById("pageFav");
 const pageSearch = document.getElementById("pageSearch");
 const pageSingle = document.getElementById("pageSingle");
-const pageLog = document.getElementById("pageLog");
 
 const articleBox = document.getElementById("articleBox");
 const articleBoxSingle = document.getElementById("articleBoxSingle");
@@ -397,10 +386,9 @@ const btnManage = document.getElementById("btnManage");
 const btnAdd = document.getElementById("btnAdd");
 const btnFav = document.getElementById("btnFav");
 const btnSearch = document.getElementById("btnSearch");
-const btnLog = document.getElementById("btnLog");
 
 const pageTitle = document.getElementById("pageTitle");
-let allBtns = [btnHome, btnManage, btnAdd, btnFav, btnSearch, btnLog];
+let allBtns = [btnHome, btnManage, btnAdd, btnFav, btnSearch];
 
 const editModal = document.getElementById("editModal");
 const imgPreviewMask = document.getElementById("imgPreviewMask");
@@ -492,75 +480,24 @@ function loadArticleCacheFromStorage(){
 }
 
 function saveArticleCacheToStorage(list){
-    const full = list || [];
     const trySave = (limit) => {
         try{
-            const slimList = full.slice(0, limit);
+            const slimList = (list || []).slice(0, limit);
             localStorage.setItem(ARTICLE_CACHE_KEY, JSON.stringify(slimList));
             return true;
         }catch(e){
             return false;
         }
     };
-    // 逐步降级：1000 → 800 → 600 → 400 → 200 → 放弃（渐进降档，超配额时尽量多保留）
-    const levels = [ARTICLE_CACHE_LIMIT, 800, 600, 400, 200];
+    // 逐步降级：600 → 300 → 150 → 50 → 放弃
+    const levels = [ARTICLE_CACHE_LIMIT, 300, 150, 50];
     for(const limit of levels){
-        if(trySave(limit)){
-            maybeEnforceRssCacheBudget();
-            // 返回「本地实际写入的条数」：小于 full.length 说明触发了降档（配额不足）
-            return Math.min(full.length, limit);
-        }
+        if(trySave(limit)) return;
     }
     // 全部失败，清理旧的 RSS 源缓存腾出空间后最后试一次
     cleanExpiredRssCache();
-    if(trySave(50)){
-        maybeEnforceRssCacheBudget();
-        return Math.min(full.length, 50);
-    }
-    console.warn("保存文章缓存失败：localStorage 容量不足，已尝试降级");
-    return 0;
-}
-
-// ===== RSS 源缓存总预算（5.0.1）=====
-// 源缓存与文章缓存是两份副本，只有两者合计才是真实的本地占用。
-// 除 app.js 的「单源条数上限」外，这里再做一道**全局**预算：
-// 所有源缓存的条目合计不得超过 RSS_CACHE_TOTAL_ITEM_BUDGET，超出则按“最旧优先”逐个删除。
-const RSS_CACHE_TOTAL_ITEM_BUDGET = 900;
-let rssCacheBudgetCheckedAt = 0;
-
-function maybeEnforceRssCacheBudget(){
-    // 节流：30 秒内最多整理一次，避免每次保存都遍历解析全部源缓存
-    const now = Date.now();
-    if(now - rssCacheBudgetCheckedAt < 30000) return;
-    rssCacheBudgetCheckedAt = now;
-    try{
-        const entries = [];
-        let total = 0;
-        for(let i = 0; i < localStorage.length; i++){
-            const key = localStorage.key(i);
-            if(!key || !key.startsWith(RSS_CACHE_PREFIX)) continue;
-            let count = 0, t = 0;
-            try{
-                const data = JSON.parse(localStorage.getItem(key) || "{}");
-                count = Array.isArray(data.items) ? data.items.length : 0;
-                t = data.time || 0;
-            }catch(e){
-                localStorage.removeItem(key); // 损坏的缓存直接清理
-                continue;
-            }
-            entries.push({ key: key, count: count, time: t });
-            total += count;
-        }
-        if(total <= RSS_CACHE_TOTAL_ITEM_BUDGET) return;
-        // 越旧的源缓存价值越低（仅在对应源拉取失败时用于回退），优先删除
-        entries.sort((a, b) => a.time - b.time);
-        for(const item of entries){
-            if(total <= RSS_CACHE_TOTAL_ITEM_BUDGET) break;
-            localStorage.removeItem(item.key);
-            total -= item.count;
-        }
-    }catch(e){
-        console.warn("RSS 源缓存预算整理失败：", e);
+    if(!trySave(50)){
+        console.warn("保存文章缓存失败：localStorage 容量不足，已尝试降级");
     }
 }
 

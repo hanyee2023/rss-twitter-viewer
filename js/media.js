@@ -256,27 +256,8 @@ function getVideoErrorMessage(video, fallback = "视频播放失败"){
     }
 }
 
-// 缓冲中指示：在 video 的父容器内叠加一个轻量“缓冲中…”遮罩。
-// 用于区分“正在缓冲(网络/代理)”与“真卡死(代码)”，配合右上角延迟面板一起定位问题。
-function setVideoLoading(video, on){
-    if(!video || !video.parentElement) return;
-    const parent = video.parentElement;
-    let el = parent.querySelector(":scope > .video-buffering");
-    if(on){
-        if(!el){
-            el = document.createElement("div");
-            el.className = "video-buffering";
-            el.innerHTML = '<span class="vb-spinner"></span><span class="vb-text">缓冲中…</span>';
-            if(getComputedStyle(parent).position === "static"){
-                parent.style.position = "relative";
-            }
-            parent.appendChild(el);
-        }
-        el.style.display = "flex";
-    }else if(el){
-        el.style.display = "none";
-    }
-}
+// 加载圈已移除：点击播放后主按钮图标即切换为“暂停”，已是足够反馈，不需要转圈
+function setVideoLoading(video, on){ /* no-op */ }
 
 function getPlayErrorMessage(err, video, fallback = "视频播放失败"){
     // 自动播放被拦截（NotAllowedError）或中断（AbortError）均为瞬时态：
@@ -323,28 +304,6 @@ function getHlsErrorMessage(data, streamUrl, info){
         return "视频解码失败，请稍后重试";
     }
     return "视频加载失败，请稍后重试";
-}
-
-// —— 媒体错误日志：带「订阅来源 + 真实地址 + 域名 + 状态码」，便于定位是哪个源 / 哪个视频 ——
-// 同一 (类型|来源|域名) 15 秒内只记一条，避免同一视频的多个分片连续失败刷屏。
-const _mediaErrSeen = new Map();
-function logMediaError(kind, video, realUrl, extra){
-    if(!window.AppLog) return;
-    let srcName = "";
-    try{
-        const card = video && video.closest ? video.closest(".tweet-card") : null;
-        const nameEl = card ? card.querySelector(".source-name-text") : null;
-        srcName = nameEl ? String(nameEl.textContent || "").trim() : "";
-    }catch(e){}
-    let host = "";
-    try{ host = realUrl ? new URL(realUrl).hostname : ""; }catch(e){}
-    const key = kind + "|" + srcName + "|" + host;
-    const now = Date.now();
-    if(now - (_mediaErrSeen.get(key) || 0) < 15000) return;
-    _mediaErrSeen.set(key, now);
-    const msg = kind + "：源【" + (srcName || "未知来源") + "】域名 " + (host || "未知") +
-        (extra ? (" " + extra) : "") + " 地址 " + String(realUrl || "").slice(0, 160);
-    AppLog.recordError(msg, "媒体");
 }
 
 function toggleVideoPlay(video){
@@ -409,7 +368,6 @@ function bindVideoErrorRetry(video){
                 if(msg && !video.dataset.errorShown){
                     video.dataset.errorShown = "1";
                     showToast(msg);
-                    logMediaError("视频加载失败", video, video.currentSrc || video.dataset.src || "", "原因:" + String(msg||'').slice(0,50));
                 }
             }
             return;
@@ -441,8 +399,6 @@ function bindSlowNetworkDetect(video){
         waitingTimes = waitingTimes.filter(t => now - t < 10000);
         waitingTimes.push(now);
         // 10 秒内出现 3 次以上 waiting，认为网络较慢
-        // 缓冲等待时给出明确“缓冲中”指示，便于区分“在缓冲(网络/代理)”还是“真卡死(代码)”
-        setVideoLoading(video, true);
         if(waitingTimes.length >= 3 && !video.dataset.slowWarnShown){
             video.dataset.slowWarnShown = "1";
             slowWarned = true;
@@ -452,9 +408,6 @@ function bindSlowNetworkDetect(video){
 
     // 播放顺畅一段时间后重置计数（用户可能切换到了好网络）
     video.addEventListener("playing", () => {
-        // 恢复播放即关闭“缓冲中”指示，并重置 HLS 自愈计数（新一轮播放从干净状态开始）
-        setVideoLoading(video, false);
-        if(video.dataset.hlsSelfHeal) delete video.dataset.hlsSelfHeal;
         if(slowWarned) return;
         const now = Date.now();
         waitingTimes = waitingTimes.filter(t => now - t < 10000);
@@ -719,9 +672,8 @@ function startHlsVideo(video){
         // 最小化配置：不锁档、不 worker、低延迟、加厚缓冲
         const hls = new Hls({
             enableWorker: true,
-            lowLatencyMode: false,
+            lowLatencyMode: true,
             maxBufferLength: 60,
-            backBufferLength: 30,
             capLevelToPlayerSize: true,
             storage: null,
             autoStartLoad: true
@@ -747,57 +699,31 @@ function startHlsVideo(video){
             }
         });
         hls.on(Hls.Events.ERROR, (event, data) => {
-            if(!data || !data.fatal) return;
-            const info = getHlsFailInfo(data);
-            console.warn("[HLS致命错误] type=", info.type, "code=", info.code, "details=", info.details, "url=", info.url);
-
-            // —— 第一层：自愈重试（同一源，不切源）——
-            // 偶发分片超时/代理抖动会抛致命错误，直接 destroy 会让视频“播几秒就硬停”。
-            // 优先用 hls.js 内置自愈：网络错误重拉、媒体错误恢复，限 3 次。
-            let healCount = Number(video.dataset.hlsSelfHeal || 0);
-            if(healCount < 3){
-                video.dataset.hlsSelfHeal = String(healCount + 1);
-                if(data.type === Hls.ErrorTypes.NETWORK_ERROR){
-                    console.warn("[HLS自愈] NETWORK_ERROR -> startLoad() 第" + (healCount + 1) + "次");
-                    hls.startLoad();
-                    return;
+            if(data && data.fatal){
+                const info = getHlsFailInfo(data);
+                console.warn("[HLS致命错误] type=", info.type, "code=", info.code, "details=", info.details, "url=", info.url);
+                const nextIndex = sourceIndex + 1;
+                if(nextIndex < uniqueSources.length){
+                    // 有备用源（altSrc），静默切换一次
+                    video.dataset.hlsAttempt = String(nextIndex);
+                    delete video.dataset.hlsLoaded;
+                    try{ hls.destroy(); }catch(e){}
+                    video.hlsInstance = null;
+                    startHlsVideo(video);
+                }else{
+                    // 无备用源：销毁实例，弹一次提示，不重试
+                    delete video.dataset.hlsLoaded;
+                    if(video.dataset.preloading === "1"){
+                        video.dataset.preloading = "0";
+                        preloadCount = Math.max(0, preloadCount - 1);
+                    }
+                    try{ hls.destroy(); }catch(e){}
+                    video.hlsInstance = null;
+                    setVideoLoading(video, false);
+                    if(video.dataset.userAttempted === "1"){
+                        showToast(getHlsErrorMessage(data, streamUrl, info));
+                    }
                 }
-                if(data.type === Hls.ErrorTypes.MEDIA_ERROR){
-                    console.warn("[HLS自愈] MEDIA_ERROR -> recoverMediaError() 第" + (healCount + 1) + "次");
-                    hls.recoverMediaError();
-                    return;
-                }
-                // 其他致命错误：兜底重拉一次
-                console.warn("[HLS自愈] 其他致命错误 -> startLoad() 第" + (healCount + 1) + "次");
-                hls.startLoad();
-                return;
-            }
-
-            // —— 第二层：自愈用尽，走原逻辑（切备用源 / 放弃提示）——
-            const nextIndex = sourceIndex + 1;
-            if(nextIndex < uniqueSources.length){
-                // 有备用源（altSrc），静默切换一次（重置自愈计数）
-                video.dataset.hlsAttempt = String(nextIndex);
-                delete video.dataset.hlsLoaded;
-                delete video.dataset.hlsSelfHeal;
-                try{ hls.destroy(); }catch(e){}
-                video.hlsInstance = null;
-                startHlsVideo(video);
-            }else{
-                // 无备用源：销毁实例，弹一次提示，不重试
-                delete video.dataset.hlsLoaded;
-                delete video.dataset.hlsSelfHeal;
-                if(video.dataset.preloading === "1"){
-                    video.dataset.preloading = "0";
-                    preloadCount = Math.max(0, preloadCount - 1);
-                }
-                try{ hls.destroy(); }catch(e){}
-                video.hlsInstance = null;
-                setVideoLoading(video, false);
-                if(video.dataset.userAttempted === "1"){
-                    showToast(getHlsErrorMessage(data, streamUrl, info));
-                }
-                logMediaError("HLS播放失败", video, info.url || streamUrl, (info.type === Hls.ErrorTypes.NETWORK_ERROR) ? ("状态" + (info.code || "?")) : "解码/媒体错误");
             }
         });
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
@@ -820,6 +746,69 @@ function startHlsVideo(video){
 
 
 
+
+/**
+ * 解析「跳过片头」秒数 —— 支持在视频链接后加 ?skip=12（单位：秒）
+ *
+ * 兼容两种加参位置：
+ *   1) 直接加在源链接上：https://xxx/video.m3u8?skip=12
+ *   2) 加在 media-proxy 代理前缀外层：/media-proxy?url=<编码后的源链接>&skip=12
+ * 这样无论用户在哪一层加参数都能识别。
+ */
+function getSkipSeconds(rawUrl){
+    if(!rawUrl) return 0;
+    const parse = (val) => {
+        const n = parseFloat(val);
+        return (isFinite(n) && n > 0) ? n : 0;
+    };
+    try{
+        const u = new URL(rawUrl, location.href);
+        let skip = u.searchParams.get("skip");
+        if(skip !== null) return parse(skip);
+        // 代理 URL：解析内层 url= 参数里的 skip
+        const inner = u.searchParams.get("url");
+        if(inner){
+            try{
+                const iu = new URL(decodeURIComponent(inner), location.href);
+                skip = iu.searchParams.get("skip");
+                if(skip !== null) return parse(skip);
+            }catch(e){}
+        }
+    }catch(e){}
+    return 0;
+}
+
+/**
+ * 绑定「跳过片头」—— mp4 原生播放 与 hls.js 共用
+ * 只在视频 URL 带 skip 参数时生效，未加参数的视频行为完全不变。
+ * 每个视频只跳一次（_skipDone），避免用户手动拖回片头后又被强行跳走。
+ */
+function bindSkipIntro(video){
+    if(!video || video._skipBound) return;
+    const rawSrc = video.dataset.src || video.dataset.altSrc || video.src || video.currentSrc || "";
+    const skipSec = getSkipSeconds(rawSrc);
+    if(skipSec <= 0) return;
+    video._skipBound = "1";
+
+    const doSkip = ()=>{
+        if(video._skipDone) return;
+        try{
+            const dur = video.duration;
+            if(dur && isFinite(dur) && skipSec < dur - 0.5){
+                video.currentTime = skipSec;
+                video._skipDone = "1";
+                video.removeEventListener("loadedmetadata", doSkip);
+                video.removeEventListener("durationchange", doSkip);
+                video.removeEventListener("canplay", doSkip);
+            }
+        }catch(e){}
+    };
+    // 需等元数据就绪才能 seek；hls 的 duration 常晚于 loadedmetadata 才确定，故多绑几个时机
+    video.addEventListener("loadedmetadata", doSkip);
+    video.addEventListener("durationchange", doSkip);
+    video.addEventListener("canplay", doSkip);
+    if(video.readyState >= 1) doSkip();
+}
 
 function initHlsVideo(){
     document.querySelectorAll(".media-video[data-m3u8], .media-video-mp4").forEach(video=>{
@@ -844,6 +833,8 @@ function initHlsVideo(){
             }
         });
         }
+        // 跳过片头：URL 带 ?skip=12 时自动从第 12 秒开始播
+        bindSkipIntro(video);
         bindCustomMediaControls(video);
         // 优化4：绑定错误自动重试
         bindVideoErrorRetry(video);

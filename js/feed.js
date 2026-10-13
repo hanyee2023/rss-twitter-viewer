@@ -197,6 +197,15 @@ btnAdd.onclick = () => showPage(pageAdd, "添加订阅");
 btnFav.onclick = () => showPage(pageFav, "我的收藏");
 btnSearch.onclick = () => showPage(pageSearch, "内容搜索");
 
+// 运行日志/诊断：打开 Nitter 实例可用性检测页（/twitter-rss?health=1 返回可视化状态页）
+const btnCheckNitter = document.getElementById('btnCheckNitter');
+if (btnCheckNitter) {
+  btnCheckNitter.onclick = () => {
+    const url = location.origin + '/twitter-rss?health=1';
+    window.open(url, '_blank');
+  };
+}
+
 async function refreshAllRSSWithLock(){
     if(rssRefreshPromise) return rssRefreshPromise;
     rssRefreshPromise = (async ()=>{
