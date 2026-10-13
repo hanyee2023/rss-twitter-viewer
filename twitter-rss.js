@@ -1,0 +1,982 @@
+// Twitter 用户时间线 RSS 生成器
+// 多源回退架构：asia.aguea.com → aguea.net → nitter.catsarch.com（按实测可用排序）
+// 视频输出策略（优先 m3u8，兼容 MP4）：
+//   - m3u8 路径（优先）：从 data-url 属性提取原始 m3u8 URL，体积小、起播快，变体过滤在 media-proxy.js 完成
+//   - MP4 路径（兜底）：仅当无 m3u8 时，从 <source src="..."> 或下载链接提取原始 video.twimg.com MP4 URL
+//   - 图片路径：从代理 URL 解码出原始 pbs.twimg.com 地址
+// 部署到 Cloudflare Pages 的 functions 目录即可使用
+// 订阅地址: /twitter-rss?user=用户名
+
+const DEFAULT_MAX_ITEMS = 50;   // 每源每次返回上限：原 20，提高到 50 以保留更多历史未读（约 5 天/源 @10条）
+const ABSOLUTE_MAX_ITEMS = 100; // ?max= 硬上限：原 50，提高到 100（保留调优空间）
+
+// Nitter 实例列表（按优先级排序）
+// 2026-08-18 重大调整：xcancel.com 提回第一优先源。
+//   理由：用户实测 xcancel 能正常播放 mp4 视频。xcancel 输出 <source src=mp4> + <a class="video-download" href=mp4>，
+//   mp4 走前端原生 <video> 播放，无 hls.js 分片/ABR/清单解析，顺畅且少错误。
+//   xcancel 默认取最高分辨率 mp4（1080p），twitter-rss.js 的 pickBestResolutionMp4 会降选 480~720p。
+//   xcancel 需要代理才能访问，但服务端 fetch 走 Cloudflare 边缘网络，与用户本地网络无关。
+//   asia.aguea.com 作为兜底：它只吐 m3u8（data-url），走 hls.js，结构兼容已验证。
+//   失败时 fast-fail 落到下一个实例，不影响主链路。
+// Nitter 实例列表（按优先级排序，2026-10-10 复核后更新）
+// 已剔除实测失效/反爬的实例：aguea.net（Anubis 验证）、nitter.catsarch.com（永久关停）、
+//   nitter.kareem.one（上游宕机）、nitter.click（Anubis）、nitter.jaydenha.uk（访问队列）、
+//   shitter.thepixora.com（狗验证）、nitter.cz（非 nitter 部署）。
+// 保留并前置实测可用的实例；xcancel 首选（输出 mp4，原生 <video> 播放最稳）。
+const NITTER_INSTANCES = [
+  'https://xcancel.com',              // 用户实测可播 mp4（首选，原生 <video> 播放最稳）
+  'https://nitter.cf',                // 2026-10-10 实测：返回真实时间线
+  'https://nitter.app',               // 2026-10-10 WebFetch 实测：完整时间线 + hls 播放
+  'https://nitter.space',             // 2026-10-10 WebFetch 实测：完整时间线
+  'https://nitter.tiekoetter.com',    // 2026-10-10 WebFetch 实测：完整时间线 + 视频状态
+  'https://nitter.tromdienste.de',    // 2026-10-10 WebFetch 实测：完整时间线 + hls 播放
+  'https://asia.aguea.com',           // m3u8 兜底源（HLS 路径，实测可访问）
+  'https://nitter.netbub.com',        // 2026-10-10 实测可访问（低优先级兜底）
+  'https://nitter.meowing.monster',   // 2026-10-10 实测可访问（低优先级兜底）
+];
+
+// 健康自检池：?health=1 时并发探测下列全部实例，给出真实可用性报告。
+// 覆盖当前默认实例 + 用户提供的候选实例，便于部署后一键复核（实例随时可能失效）。
+const HEALTH_POOL = [
+  'https://xcancel.com',
+  'https://asia.aguea.com',
+  'https://aguea.net',
+  'https://nitter.catsarch.com',
+  'https://nitter.cf',
+  'https://nitter.kareem.one',
+  'https://nitter.click',
+  'https://nitter.jaydenha.uk',
+  'https://shitter.thepixora.com',
+  'https://nitter.netbub.com',
+  'https://nitter.meowing.monster',
+  'https://nitter.tiekoetter.com',
+  'https://nitter.space',
+  'https://nitter.cz',
+  'https://nitter.tromdienste.de',
+  'https://nitter.app',
+];
+
+const SYNDICATION_BASE = 'https://syndication.twitter.com/srv/timeline-profile/screen-name/';
+
+const FETCH_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+const FETCH_TIMEOUT = 10000;
+
+function corsHeaders(extra = {}) {
+  return {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET,OPTIONS',
+    'Access-Control-Allow-Headers': '*',
+    ...extra,
+  };
+}
+
+function escapeXml(text) {
+  return String(text || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function escapeHtml(text) {
+  return String(text || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+// 从视频变体列表中选择中等码率的 MP4（平衡画质和加载速度）
+function pickBestMp4(variants) {
+  const mp4s = variants
+    .filter(v => v.content_type === 'video/mp4')
+    .sort((a, b) => (a.bitrate || 0) - (b.bitrate || 0));
+
+  if (mp4s.length === 0) return null;
+
+  const targetBitrate = 832000;
+  let best = mp4s[0];
+  let bestDiff = Infinity;
+  for (const v of mp4s) {
+    const diff = Math.abs((v.bitrate || 0) - targetBitrate);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      best = v;
+    }
+  }
+  return best.url;
+}
+
+// 简单哈希函数，用于生成伪推文 ID
+function simpleHash(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+// ─── URL 解码工具 ──────────────────────────────────────────────
+
+// 从 MP4 URL 候选列表中选择低码率视频
+// 策略：优先选短边最接近 480 的 MP4（平衡画质和加载速度）
+// 如果没有 480p 附近的选择，退而求其次选短边最小的（文件最小）
+// Twitter MP4 URL 中包含分辨率信息，如 /vid/avc1/640x480/xxx.mp4、/vid/avc1/1280x720/xxx.mp4
+// 注意：480x270 的短边是 270（横屏视频），480x854 的短边是 480（竖屏视频）
+// 因此 480p 筛选不能只看短边，需要综合考虑
+function pickBestResolutionMp4(urls) {
+  if (!urls || urls.length === 0) return '';
+  if (urls.length === 1) return urls[0];
+
+  // 解析每个 URL 的分辨率
+  const parsed = urls.map(url => {
+    const resMatch = url.match(/\/(\d{3,4})x(\d{3,4})\//i);
+    if (resMatch) {
+      const w = parseInt(resMatch[1]);
+      const h = parseInt(resMatch[2]);
+      // longSide 用于判断画质等级，shortSide 用于判断文件大小
+      return { url, w, h, shortSide: Math.min(w, h), longSide: Math.max(w, h), hasRes: true };
+    }
+    return { url, w: 0, h: 0, shortSide: 0, longSide: 0, hasRes: false };
+  });
+
+  // 策略1：优先选 longSide 在 480-720 范围内的（480p 或 720p 级别）
+  // 480x270 → longSide=480 ✓
+  // 640x480 → longSide=640 ✓
+  // 1280x720 → longSide=1280 ✗ (太大了)
+  // 1284x720 → longSide=1284 ✗
+  const candidatesMid = parsed.filter(p => p.hasRes && p.longSide >= 400 && p.longSide <= 900);
+  if (candidatesMid.length > 0) {
+    // 在中等画质中选 longSide 最小的（最接近 480p）
+    candidatesMid.sort((a, b) => a.longSide - b.longSide);
+    return candidatesMid[0].url;
+  }
+
+  // 策略2：没有中等画质，选 shortSide 最小的（文件最小）
+  const withRes = parsed.filter(p => p.hasRes);
+  if (withRes.length > 0) {
+    withRes.sort((a, b) => a.shortSide - b.shortSide);
+    return withRes[0].url;
+  }
+
+  // 无分辨率信息，返回第一个
+  return urls[0];
+}
+
+// 从 Nitter 代理 URL 中提取原始 Twitter CDN URL
+// 代理格式1: https://cdn.xcancel.com/pic/哈希/pbs.twimg.com%2Fprofile_images%2F...
+// 代理格式2: https://cdn.xcancel.com/video/哈希/https%3A%2F%2Fvideo.twimg.com%2F...
+// 代理格式3 (asia.aguea.com): https://venexa.site/media/xxx.jpg
+// 代理格式4: https://nitter.catsarch.com/pic/...
+function decodeNitterProxyUrl(proxyUrl) {
+  if (!proxyUrl) return '';
+  let url = proxyUrl.replace(/&amp;/g, '&');
+
+  // 通用：代理路径里内嵌了完整原始地址。部分实例（如 asia.aguea.com）的视频下载链接为
+  //   /video/<哈希>/https://venexa.site/amplify_video/.../xxx.mp4
+  // 形式，前面带 /video/<哈希>/ 前缀，直接提取内嵌的绝对地址并递归解析（venexa.site → twimg 等）。
+  // 必须放在 venexa 分支之前，否则 venexa 分支会提前 return 而只替换主机名、残留 /video/<哈希>/ 前缀，
+  // 导致前端拿到非法相对 URL → 媒体区黑屏/闪烁。
+  const embeddedAny = url.match(/\/(?:pic|video|thumb)\/[A-Za-z0-9]+\/(https?:\/\/[^\s"'<>]+)$/i);
+  if (embeddedAny) {
+    return decodeNitterProxyUrl(embeddedAny[1]);
+  }
+
+  // 格式3: venexa.site → 替换为 pbs.twimg.com 或 video.twimg.com
+  if (/venexa\.site/.test(url)) {
+    if (/\/media\//.test(url) || /\.(jpg|jpeg|png|gif|webp)/i.test(url)) {
+      return url.replace(/https?:\/\/venexa\.site\//, 'https://pbs.twimg.com/');
+    }
+    return url.replace(/https?:\/\/venexa\.site\//, 'https://video.twimg.com/');
+  }
+
+  // 格式5: 部分 Nitter 实例（如 xcancel.com）把图片/视频封面输出为 /i/ 前缀的未编码 twimg 路径，
+  // 例如 https://cdn.xcancel.com/i/pbs.twimg.com/ext_tw_video_thumb/.../png
+  // 不还原的话前端会去代理 cdn.xcancel.com/i/... 而失败，导致「视频能播、封面不显示」
+  const iMatch = url.match(/\/i\/((?:pbs|video|abs)\.twimg\.com\/.+)$/i);
+  if (iMatch) {
+    return 'https://' + iMatch[1];
+  }
+
+  // 格式1/2/4: 从 /pic/ 或 /video/ 路径中提取 URL 编码的原始地址
+  // 匹配 /pic/xxx/ 或 /video/xxx/ 后面的部分
+  // 注意：哈希段 <xxx> 必须是可选的——部分较新实例（nitter.app / nitter.space /
+  // nitter.tiekoetter.com / nitter.tromdienste.de）输出 /pic/https%3A%2F%2Fpbs...（无哈希），
+  // 若强制要求哈希段会导致整条正则不匹配、poster 原样吐出相对地址 → 封面黑屏。
+  const proxyMatch = url.match(/\/(?:pic|video|thumb)\/(?:[A-Za-z0-9]+\/)?(.+)$/);
+  if (proxyMatch) {
+    let encoded = proxyMatch[1];
+    // URL 解码（可能双重编码）
+    try {
+      // 先检查是否以 http 开头（未编码）
+      if (/^https?:\/\//i.test(encoded)) {
+        return encoded;
+      }
+      // URL 解码
+      let decoded = decodeURIComponent(encoded);
+      // 如果解码后仍然包含 % 编码，再解一次
+      if (decoded.includes('%')) {
+        const decoded2 = decodeURIComponent(decoded);
+        if (decoded2 !== decoded) decoded = decoded2;
+      }
+      // 确保是有效的 HTTP URL
+      if (/^https?:\/\//i.test(decoded)) {
+        return decoded;
+      }
+      // xcancel.com 格式: /pic/哈希/pbs.twimg.com%2F... → 解码后 pbs.twimg.com/...（缺少协议）
+      if (/^(pbs|video)\.twimg\.com\//i.test(decoded)) {
+        return 'https://' + decoded;
+      }
+      // asia.aguea.com 等实例：原始 twimg 地址直接嵌在代理路径里
+      // 例如 /video/<哈希>/https://video.twimg.com/...mp4 或 /pic/<哈希>/https://pbs.twimg.com/...
+      // 仅解码出末尾的绝对地址即可（否则前缀 /video/<哈希>/ 会让前端拿到非法相对 URL → 媒体区黑屏/闪烁）
+      const embedded = decoded.match(/https?:\/\/(?:pbs|video)\.twimg\.com\/.+/i);
+      if (embedded) {
+        return embedded[0];
+      }
+    } catch (e) {
+      // 解码失败，返回原始
+    }
+  }
+
+  // 如果已经是原始 Twitter CDN URL，直接返回
+  if (/^https?:\/\/(?:pbs|video)\.twimg\.com\//i.test(url)) {
+    return url;
+  }
+
+  // 其他情况返回原始 URL（可能是直连地址）
+  return url;
+}
+
+// 归一化 Twitter 图片 URL：去掉尺寸后缀（:large/:orig/:small 等）与尺寸相关查询参数，
+// 让同一张图的不同尺寸变体被视为「同一张」。
+// 修复：Nitter 的 <a class="still-image" href> 与内部 <img src> 常指向带/不带 :large 后缀的两种代理地址，
+// 解码后文本不同，导致后端把同一张图当成两张重复写入 description，前端显示成「两张一样的图」。
+function normalizeTwImgUrl(url) {
+  if (!url) return url;
+  return url
+    .replace(/:(large|orig|small|medium|thumb|mini|900x900|4096x4096)(?=$|[?&])/i, '')
+    .replace(/[?&](format|name|width|height)=[^&]*/gi, '')
+    .replace(/\?$/, '');
+}
+
+// 宽松判断页面是否含有推文时间线（兼容不同 Nitter 实例/改版的类名）
+// 旧版仅认 timeline-item，xcancel 等改版后可能换类名，导致整源被误判为空
+function hasTimeline(html) {
+  return html.includes('timeline-item')
+      || html.includes('tweet-content')
+      || html.includes('tweet-header')
+      || html.includes('class="tweet"');
+}
+
+// ─── 方案 A：Nitter HTML 解析（多实例回退）──────────────────────
+async function fetchFromNitter(username, maxItems, diag = []) {
+  const hostOf = (b) => b.replace('https://', '');
+  for (const base of NITTER_INSTANCES) {
+    try {
+      const res = await fetch(base + '/' + username, {
+        headers: {
+          'User-Agent': FETCH_UA,
+          'Accept': 'text/html,application/xhtml+xml',
+        },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT),
+        redirect: 'follow',
+      });
+
+      if (!res.ok) {
+        diag.push(`${hostOf(base)}: HTTP ${res.status}`);
+        continue;
+      }
+
+      const html = await res.text();
+
+      // 检测用户不存在
+      if (html.includes('User not found') || html.includes('does not exist') || html.includes('Account suspended')) {
+        return buildEmptyRss(username, '该用户不存在或已被封禁');
+      }
+
+      // 检测是否有推文内容（宽松判断，兼容改版）
+      if (!hasTimeline(html)) {
+        diag.push(`${hostOf(base)}: 未识别到推文结构`);
+        continue;
+      }
+
+      // 检测 Cloudflare 验证页
+      if (html.includes('Just a moment') || (html.includes('cloudflare') && html.includes('challenge'))) {
+        diag.push(`${hostOf(base)}: Cloudflare验证页`);
+        continue;
+      }
+
+      const items = await parseNitterHtml(html, username, maxItems, base);
+
+      if (items.length === 0) {
+        // 当前实例能访问但没有媒体推文，不继续尝试其他实例
+        return buildEmptyRss(username, '该用户暂无可获取的公开推文（仅显示含图片或视频的推文）');
+      }
+
+      const rss =
+        '<?xml version="1.0" encoding="UTF-8"?>\n' +
+        '<rss version="2.0">\n' +
+        '<channel>\n' +
+        '<title>@' + username + ' / Twitter</title>\n' +
+        '<link>https://x.com/' + username + '</link>\n' +
+        '<description>Twitter 时间线 - @' + username + '（via ' + base.replace('https://', '') + '）</description>\n' +
+        '<language>zh-CN</language>\n' +
+        '<lastBuildDate>' + new Date().toUTCString() + '</lastBuildDate>\n' +
+        items.join('\n') + '\n' +
+        '</channel>\n' +
+        '</rss>';
+
+      return rss;
+    } catch (e) {
+      diag.push(`${hostOf(base)}: ${e && e.message ? e.message : 'fetch失败'}`);
+      continue;
+    }
+  }
+  return null;
+}
+
+// 解析 Nitter HTML，提取推文、图片、视频
+// 兼容多种 Nitter 实例的 HTML 结构（xcancel.com / nitter.catsarch.com / asia.aguea.com 等）
+//
+// 通用 HTML 结构（基于 Nitter 最新源码 tweet.nim）:
+//   <div class="timeline-item ...">
+//     <div class="tweet-body">
+//       <div class="tweet-header">
+//         ... <span class="tweet-date"><a href="..." title="Aug 14, 2026 · 3:08 AM UTC">10h</a></span>
+//       </div>
+//       <div class="tweet-content media-body" dir="auto">推文文本</div>
+//       <div class="attachments">
+//         <!-- 图片 -->
+//         <div class="attachment">
+//           <a class="still-image" href="代理URL"><img src="代理URL" /></a>
+//         </div>
+//         <!-- 视频 MP4 模式 -->
+//         <div class="attachment">
+//           <video poster="代理URL" controls>
+//             <source src="代理URL" type="video/mp4">
+//           </video>
+//           <a class="video-download" href="代理URL">Download video</a>
+//         </div>
+//         <!-- 视频 m3u8 模式 -->
+//         <div class="attachment">
+//           <video poster="代理URL" data-url="代理URL" data-autoload="false"></video>
+//           <div class="video-overlay">...</div>
+//         </div>
+//       </div>
+//     </div>
+//   </div>
+async function parseNitterHtml(html, username, maxItems, nitterBase) {
+  const items = [];
+
+  // 用 timeline-item 作为分隔，每个块包含一条推文
+  const tweetBlocks = html.split(/(?=<div class="timeline-item)/i);
+
+  for (const block of tweetBlocks) {
+    if (items.length >= maxItems) break;
+    if (!block.includes('tweet-body')) continue;
+
+    // 提取推文文本
+    const contentMatch = block.match(/<div class="tweet-content[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+    if (!contentMatch) continue;
+
+    // 清理 HTML 标签，保留纯文本和链接文本
+    let rawText = contentMatch[1];
+    // 将 <a> 标签的文本保留（如 @mention、链接文本）
+    rawText = rawText.replace(/<a[^>]*>([^<]*)<\/a>/gi, '$1');
+    const text = rawText
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&nbsp;/g, ' ')
+      .trim();
+
+    if (!text) continue;
+
+    // 检测转推（RT）：Nitter 在 tweet-badge 中以「转推了 @originalUser」显示原作者，
+    // 而 tweet-content 本身通常不含 RT 前缀，故主动提取原作者拼到标题前，
+    // 否则转推的「原始作者」信息会丢失，前端标题看不出是谁的内容。
+    let rtAuthor = '';
+    // 仅从「推文头部区」（tweet-content 之前，含 tweet-badge）检测转推，
+    // 切勿扫描整条正文——正文里出现「转推」二字（中文极常见）会被误判，
+    // 并错误抓到最近的 <a href> 把作者认错。
+    const headerPart = block.split(/<div class="tweet-content/i)[0] || '';
+    if (/转推|Retweet/i.test(headerPart)) {
+      // 优先从 badge 链接的 href 取 handle（用户名）。部分 Nitter 镜像 badge 文本是「显示名/昵称」
+      // （如 Elon Musk），若直接取文本会导致标题里 @ 后面跟着昵称而非用户名。
+      // href 路径首段永远是用户名（如 /elonmusk 或 /elonmusk/status/123），可靠。
+      const rtHrefMatch = headerPart.match(/<a[^>]*href="\/([A-Za-z0-9_]+)/i);
+      if (rtHrefMatch) {
+        rtAuthor = rtHrefMatch[1];
+      } else {
+        // 兜底：从 badge 文本取（去掉可能的 @ 前缀）
+        const rtTextMatch = headerPart.match(/<a[^>]*>([^<]*)<\/a>/i);
+        if (rtTextMatch) {
+          rtAuthor = (rtTextMatch[1] || '').replace(/^@/, '').trim();
+        }
+      }
+    }
+    let finalText = text;
+    // 避免与 tweet-content 已自带「RT @user」前缀的推文重复拼接
+    const alreadyRT = /^rt\s*@/i.test(text);
+    if (rtAuthor && !alreadyRT) {
+      finalText = 'RT @' + rtAuthor + ': ' + text;
+    }
+
+    // 提取日期
+    // 优先从 <a title="Aug 14, 2026 · 3:08 AM UTC"> 解析精确时间
+    // 回退到 <span class="tweet-date">10h</span> 相对时间
+    let pubDate = '';
+    const dateTitleMatch = block.match(/<span class="tweet-date"[^>]*>\s*<a[^>]*title="([^"]+)"/i);
+    if (dateTitleMatch) {
+      pubDate = parseNitterDate(dateTitleMatch[1].trim());
+    }
+    if (!pubDate) {
+      const dateTextMatch = block.match(/<span class="tweet-date"[^>]*>([^<]*<[^>]*>)?([^<]*)<\/span>/i);
+      if (dateTextMatch) {
+        const dateText = (dateTextMatch[2] || dateTextMatch[1] || '').replace(/<[^>]+>/g, '').trim();
+        if (dateText) pubDate = parseNitterDate(dateText);
+      }
+    }
+    if (!pubDate) {
+      // 兜底：直接从 tweet-date 块提取所有文本
+      const dateFallback = block.match(/<span class="tweet-date"[^>]*>([\s\S]*?)<\/span>/i);
+      if (dateFallback) {
+        const dateText = dateFallback[1].replace(/<[^>]+>/g, '').trim();
+        if (dateText) pubDate = parseNitterDate(dateText);
+      }
+    }
+    if (!pubDate) pubDate = new Date().toUTCString();
+
+    // 提取图片
+    // 格式：<a class="still-image" href="代理URL">
+    const imageUrls = [];
+    const imageRegex = /<a[^>]*class="still-image"[^>]*href="([^"]+)"/gi;
+    let imgMatch;
+    while ((imgMatch = imageRegex.exec(block)) !== null) {
+      const originalUrl = decodeNitterProxyUrl(imgMatch[1]);
+      if (originalUrl) imageUrls.push(normalizeTwImgUrl(originalUrl));
+    }
+
+    // 提取视频和对应的 poster（预览图）
+    // Nitter 视频渲染有多种模式（取决于实例配置 proxyVideos/hlsPlayback/mp4Playback）：
+    //   模式1: <video poster="thumb" controls><source src="mp4" type="video/mp4"></video>
+    //   模式2: <video poster="thumb" data-url="m3u8" data-autoload="false"> + video-overlay
+    //   模式3（播放被禁用）: <img src="thumb" loading="lazy"> + video-download 链接
+    //   模式4: <video poster="thumb" ...> + <a class="video-download" href="mp4">
+    // poster 可能在 <video> 标签上，也可能作为单独 <img> 标签在 attachment 内
+    const videoUrls = [];
+    const videoPosters = [];
+
+    // 用 attachment 容器分割，逐块提取视频 URL 和 poster
+    // 每个 <div class="attachment"> 包含一个视频/图片及其缩略图
+    const attachmentBlocks = block.split(/(?=<div class="attachment")/i);
+
+    for (const attBlock of attachmentBlocks) {
+      // 精确匹配 <div class="attachment"> 或 <div class="attachment ...">
+      // 避免匹配到 <div class="attachments">（容器），后者不包含单个媒体项
+      if (!/<div class="attachment["\s>]/i.test(attBlock)) continue;
+
+      let posterUrl = '';
+
+      // 提取 video 标签上的 poster
+      const videoTagMatch = attBlock.match(/<video[^>]*\sposter="([^"]+)"[^>]*>/i);
+      if (videoTagMatch) {
+        posterUrl = decodeNitterProxyUrl(videoTagMatch[1]);
+      }
+
+      // 如果 video 标签没有 poster，查找 attachment 内的 <img> 标签
+      // （模式3：播放被禁用时，Nitter 用 <img src="thumb"> 显示缩略图）
+      // 排除 avatar 图片（class 包含 "avatar"），避免把头像误当作视频缩略图
+      if (!posterUrl) {
+        const attImgMatch = attBlock.match(/<img(?![^>]*class="[^"]*avatar[^"]*")[^>]*\ssrc="([^"]+)"[^>]*>/i);
+        if (attImgMatch) {
+          posterUrl = decodeNitterProxyUrl(attImgMatch[1]);
+        }
+      }
+
+      // 提取视频 URL
+      // 优先 MP4（原生 <video> 播放，无 hls.js 分片/ABR，顺畅且少错误）：
+      //   xcancel.com 输出 <source src="mp4"> + <a class="video-download" href="mp4">
+      //   从 source 标签和 video-download 链接收集所有 MP4 候选，选 480~720p（不取 1080p 避免吃网速）。
+      // 仅当无 MP4 时才回退到 m3u8（asia.aguea.com 只吐 m3u8，作为兜底走 hls.js）。
+      const mp4Candidates = [];
+
+      // <source> 标签（xcancel 的 mp4 模式）
+      const sourceMatch = attBlock.match(/<source[^>]*\ssrc="([^"]+)"[^>]*>/i);
+      if (sourceMatch) {
+        const mp4Url = decodeNitterProxyUrl(sourceMatch[1]);
+        if (mp4Url && /\.mp4/i.test(mp4Url)) {
+          mp4Candidates.push(mp4Url);
+        }
+      }
+
+      // video-download 链接（xcancel 的下载链接，取最高码率 mp4）
+      const downloadRegex = /<a[^>]*class="video-download"[^>]*href="([^"]+)"/gi;
+      let dlMatch;
+      while ((dlMatch = downloadRegex.exec(attBlock)) !== null) {
+        const dlUrl = decodeNitterProxyUrl(dlMatch[1]);
+        if (dlUrl && /\.mp4/i.test(dlUrl) && !mp4Candidates.includes(dlUrl)) {
+          mp4Candidates.push(dlUrl);
+        }
+      }
+
+      let videoUrl = '';
+      if (mp4Candidates.length > 0) {
+        // 从 MP4 候选中选 480~720p（不取 1080p，避免吃网速）
+        videoUrl = pickBestResolutionMp4(mp4Candidates);
+      }
+
+      // 无 MP4 时回退到 m3u8（asia.aguea.com 等 HLS-only 实例）
+      if (!videoUrl) {
+        const dataUrlMatch = attBlock.match(/<video[^>]*\sdata-url="([^"]+)"[^>]*>/i);
+        if (dataUrlMatch) {
+          const m3u8Url = decodeNitterProxyUrl(dataUrlMatch[1]);
+          if (m3u8Url && /\.m3u8/i.test(m3u8Url)) {
+            videoUrl = m3u8Url;
+          }
+        }
+      }
+
+      // 只有提取到视频 URL 才算视频条目（避免把纯图片 attachment 误认为视频）
+      if (videoUrl) {
+        videoUrls.push(videoUrl);
+        videoPosters.push(posterUrl ? normalizeTwImgUrl(posterUrl) : '');
+      } else if (posterUrl) {
+        // 有 poster 但没有视频 URL：可能视频不可用，把 poster 当作普通图片
+        const normPoster = normalizeTwImgUrl(posterUrl);
+        if (!imageUrls.includes(normPoster)) {
+          imageUrls.push(normPoster);
+        }
+      }
+    }
+
+    // 不再过滤纯文字推文：保留所有推文（含纯文字），确保「及时收到更新」不丢内容。
+    // 纯文字条目没有图片/视频，前端卡片会只显示文字，不影响阅读。
+
+    // 生成推文链接
+    // 优先从日期链接中提取真实推文 ID
+    let tweetId = '';
+    const statusLinkMatch = block.match(/href="[^"]*\/status\/(\d+)/i);
+    if (statusLinkMatch) {
+      tweetId = statusLinkMatch[1];
+    }
+    if (!tweetId) {
+      // 回退：用媒体 URL 文件名或文本哈希生成伪 ID
+      if (imageUrls.length > 0) {
+        const fnMatch = imageUrls[0].match(/\/media\/([^.\/]+)/);
+        if (fnMatch) tweetId = fnMatch[1];
+      }
+      if (!tweetId && videoUrls.length > 0) {
+        const fnMatch = videoUrls[0].match(/\/amplify_video\/([^\/]+)/);
+        if (fnMatch) tweetId = fnMatch[1];
+      }
+      if (!tweetId) tweetId = simpleHash(text + pubDate);
+    }
+
+    const tweetLink = 'https://x.com/' + username + '/status/' + tweetId;
+
+    // 构建描述 HTML
+    let desc = '<p>' + escapeHtml(text) + '</p>';
+
+    // 添加图片（使用原始 pbs.twimg.com URL，通过 media-proxy 代理播放）
+    // 排除视频 poster（已在 <video poster="..."> 中输出，避免前端 imgs[0] 取到 poster 而非普通图片）
+    const usedPosterUrls = new Set();
+
+    // 先收集视频 poster URL（归一化），后面输出图片时跳过
+    for (let i = 0; i < videoUrls.length; i++) {
+      if (videoPosters[i]) usedPosterUrls.add(normalizeTwImgUrl(videoPosters[i]));
+    }
+
+    for (const imgUrl of imageUrls) {
+      if (usedPosterUrls.has(imgUrl)) continue;
+      desc += '<img src="' + escapeHtml(imgUrl) + '" />';
+    }
+
+    // 添加视频
+    // MP4 视频：直接输出原始 video.twimg.com URL，由阅读器的 media-proxy 代理
+    // m3u8 视频：输出原始 m3u8 URL，由 media-proxy 做变体过滤
+    // poster 放在 <video poster="..."> 属性中，前端 parseRSS 会优先从该属性提取视频封面
+    for (let i = 0; i < videoUrls.length; i++) {
+      const videoUrl = videoUrls[i];
+      const posterUrl = videoPosters[i] || '';
+      const posterAttr = posterUrl ? ` poster="${escapeHtml(posterUrl)}"` : '';
+      // 双重保险：同时把 poster 作为 <img> 输出在 <video> 前面。
+      // 旧版前端只解析 imgs[0] 作为封面（不识别 <video poster> 属性），
+      // 新版前端优先从 <video poster> 属性取封面，两种方式都能正确显示预览图，
+      // 避免「只更新了后端 Function、前端 index.html 未同步」时出现黑屏。
+      if (posterUrl) {
+        desc += '<img src="' + escapeHtml(posterUrl) + '" />';
+      }
+      desc += `<video src="${escapeHtml(videoUrl)}"${posterAttr} controls></video>`;
+    }
+
+    items.push(
+      '<item>\n' +
+      '<title>' + escapeXml(finalText.slice(0, 100)) + (finalText.length > 100 ? '…' : '') + '</title>\n' +
+      '<link>' + tweetLink + '</link>\n' +
+      '<description><![CDATA[' + desc + ']]></description>\n' +
+      '<pubDate>' + pubDate + '</pubDate>\n' +
+      '<guid isPermaLink="false">' + tweetLink + '</guid>\n' +
+      '</item>'
+    );
+  }
+
+  return items;
+}
+
+// 解析 Nitter 日期格式
+// 支持的格式：
+//   精确时间 (title 属性): "Aug 14, 2026 · 3:08 AM UTC"
+//   相对时间: "15h", "2d", "3m", "30s"
+//   绝对时间: "Aug 4", "Aug 4, 2025", "Jan 5"
+function parseNitterDate(dateStr) {
+  if (!dateStr) return '';
+
+  const now = new Date();
+
+  // 精确时间格式: "Aug 14, 2026 · 3:08 AM UTC" 或 "Aug 14, 2026, 3:08 AM"
+  // 这是 Nitter <a title="..."> 中提供的完整时间戳
+  const preciseMatch = dateStr.match(/^([A-Z][a-z]{2})\s+(\d{1,2}),?\s+(\d{4})[,\s·]+(\d{1,2}):(\d{2})\s*(AM|PM)?\s*(UTC)?$/i);
+  if (preciseMatch) {
+    const months = {
+      'Jan': 0, 'Feb': 1, 'Mar': 2, 'Apr': 3, 'May': 4, 'Jun': 5,
+      'Jul': 6, 'Aug': 7, 'Sep': 8, 'Oct': 9, 'Nov': 10, 'Dec': 11
+    };
+    const month = months[preciseMatch[1]];
+    if (month !== undefined) {
+      const day = parseInt(preciseMatch[2]);
+      const year = parseInt(preciseMatch[3]);
+      let hour = parseInt(preciseMatch[4]);
+      const minute = parseInt(preciseMatch[5]);
+      const ampm = preciseMatch[6];
+      if (ampm && /PM/i.test(ampm) && hour < 12) hour += 12;
+      if (ampm && /AM/i.test(ampm) && hour === 12) hour = 0;
+      const d = new Date(Date.UTC(year, month, day, hour, minute, 0));
+      if (!isNaN(d.getTime())) return d.toUTCString();
+    }
+  }
+
+  // "15h" → 15小时前
+  const hoursMatch = dateStr.match(/^(\d+)h$/i);
+  if (hoursMatch) {
+    const d = new Date(now.getTime() - parseInt(hoursMatch[1]) * 3600000);
+    return d.toUTCString();
+  }
+
+  // "2d" → 2天前
+  const daysMatch = dateStr.match(/^(\d+)d$/i);
+  if (daysMatch) {
+    const d = new Date(now.getTime() - parseInt(daysMatch[1]) * 86400000);
+    return d.toUTCString();
+  }
+
+  // "3m" → 3分钟前
+  const minMatch = dateStr.match(/^(\d+)m$/i);
+  if (minMatch) {
+    const d = new Date(now.getTime() - parseInt(minMatch[1]) * 60000);
+    return d.toUTCString();
+  }
+
+  // "30s" → 30秒前
+  const secMatch = dateStr.match(/^(\d+)s$/i);
+  if (secMatch) {
+    const d = new Date(now.getTime() - parseInt(secMatch[1]) * 1000);
+    return d.toUTCString();
+  }
+
+  // "Aug 4" 或 "Aug 4, 2025" 格式
+  const monthDayMatch = dateStr.match(/^([A-Z][a-z]{2})\s+(\d{1,2})(?:,?\s*(\d{4}))?$/);
+  if (monthDayMatch) {
+    const monthName = monthDayMatch[1];
+    const day = parseInt(monthDayMatch[2]);
+    const year = monthDayMatch[3] ? parseInt(monthDayMatch[3]) : now.getFullYear();
+    const months = {
+      'Jan': 0, 'Feb': 1, 'Mar': 2, 'Apr': 3, 'May': 4, 'Jun': 5,
+      'Jul': 6, 'Aug': 7, 'Sep': 8, 'Oct': 9, 'Nov': 10, 'Dec': 11
+    };
+    const month = months[monthName];
+    if (month !== undefined) {
+      let actualYear = year;
+      if (!monthDayMatch[3]) {
+        const candidate = new Date(year, month, day);
+        if (candidate > now) {
+          actualYear = year - 1;
+        }
+      }
+      const d = new Date(actualYear, month, day, 12, 0, 0);
+      return d.toUTCString();
+    }
+  }
+
+  // 尝试直接解析
+  const parsed = new Date(dateStr);
+  if (!isNaN(parsed.getTime())) {
+    return parsed.toUTCString();
+  }
+
+  // 无法解析，返回当前时间
+  return now.toUTCString();
+}
+
+// ─── 方案 B：Syndication API（最终回退）────────────────────────
+async function fetchFromSyndication(username, maxItems) {
+  try {
+    const res = await fetch(SYNDICATION_BASE + username, {
+      headers: {
+        'User-Agent': FETCH_UA,
+        'Accept': 'text/html,application/xhtml+xml',
+      },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT),
+    });
+
+    if (!res.ok) return null;
+
+    const html = await res.text();
+
+    // 检测限速
+    if (html.includes('Rate limit exceeded')) return null;
+
+    const match = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
+    if (!match) return null;
+
+    const jsonStr = match[1].replace(/[\x00-\x1f]/g, function(ch) {
+      if (ch === '\n' || ch === '\r' || ch === '\t') return ch;
+      return ' ';
+    });
+    const data = JSON.parse(jsonStr);
+    const entries = data?.props?.pageProps?.timeline?.entries || [];
+    const hasResults = data?.props?.pageProps?.contextProvider?.hasResults;
+
+    if (!hasResults || entries.length === 0) {
+      return null;
+    }
+
+    const items = [];
+    for (const entry of entries) {
+      if (items.length >= maxItems) break;
+
+      const tweet = entry?.content?.tweet;
+      if (!tweet) continue;
+
+      const tweetId = tweet.conversation_id_str || '';
+      const text = tweet.text || '';
+
+      let pubDate = '';
+      try {
+        pubDate = new Date(tweet.created_at).toUTCString();
+      } catch (e) {
+        continue;
+      }
+
+      let desc = '<p>' + escapeHtml(text) + '</p>';
+
+      const mediaList = tweet.entities?.media || [];
+      let hasMedia = false;
+      for (const m of mediaList) {
+        if (m.type === 'photo') {
+          desc += '<img src="' + escapeHtml(m.media_url_https || '') + '" />';
+          hasMedia = true;
+        } else if (m.type === 'video' || m.type === 'animated_gif') {
+          const poster = m.media_url_https || '';
+          if (poster) {
+            desc += '<img src="' + escapeHtml(poster) + '" />';
+          }
+          const mp4Url = pickBestMp4(m.video_info?.variants || []);
+          if (mp4Url) {
+            desc += '<video src="' + escapeHtml(mp4Url) + '" controls></video>';
+            hasMedia = true;
+          }
+        }
+      }
+
+      // 只保留有媒体的推文
+      if (!hasMedia) continue;
+
+      items.push(
+        '<item>\n' +
+        '<title>' + escapeXml(text.slice(0, 100)) + (text.length > 100 ? '…' : '') + '</title>\n' +
+        '<link>https://x.com/' + username + '/status/' + tweetId + '</link>\n' +
+        '<description><![CDATA[' + desc + ']]></description>\n' +
+        '<pubDate>' + pubDate + '</pubDate>\n' +
+        '<guid isPermaLink="true">https://x.com/' + username + '/status/' + tweetId + '</guid>\n' +
+        '</item>'
+      );
+    }
+
+    if (items.length === 0) {
+      return null;
+    }
+
+    const rss =
+      '<?xml version="1.0" encoding="UTF-8"?>\n' +
+      '<rss version="2.0">\n' +
+      '<channel>\n' +
+      '<title>@' + username + ' / Twitter</title>\n' +
+      '<link>https://x.com/' + username + '</link>\n' +
+      '<description>Twitter 时间线 - @' + username + '（via Syndication API）</description>\n' +
+      '<language>zh-CN</language>\n' +
+      '<lastBuildDate>' + new Date().toUTCString() + '</lastBuildDate>\n' +
+      items.join('\n') + '\n' +
+      '</channel>\n' +
+      '</rss>';
+
+    return rss;
+  } catch (err) {
+    return null;
+  }
+}
+
+// ─── 生成空 RSS（无 item，不显示占位内容）──────────────────────
+function buildEmptyRss(username, reason) {
+  return (
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<rss version="2.0">\n' +
+    '<channel>\n' +
+    '<title>@' + username + ' / Twitter</title>\n' +
+    '<link>https://x.com/' + username + '</link>\n' +
+    '<description>' + escapeXml(reason) + '</description>\n' +
+    '<language>zh-CN</language>\n' +
+    '<lastBuildDate>' + new Date().toUTCString() + '</lastBuildDate>\n' +
+    '</channel>\n' +
+    '</rss>'
+  );
+}
+
+// ─── 实例健康自检（?health=1）──────────────────────────────────
+// 在 Cloudflare 边缘网络并发探测 HEALTH_POOL 全部实例，返回真实可用性。
+// 用途：部署后访问 /twitter-rss?health=1 一键复核实例存活，无需本地改代码。
+// 注意：必须在 Cloudflare 上跑才有意义——本地/沙箱网络与实例可达性无关，会误判。
+async function healthCheck() {
+  const probe = async (base) => {
+    const host = base.replace(/^https?:\/\//, '');
+    try {
+      const res = await fetch(base + '/NASA', {
+        headers: { 'User-Agent': FETCH_UA, 'Accept': 'text/html,application/xhtml+xml' },
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!res.ok) return { instance: host, status: 'FAIL', detail: 'HTTP ' + res.status };
+      const html = await res.text();
+      if (html.includes('Just a moment') || (html.includes('cloudflare') && html.includes('challenge')))
+        return { instance: host, status: 'FAIL', detail: 'Cloudflare 验证页' };
+      if (/Upstream is temporarily unavailable|Nitter shutdown|not a bot|Prove You|Access Queue|dogcaptcha/i.test(html))
+        return { instance: host, status: 'FAIL', detail: '反爬/宕机/排队' };
+      if (html.includes('YunoHost') || html.includes('Admin Login'))
+        return { instance: host, status: 'FAIL', detail: '非 nitter 部署' };
+      if (!hasTimeline(html)) return { instance: host, status: 'FAIL', detail: '无时间线结构' };
+      return { instance: host, status: 'OK', detail: '时间线正常' };
+    } catch (e) {
+      return { instance: host, status: 'FAIL', detail: (e && e.message) ? e.message : 'fetch 失败' };
+    }
+  };
+  const results = await Promise.all(HEALTH_POOL.map(probe));
+  const alive = results.filter(r => r.status === 'OK').map(r => r.instance);
+  return new Response(JSON.stringify({
+    checked: results.length,
+    alive: alive.length,
+    aliveInstances: alive,
+    results
+  }, null, 2), {
+    status: 200,
+    headers: corsHeaders({ 'Content-Type': 'application/json; charset=utf-8' })
+  });
+}
+
+// ─── 主入口：多源回退 ──────────────────────────────────────────
+export async function onRequest({ request, env }) {
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: corsHeaders() });
+  }
+
+  const url = new URL(request.url);
+
+  // 实例健康自检：/twitter-rss?health=1 —— 在 Cloudflare 边缘网络实测全部候选实例，
+  // 直接给出「此刻真实可用性」，避免本地/沙箱网络误判（nitter 实例随时可能宕机/被反爬）。
+  if (url.searchParams.get('health') !== null) {
+    return await healthCheck();
+  }
+
+  const username = (url.searchParams.get('user') || '')
+    .replace(/[^a-zA-Z0-9_]/g, '')
+    .slice(0, 15);
+
+  let maxItems = DEFAULT_MAX_ITEMS;
+  const maxParam = parseInt(url.searchParams.get('max'), 10);
+  if (maxParam > 0) {
+    maxItems = Math.min(maxParam, ABSOLUTE_MAX_ITEMS);
+  }
+
+  if (!username) {
+    return new Response('缺少 user 参数。用法: /twitter-rss?user=用户名', {
+      status: 400,
+      headers: corsHeaders({ 'Content-Type': 'text/plain; charset=utf-8' }),
+    });
+  }
+
+  // KV 缓存（命名空间 rss-video-cache，已在 Cloudflare 后台绑定）
+  // 命中则直接返回，毫秒级、不再回源打 Nitter，既提速又抗 Nitter 限流/封锁
+  const kv = env && env["rss-video-cache"];
+  const cacheKey = `twrss:${username}:${maxItems}`;
+  if (kv) {
+    try {
+      const cached = await kv.get(cacheKey, { type: "text" });
+      if (cached) {
+        return new Response(cached, {
+          status: 200,
+          headers: corsHeaders({
+            'Content-Type': 'application/rss+xml; charset=utf-8',
+            'Cache-Control': 'public, max-age=60, stale-while-revalidate=240',
+            'X-Cache': 'HIT',
+          }),
+        });
+      }
+    } catch (e) {
+      console.warn("twitter-rss KV 读取失败，回退实时代理：", e);
+    }
+  }
+
+  // 方案 A：尝试 Nitter HTML 解析（多实例依次回退），记录每个实例的诊断
+  const nitterDiag = [];
+  let rss = await fetchFromNitter(username, maxItems, nitterDiag);
+  let gotReal = !!rss;
+
+  // 方案 B：所有 Nitter 实例失败，回退到 Syndication API
+  if (!rss) {
+    const syn = await fetchFromSyndication(username, maxItems);
+    gotReal = !!syn;
+    if (syn) {
+      rss = syn;
+    } else {
+      const detail = nitterDiag.length ? nitterDiag.join('；') : '未知原因';
+      rss = buildEmptyRss(
+        username,
+        `所有 Nitter 实例均不可用（${detail}），且 Syndication API 也失败。可能是实例失效或 Twitter 风控限制，请稍后重试，或检查 NITTER_INSTANCES 实例列表。`
+      );
+    }
+  }
+
+  // 仅缓存真实抓取到的内容；空结果/失败不缓存，以便尽快重试源站
+  if (kv && gotReal && rss) {
+    try {
+      await kv.put(cacheKey, rss, { expirationTtl: 300 });
+    } catch (e) {
+      console.warn("twitter-rss KV 写入失败（不影响本次返回）：", e);
+    }
+  }
+
+  return new Response(rss, {
+    status: 200,
+    headers: corsHeaders({
+      'Content-Type': 'application/rss+xml; charset=utf-8',
+      'Cache-Control': 'public, max-age=300, stale-while-revalidate=300',
+      'ETag': '"' + username + '-' + maxItems + '-' + Math.floor(Date.now() / 300000) + '"',
+      'X-Cache': gotReal ? 'MISS' : 'BYPASS',
+    }),
+  });
+}
