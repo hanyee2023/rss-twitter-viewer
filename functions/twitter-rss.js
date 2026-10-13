@@ -10,14 +10,6 @@
 const DEFAULT_MAX_ITEMS = 50;   // 每源每次返回上限：原 20，提高到 50 以保留更多历史未读（约 5 天/源 @10条）
 const ABSOLUTE_MAX_ITEMS = 100; // ?max= 硬上限：原 50，提高到 100（保留调优空间）
 
-// Nitter 实例列表（按优先级排序）
-// 2026-08-18 重大调整：xcancel.com 提回第一优先源。
-//   理由：用户实测 xcancel 能正常播放 mp4 视频。xcancel 输出 <source src=mp4> + <a class="video-download" href=mp4>，
-//   mp4 走前端原生 <video> 播放，无 hls.js 分片/ABR/清单解析，顺畅且少错误。
-//   xcancel 默认取最高分辨率 mp4（1080p），twitter-rss.js 的 pickBestResolutionMp4 会降选 480~720p。
-//   xcancel 需要代理才能访问，但服务端 fetch 走 Cloudflare 边缘网络，与用户本地网络无关。
-//   asia.aguea.com 作为兜底：它只吐 m3u8（data-url），走 hls.js，结构兼容已验证。
-//   失败时 fast-fail 落到下一个实例，不影响主链路。
 // Nitter 实例列表（按优先级排序，2026-10-10 复核后更新）
 // 已剔除实测失效/反爬的实例：aguea.net（Anubis 验证）、nitter.catsarch.com（永久关停）、
 //   nitter.kareem.one（上游宕机）、nitter.click（Anubis）、nitter.jaydenha.uk（访问队列）、
@@ -39,14 +31,10 @@ const NITTER_INSTANCES = [
 // 覆盖当前默认实例 + 用户提供的候选实例，便于部署后一键复核（实例随时可能失效）。
 const HEALTH_POOL = [
   'https://xcancel.com',
-  'https://asia.aguea.com',
-  'https://aguea.net',
-  'https://nitter.catsarch.com',
   'https://nitter.cf',
   'https://nitter.kareem.one',
   'https://nitter.click',
   'https://nitter.jaydenha.uk',
-  'https://shitter.thepixora.com',
   'https://nitter.netbub.com',
   'https://nitter.meowing.monster',
   'https://nitter.tiekoetter.com',
@@ -896,12 +884,12 @@ export async function onRequest({ request, env }) {
 
   const url = new URL(request.url);
 
-  // 实例健康自检：/twitter-rss?health=1 —— 在 Cloudflare 边缘网络实测全部候选实例，
-  // 直接给出「此刻真实可用性」，避免本地/沙箱网络误判（nitter 实例随时可能宕机/被反爬）。
-  if (url.searchParams.get('health') !== null) {
-    return await healthCheck();
+  // 实例健康自检：访问 /twitter-rss?health=1 一键复核全部 Nitter 实例存活情况
+  if (url.searchParams.get('health') === '1') {
+    return healthCheck();
   }
 
+  const username = (url.searchParams.get('user') || '')
   const username = (url.searchParams.get('user') || '')
     .replace(/[^a-zA-Z0-9_]/g, '')
     .slice(0, 15);
