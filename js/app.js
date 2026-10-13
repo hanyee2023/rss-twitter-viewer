@@ -66,13 +66,20 @@ function bindAllCardEvent(){
 
     document.querySelectorAll(".grid-img").forEach((img)=>{
         img.onclick = function(){
-            const imgs = JSON.parse(this.dataset.imggroup);
+            let imgs;
+            try {
+                imgs = JSON.parse(this.dataset.imggroup || "[]");
+                if(!Array.isArray(imgs) || imgs.length === 0) throw new Error("empty");
+            } catch(e) {
+                // 属性损坏/缺失时退化为单图预览（用当前已加载或直连地址），保证放大功能不崩
+                imgs = [ this.currentSrc || this.src || this.dataset.directSrc ].filter(Boolean);
+            }
             currentPreviewImgs = imgs;
             const box = this.closest(".grid-img-box");
-            const allBoxes = box.parentElement.querySelectorAll(".grid-img-box");
-            const clickIndex = Array.from(allBoxes).indexOf(box);
+            const allBoxes = box ? box.parentElement.querySelectorAll(".grid-img-box") : [];
+            const clickIndex = box ? Array.from(allBoxes).indexOf(box) : 0;
             renderPreviewSlider(imgs, clickIndex);
-            imgPreviewMask.style.display = "flex";
+            if(imgPreviewMask) imgPreviewMask.style.display = "flex";
         }
     })
 

@@ -674,7 +674,7 @@ function buildCard(item, isFav = false){
             const imgFallbacksAttr = imgIsProxy ? getProxyFallbacksAttr(src, isFav) : "";
             const imgSrc = imgIsProxy ? imgProxy : imgDirect;
             mediaHtml += `<div class="grid-img-box">
-                <img class="grid-img" referrerpolicy="no-referrer" decoding="async" loading="lazy" data-imggroup='${escapeAttr(JSON.stringify(imgs))}' data-direct-src="${escapeAttr(imgDirect)}" src="${escapeAttr(imgSrc)}" ${imgFallbacksAttr} onerror="(function(img){if(!fallbackMediaProxy(img)){var b=img.closest('.grid-img-box');if(b)b.classList.add('img-failed');if(img.dataset.directSrc&&img.src!==img.dataset.directSrc){img.src=img.dataset.directSrc;}})(this)">${overlay}
+                <img class="grid-img" referrerpolicy="no-referrer" decoding="async" loading="lazy" data-imggroup='${escapeAttr(JSON.stringify(imgs))}' data-direct-src="${escapeAttr(imgDirect)}" src="${escapeAttr(imgSrc)}" ${imgFallbacksAttr} onerror="(function(img){if(img.dataset.ef)return;img.dataset.ef='1';var b=img.closest('.grid-img-box');if(b)b.classList.add('img-failed');if(!fallbackMediaProxy(img)&&img.dataset.directSrc&&img.src!==img.dataset.directSrc){img.src=img.dataset.directSrc;}})(this)">${overlay}
             </div>`;
         })
         mediaHtml += `</div></div>`;
