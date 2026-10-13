@@ -16,15 +16,15 @@ const ABSOLUTE_MAX_ITEMS = 100; // ?max= 硬上限：原 50，提高到 100（�
 //   shitter.thepixora.com（狗验证）、nitter.cz（非 nitter 部署）。
 // 保留并前置实测可用的实例；xcancel 首选（输出 mp4，原生 <video> 播放最稳）。
 const NITTER_INSTANCES = [
-  'https://xcancel.com',              // 用户实测可播 mp4（首选，原生 <video> 播放最稳）
-  'https://nitter.cf',                // 2026-10-10 实测：返回真实时间线
-  'https://nitter.app',               // 2026-10-10 WebFetch 实测：完整时间线 + hls 播放
-  'https://nitter.space',             // 2026-10-10 WebFetch 实测：完整时间线
-  'https://nitter.tiekoetter.com',    // 2026-10-10 WebFetch 实测：完整时间线 + 视频状态
-  'https://nitter.tromdienste.de',    // 2026-10-10 WebFetch 实测：完整时间线 + hls 播放
-  'https://asia.aguea.com',           // m3u8 兜底源（HLS 路径，实测可访问）
-  'https://nitter.netbub.com',        // 2026-10-10 实测可访问（低优先级兜底）
-  'https://nitter.meowing.monster',   // 2026-10-10 实测可访问（低优先级兜底）
+  'https://xcancel.com',              // 首选：用户实测可播 mp4，原生 <video> 最稳（多图解析已适配其结构）
+  'https://asia.aguea.com',           // 4.8 长期稳定源（venexa.site 结构），作为 xcancel 失效时的首选回退
+  'https://nitter.app',               // 完整时间线 + hls 播放
+  'https://nitter.cf',                // 返回真实时间线
+  'https://nitter.space',             // 完整时间线
+  'https://nitter.tiekoetter.com',    // 完整时间线 + 视频状态
+  'https://nitter.tromdienste.de',    // 完整时间线 + hls 播放
+  'https://nitter.netbub.com',        // 低优先级兜底
+  'https://nitter.meowing.monster',   // 低优先级兜底
 ];
 
 // 健康自检池：?health=1 时并发探测下列全部实例，给出真实可用性报告。
@@ -442,14 +442,35 @@ async function parseNitterHtml(html, username, maxItems, nitterBase) {
     }
     if (!pubDate) pubDate = new Date().toUTCString();
 
-    // 提取图片
-    // 格式：<a class="still-image" href="代理URL">
+    // 提取图片（兼容多种 Nitter 实例 HTML 结构）
+    //   1) 标准 <a class="still-image" href="代理URL"> 画廊锚点（xcancel / aguea 通用）
+    //   2) 兜底：所有 <img src="代理URL">。部分改版 Nitter 把多图画廊的图片直接放在
+    //      <img> 而非 still-image 锚点，若只抓 still-image 会导致「多图卡片只显示一张」。
+    //      这里兜底抓取所有指向 pbs.twimg / venexa / xcancel-pic 的图片（排除头像），
+    //      用归一化 URL 去重，确保多图全部输出。
     const imageUrls = [];
+    const seenImg = new Set();
+    const pushImg = (rawUrl) => {
+      if (!rawUrl) return;
+      // 排除头像（profile_images / avatar），避免把用户头像当推文图片
+      if (/avatar|profile_img|profile_images/i.test(rawUrl)) return;
+      const originalUrl = decodeNitterProxyUrl(rawUrl);
+      if (!originalUrl) return;
+      if (!/pbs\.twimg\.com|venexa\.site|video\.twimg\.com/i.test(originalUrl)) return;
+      const norm = normalizeTwImgUrl(originalUrl);
+      if (seenImg.has(norm)) return;
+      seenImg.add(norm);
+      imageUrls.push(norm);
+    };
     const imageRegex = /<a[^>]*class="still-image"[^>]*href="([^"]+)"/gi;
     let imgMatch;
     while ((imgMatch = imageRegex.exec(block)) !== null) {
-      const originalUrl = decodeNitterProxyUrl(imgMatch[1]);
-      if (originalUrl) imageUrls.push(normalizeTwImgUrl(originalUrl));
+      pushImg(imgMatch[1]);
+    }
+    // 兜底：画廊里的 <img src>（多图场景常见，避免只抓到一张）
+    const imgTagRegex = /<img[^>]*\ssrc="([^"]+)"[^>]*>/gi;
+    while ((imgMatch = imgTagRegex.exec(block)) !== null) {
+      pushImg(imgMatch[1]);
     }
 
     // 提取视频和对应的 poster（预览图）
@@ -538,10 +559,8 @@ async function parseNitterHtml(html, username, maxItems, nitterBase) {
         videoPosters.push(posterUrl ? normalizeTwImgUrl(posterUrl) : '');
       } else if (posterUrl) {
         // 有 poster 但没有视频 URL：可能视频不可用，把 poster 当作普通图片
-        const normPoster = normalizeTwImgUrl(posterUrl);
-        if (!imageUrls.includes(normPoster)) {
-          imageUrls.push(normPoster);
-        }
+        // 统一走 pushImg（已做 decode + twimg 校验 + 去重）
+        pushImg(posterUrl);
       }
     }
 
@@ -844,35 +863,64 @@ function buildEmptyRss(username, reason) {
 async function healthCheck() {
   const probe = async (base) => {
     const host = base.replace(/^https?:\/\//, '');
+    const t0 = Date.now();
     try {
       const res = await fetch(base + '/NASA', {
         headers: { 'User-Agent': FETCH_UA, 'Accept': 'text/html,application/xhtml+xml' },
         signal: AbortSignal.timeout(12000),
       });
-      if (!res.ok) return { instance: host, status: 'FAIL', detail: 'HTTP ' + res.status };
+      const ms = Date.now() - t0;
+      if (!res.ok) return { instance: host, status: 'FAIL', detail: 'HTTP ' + res.status, ms };
       const html = await res.text();
       if (html.includes('Just a moment') || (html.includes('cloudflare') && html.includes('challenge')))
-        return { instance: host, status: 'FAIL', detail: 'Cloudflare 验证页' };
+        return { instance: host, status: 'FAIL', detail: 'Cloudflare 验证页', ms };
       if (/Upstream is temporarily unavailable|Nitter shutdown|not a bot|Prove You|Access Queue|dogcaptcha/i.test(html))
-        return { instance: host, status: 'FAIL', detail: '反爬/宕机/排队' };
+        return { instance: host, status: 'FAIL', detail: '反爬/宕机/排队', ms };
       if (html.includes('YunoHost') || html.includes('Admin Login'))
-        return { instance: host, status: 'FAIL', detail: '非 nitter 部署' };
-      if (!hasTimeline(html)) return { instance: host, status: 'FAIL', detail: '无时间线结构' };
-      return { instance: host, status: 'OK', detail: '时间线正常' };
+        return { instance: host, status: 'FAIL', detail: '非 nitter 部署', ms };
+      if (!hasTimeline(html)) return { instance: host, status: 'FAIL', detail: '无时间线结构', ms };
+      return { instance: host, status: 'OK', detail: '时间线正常', ms };
     } catch (e) {
-      return { instance: host, status: 'FAIL', detail: (e && e.message) ? e.message : 'fetch 失败' };
+      const ms = Date.now() - t0;
+      return { instance: host, status: 'FAIL', detail: (e && e.message) ? e.message : 'fetch 失败', ms };
     }
   };
-  const results = await Promise.all(HEALTH_POOL.map(probe));
-  const alive = results.filter(r => r.status === 'OK').map(r => r.instance);
-  return new Response(JSON.stringify({
-    checked: results.length,
-    alive: alive.length,
-    aliveInstances: alive,
-    results
-  }, null, 2), {
+  // 探测内置活跃实例列表（NITTER_INSTANCES），覆盖当前实际生效的源
+  const results = await Promise.all(NITTER_INSTANCES.map(probe));
+  const alive = results.filter(r => r.status === 'OK');
+  const dead = results.filter(r => r.status !== 'OK');
+  const now = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+  const row = (r) => `<tr class="${r.status === 'OK' ? 'ok' : 'bad'}"><td>${r.instance}</td><td>${r.status === 'OK' ? '✅ 可用' : '❌ 失效'}</td><td>${r.detail}</td><td>${r.ms}ms</td></tr>`;
+  const page = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nitter 实例检测</title>
+<style>
+ body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#0f1115;color:#e6e6e6;margin:0;padding:24px;}
+ h1{font-size:20px;margin:0 0 4px} .sub{color:#8b8b8b;font-size:13px;margin-bottom:18px}
+ .summary{display:flex;gap:16px;margin-bottom:18px}
+ .card{background:#1a1d24;border:1px solid #2a2e38;border-radius:10px;padding:12px 18px;min-width:120px}
+ .card .n{font-size:26px;font-weight:700} .card .l{font-size:12px;color:#8b8b8b}
+ .ok .n{color:#3ad07a} .bad .n{color:#ff6b6b}
+ table{width:100%;border-collapse:collapse;background:#1a1d24;border-radius:10px;overflow:hidden}
+ th,td{text-align:left;padding:10px 12px;font-size:14px;border-bottom:1px solid #2a2e38}
+ th{background:#22262f;color:#aab}
+ tr.ok td:first-child{color:#3ad07a} tr.bad td:first-child{color:#ff8a8a}
+ .refresh{margin-top:18px;display:inline-block;background:#2d6cff;color:#fff;border:none;border-radius:8px;padding:10px 18px;font-size:14px;cursor:pointer}
+ code{background:#22262f;padding:1px 5px;border-radius:4px}
+</style></head><body>
+ <h1>Nitter 实例可用性检测</h1>
+ <div class="sub">检测时间：${now} ｜ 共探测 ${results.length} 个内置实例（Cloudflare 边缘网络）</div>
+ <div class="summary">
+   <div class="card ok"><div class="n">${alive.length}</div><div class="l">可用</div></div>
+   <div class="card bad"><div class="n">${dead.length}</div><div class="l">失效</div></div>
+ </div>
+ <table><thead><tr><th>实例</th><th>状态</th><th>说明</th><th>耗时</th></tr></thead><tbody>
+ ${results.map(row).join('')}
+ </tbody></table>
+ <button class="refresh" onclick="location.reload()">重新检测</button>
+ <p style="margin-top:14px;color:#8b8b8b;font-size:12px">本页在 Cloudflare 边缘网络运行，结果反映服务端可达性。若大量实例失效，请在 <code>twitter-rss.js</code> 的 <code>NITTER_INSTANCES</code> 中替换为新实例后重新部署。</p>
+</body></html>`;
+  return new Response(page, {
     status: 200,
-    headers: corsHeaders({ 'Content-Type': 'application/json; charset=utf-8' })
+    headers: corsHeaders({ 'Content-Type': 'text/html; charset=utf-8' })
   });
 }
 
@@ -889,7 +937,6 @@ export async function onRequest({ request, env }) {
     return healthCheck();
   }
 
-  const username = (url.searchParams.get('user') || '')
   const username = (url.searchParams.get('user') || '')
     .replace(/[^a-zA-Z0-9_]/g, '')
     .slice(0, 15);
