@@ -3,7 +3,71 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>RSS媒体阅读器</title>
-<script src="https://unpkg.com/hls.js@1.5.7/dist/hls.min.js"></script>
+<!-- 早期错误收集器（5.0.1）：必须放在所有脚本之前，包括下面的 hls.js。
+     原因：hls.js 从 CDN 加载，且 core/media/feed/app 四个脚本的顶层执行，
+     都发生在 log.js 注册 window 错误监听之前。若 CDN 不可达或脚本崩溃，
+     运行日志里将一片空白、无从排查。这里先无条件把错误暂存内存，
+     等 log.js 就绪后由 window.__setErrorSink 回灌进日志。 -->
+<script>
+(function(){
+    var MAX = 50;                    // 内存暂存上限，防极端情况下刷屏
+    var buf = window.__earlyErrors = [];
+    var sink = null;                 // log.js 就绪后接管
+
+    function stamp(rec){
+        rec.where = rec.where ? ("启动期 " + rec.where) : "启动期";
+        return rec;
+    }
+    function push(rec){
+        try{
+            if(sink){ sink(rec); return; }
+            buf.push(stamp(rec));
+            if(buf.length > MAX) buf.shift();
+        }catch(e){}
+    }
+    // 供外部主动上报启动期错误（如 hls.js 的 script onerror）
+    window.__reportEarlyError = function(msg, where){
+        push({ msg: String(msg == null ? "" : msg), where: where || "" });
+    };
+    // log.js 调用：接管后续错误，并回灌已暂存记录（按发生顺序）
+    window.__setErrorSink = function(fn){
+        sink = fn;
+        try{
+            var pending = buf.splice(0, buf.length);
+            for(var i = 0; i < pending.length; i++){
+                try{ fn(pending[i]); }catch(e){}
+            }
+        }catch(e){}
+    };
+
+    window.addEventListener("error", function(ev){
+        try{
+            var msg = (ev && ev.message) ? ev.message : "未知错误";
+            // 跨域脚本抛错时，浏览器只给无信息的 "Script error."（不含文件名/行号），需注明来源
+            if(/^Script error\.?$/.test(msg)){ msg = "Script error.（跨域脚本抛错，浏览器已隐藏详情）"; }
+            if(ev && ev.filename){
+                msg += " (" + (String(ev.filename).split("/").pop() || "") +
+                       (ev.lineno ? (":" + ev.lineno) : "") + ")";
+            }
+            push({ msg: msg, where: "前台" });
+        }catch(e){}
+    });
+    window.addEventListener("unhandledrejection", function(ev){
+        try{
+            var msg = "未处理的异步异常";
+            if(ev && ev.reason){ msg = ev.reason.message || String(ev.reason); }
+            push({ msg: "未处理异常: " + msg, where: "前台" });
+        }catch(e){}
+    });
+})();
+</script>
+<!-- hls.js 改为「同源自托管」（v1.7.3），文件为 js/hls.min.js。原因：
+     ① 不再依赖 unpkg CDN —— 国内网络下该 CDN 超时/被拦截会导致所有 m3u8 视频无法播放；
+     ② 同源脚本抛错时浏览器不会遮蔽详情，日志里能直接看到文件名与行号；
+     ③ 版本锁定在自己的仓库，不受 CDN 删版本/改内容影响。
+     升级方式：从 https://unpkg.com/hls.js@<版本>/dist/hls.min.js 下载后覆盖 js/hls.min.js，
+     并同步更新本注释里的版本号、以及 js/log.js 里的 HLS_BUNDLED_VERSION。 -->
+<script src="js/hls.min.js" onerror="window.__reportEarlyError && window.__reportEarlyError('关键依赖 hls.js 加载失败（文件缺失或服务器错误），所有 m3u8 视频将无法播放', '依赖')"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto;}
 html {
@@ -37,6 +101,8 @@ body{
     display:flex;
     align-items:center;
     justify-content:center;
+    padding: 0 12px;
+    box-sizing: border-box;
 }
 
 .title-wrap {
@@ -60,6 +126,20 @@ body{
     font-weight:600;
     white-space:nowrap;
 }
+
+/* 视频缓冲中遮罩（P0-3：区分“在缓冲”与“真卡死”） */
+.video-buffering{
+    position:absolute; top:0; left:0; right:0; bottom:0;
+    display:none; align-items:center; justify-content:center; gap:8px;
+    background:rgba(0,0,0,0.30); color:#fff; font-size:13px;
+    z-index:50; pointer-events:none;
+}
+.vb-spinner{
+    width:16px; height:16px; border:2px solid rgba(255,255,255,.4);
+    border-top-color:#fff; border-radius:50%;
+    animation:vb-spin .7s linear infinite;
+}
+@keyframes vb-spin{ to{ transform:rotate(360deg); } }
 
 /* 卡片样式 */
 .tweet-card{
@@ -111,7 +191,7 @@ body{
     animation:vs-shimmer 1.4s linear infinite;
 }
 .grid-img{background:transparent;animation:none;}
-/* 图片加载失败：停 shimmer、变静态灰底，避免一直频闪/空白 */
+/* 图片加载失败时：停掉骨架屏微光，改为静态灰底占位，避免一直频闪 */
 .grid-img-box.img-failed{animation:none;background:#e8e8e8;}
 
 @keyframes vs-shimmer{to{background-position:-200% 0;}}
@@ -172,7 +252,7 @@ body{
     overflow-y: auto;
     overflow-x: hidden;
 }
-.page-home,.page-manage,.page-add,.page-fav,.page-search,.page-single{display:none;}
+.page-home,.page-manage,.page-add,.page-fav,.page-search,.page-single,.page-log{display:none;}
 #pageHome,#pageManage,#pageFav,#pageSearch{
     width: 100%;
 }
@@ -190,6 +270,7 @@ body{
 #importFeed{background:#ff7823;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:14px;}
 #exportAllBtn{background:#b388eb;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:14px;}
 #delAllFeed{background:#c0392b;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:14px;}
+#btnCheckNitter{background:#2d6cff;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:14px;}
 .feed-list{background:#fff;}
 .feed-item{
     padding:12px 10px;
@@ -717,6 +798,168 @@ body{
     overflow:hidden;
     text-overflow:ellipsis;
 }
+
+/* ===== 运行日志（5.0 新增）===== */
+.page-log{
+    width: 100%;
+    box-sizing: border-box;
+}
+.log-toolbar{
+    display:flex;
+    gap:10px;
+    justify-content:center;
+    padding:12px;
+    position: sticky;
+    top:0;
+    background:#f5f5f5;
+    z-index:5;
+}
+.log-toolbar button{
+    flex:1;
+    max-width:200px;
+    border:none;
+    padding:10px 14px;
+    border-radius:8px;
+    font-size:14px;
+    color:#fff;
+    cursor:pointer;
+}
+#logDeleteBtn{background:#c0392b;}
+#logCopyBtn{background:#27ae60;}
+#logExportBtn{background:#1d9bf0;}
+
+.log-storage{
+    margin:0 12px 10px;
+    padding:10px 12px;
+    background:#fff;
+    border-radius:8px;
+    font-size:12px;
+    line-height:1.7;
+    color:#555;
+    word-break:break-all;
+}
+.log-storage b{color:#1d9bf0;font-size:14px;}
+.log-storage .ls-sub{color:#888;}
+.log-storage .ls-ok{color:#888;}
+.log-storage .ls-amber{color:#b7791f;}
+.log-storage .ls-warn{color:#c0392b;}
+
+/* 顶部「代理 / 网络状态」卡片（5.2）：与存储卡片同宽同风格 */
+.log-conn{
+    margin:0 12px 10px;
+    padding:10px 12px;
+    background:#fff;
+    border-radius:8px;
+    font-size:12px;
+    line-height:1.7;
+    color:#444;
+    word-break:break-all;
+}
+.log-conn .conn-sub{color:#888;}
+.log-conn b{color:#1d9bf0;font-size:13px;}
+.log-conn .conn-ok{color:#1a9c4b;font-weight:700;}
+.log-conn .conn-amber{color:#b7791f;}
+.log-conn .conn-err{color:#c0392b;font-weight:700;}
+.log-conn .conn-wait{color:#999;}
+/* 「重新检测」：清掉 10 分钟缓存立刻重查 */
+.log-conn .conn-retry{
+    float:right;
+    margin-left:8px;
+    padding:1px 8px;
+    border:1px solid #cfd9e4;
+    border-radius:10px;
+    background:#f6f9fc;
+    color:#1d9bf0;
+    font-size:11px;
+    cursor:pointer;
+    user-select:none;
+}
+.log-conn .conn-retry:active{background:#e8f2fd;}
+
+.log-list{margin:0 12px 12px;}
+.log-item{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    background:#fff;
+    border-bottom:1px solid #eee;
+    padding:14px 10px;
+    cursor:pointer;
+}
+.log-item:active{background:#f0f0f0;}
+.log-idx{
+    width:26px;
+    height:26px;
+    flex-shrink:0;
+    border-radius:50%;
+    background:#eef3f8;
+    color:#1d9bf0;
+    font-size:13px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+}
+.log-meta{flex:1;min-width:0;}
+.log-date{font-size:15px;font-weight:600;color:#111;}
+.log-summary{font-size:13px;color:#888;margin-top:2px;}
+.log-arrow{color:#bbb;font-size:22px;flex-shrink:0;}
+
+.log-detail-box{max-width:480px;width:100%;max-height:85vh;overflow-y:auto;}
+/* 5.1：日志页直接展示今日报告（无弹窗）的容器与统计样式 */
+.log-today-box{
+    background:#fff;border-radius:12px;padding:6px 14px 14px;
+    box-shadow:0 1px 4px rgba(0,0,0,.06);
+}
+.today-stats{font-size:13px;color:#444;line-height:1.9;padding:4px 2px;}
+.today-stats b{color:#1d9bf0;font-size:14px;}
+/* 提示区：hls.js 有新版本时的高亮卡片 */
+.hls-notice{
+    font-size:13px;color:#8a5a00;line-height:1.9;
+    background:#fff8e6;border:1px solid #f0dfae;border-radius:8px;padding:8px 10px;
+}
+.hls-notice b{color:#c0392b;font-size:14px;}
+.hls-notice code{
+    background:#fff;border:1px solid #eee;border-radius:3px;
+    padding:0 3px;font-size:12px;color:#555;
+}
+.log-detail-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    font-size:16px;
+    font-weight:600;
+    margin-bottom:8px;
+}
+.log-close{
+    border:none;background:transparent;color:#999;
+    font-size:24px;line-height:1;cursor:pointer;padding:0 4px;
+}
+.log-detail-sec-title{
+    font-size:14px;font-weight:600;color:#222;
+    margin:14px 0 6px;padding-left:8px;border-left:3px solid #1d9bf0;
+}
+.log-detail-list{background:#fafafa;border-radius:8px;padding:6px 8px;}
+.log-detail-row{
+    display:flex;gap:8px;padding:8px 4px;border-bottom:1px solid #eee;
+}
+.log-detail-row:last-child{border-bottom:none;}
+.ld-idx{
+    width:22px;height:22px;flex-shrink:0;border-radius:50%;
+    background:#eef3f8;color:#1d9bf0;font-size:12px;
+    display:flex;align-items:center;justify-content:center;
+}
+.ld-body{flex:1;min-width:0;}
+.ld-time{font-size:13px;color:#444;font-weight:600;}
+.ld-stats{font-size:12px;color:#888;margin-top:2px;}
+.ld-stats b{color:#1d9bf0;font-size:14px;font-weight:700;}
+.ld-msg{font-size:13px;color:#c0392b;margin-top:2px;word-break:break-all;}
+.log-empty{color:#999;font-size:13px;padding:8px 4px;}
+.log-detail-actions{display:flex;gap:10px;margin-top:16px;}
+.log-act-btn{
+    flex:1;border:none;padding:10px;border-radius:8px;font-size:14px;
+    background:#1d9bf0;color:#fff;cursor:pointer;
+}
+.log-act-btn.log-del{background:#c0392b;}
 </style>
 
 </head>
@@ -724,7 +967,7 @@ body{
 <header id="mainHeader">
 <div class="title-wrap">
   <h1 id="pageTitle">RSS媒体阅读器</h1>
-  <span class="beta-tag">4.9</span>
+  <span class="beta-tag">5.3.6</span>
 </div>
 </header>
 
@@ -740,7 +983,7 @@ body{
     <button id="importFeed">一键导入</button>
     <button id="exportAllBtn">一键导出</button>
     <button id="delAllFeed">一键清空</button>
-    <button id="btnCheckNitter" style="background:#2d6cff;border-color:#2d6cff;">检测 Nitter 实例</button>
+    <button id="btnCheckNitter">检测 Nitter 实例</button>
     <input type="file" id="importFileInput" accept=".json" style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none;">
 </div>
         <div class="feed-list" id="feedPanel"></div>
@@ -779,6 +1022,16 @@ body{
             <div id="searchResultBox"></div>
         </div>
     </div>
+    <div class="page-log" id="pageLog" style="display: none;">
+        <div class="log-toolbar">
+            <button id="logDeleteBtn">删除报告</button>
+            <button id="logCopyBtn">复制报告</button>
+            <button id="logExportBtn">导出报告</button>
+        </div>
+        <div class="log-conn" id="logConn"></div>
+        <div class="log-storage" id="logStorage"></div>
+        <div class="log-list" id="logList"></div>
+    </div>
 </div>
 
 <div class="bottom-nav-bar">
@@ -813,6 +1066,15 @@ body{
     <button id="btnFav" class="">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#111111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+        </svg>
+    </button>
+    <button id="btnLog" class="">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#111111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="8" y1="13" x2="16" y2="13"></line>
+            <line x1="8" y1="17" x2="16" y2="17"></line>
+            <line x1="8" y1="9" x2="10" y2="9"></line>
         </svg>
     </button>
 </div>
@@ -872,5 +1134,6 @@ body{
 <script src="js/media.js"></script>
 <script src="js/feed.js"></script>
 <script src="js/app.js"></script>
+<script src="js/log.js"></script>
 
 </body></html>
