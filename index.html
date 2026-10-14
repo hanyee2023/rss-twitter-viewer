@@ -270,20 +270,12 @@ body{
 #importFeed{background:#ff7823;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:14px;}
 #exportAllBtn{background:#b388eb;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:14px;}
 #delAllFeed{background:#c0392b;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:14px;}
-.btn-recheck{background:#2d6cff;color:#fff;border:none;padding:5px 12px;border-radius:6px;font-size:13px;cursor:pointer;}
+.btn-recheck{display:inline-block;background:#2d6cff;color:#fff;border:none;padding:7px 16px;border-radius:6px;font-size:13px;cursor:pointer;text-decoration:none;}
 .btn-recheck:disabled{opacity:.5;cursor:default;}
 .nitter-check{margin-top:16px;background:#fff;border-radius:10px;padding:14px;border:1px solid #e6e6e6;}
 .nc-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px;}
 .nc-head h3{margin:0;font-size:15px;}
 .nc-sub{margin:4px 0 0;font-size:12px;color:#888;}
-.nc-list{display:flex;flex-direction:column;gap:6px;}
-.nc-row{display:flex;align-items:center;gap:10px;padding:8px 10px;background:#f7f8fa;border-radius:8px;font-size:13px;}
-.nc-name{font-weight:600;min-width:140px;}
-.nc-status{flex:1;}
-.nc-status.ok{color:#1a9e4b;}
-.nc-status.bad{color:#c0392b;}
-.nc-ms{color:#999;min-width:64px;text-align:right;font-variant-numeric:tabular-nums;}
-.nc-loading{color:#999;font-size:13px;padding:8px 0;}
 .feed-list{background:#fff;}
 .feed-item{
     padding:12px 10px;
@@ -1046,13 +1038,10 @@ body{
         <div class="nitter-check" id="nitterCheck">
           <div class="nc-head">
             <div>
-              <h3>四、Nitter 实例检测</h3>
-              <p class="nc-sub">自动检测周期：每天首次打开自动检测一次。右侧可手动「重新检测」。</p>
+              <h3>Nitter 实例检测</h3>
+              <p class="nc-sub">点击右侧按钮跳转检测页，可查看全部内置实例的可用状态与响应耗时。</p>
             </div>
-            <button id="btnNitterRefreshAll" class="btn-recheck">重新检测</button>
-          </div>
-          <div class="nc-list" id="nitterCheckList">
-            <div class="nc-loading">正在检测实例可用性…</div>
+            <a href="/twitter-rss?health=1" target="_blank" rel="noopener" class="btn-recheck" id="btnNitterCheck">检测实例</a>
           </div>
         </div>
     </div>
@@ -1159,6 +1148,5 @@ body{
 <script src="js/feed.js"></script>
 <script src="js/app.js"></script>
 <script src="js/log.js"></script>
-<script src="js/nitter-check.js"></script>
 
 </body></html>
