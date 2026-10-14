@@ -860,7 +860,9 @@ function buildEmptyRss(username, reason) {
 // 在 Cloudflare 边缘网络并发探测 HEALTH_POOL 全部实例，返回真实可用性。
 // 用途：部署后访问 /twitter-rss?health=1 一键复核实例存活，无需本地改代码。
 // 注意：必须在 Cloudflare 上跑才有意义——本地/沙箱网络与实例可达性无关，会误判。
-async function healthCheck() {
+// 探测内置活跃实例列表（NITTER_INSTANCES）全部实例，返回真实可用性数组。
+// only: 可选，仅探测指定 host（用于单实例「重新检测」）。
+async function probeAll(only) {
   const probe = async (base) => {
     const host = base.replace(/^https?:\/\//, '');
     const t0 = Date.now();
@@ -885,12 +887,20 @@ async function healthCheck() {
       return { instance: host, status: 'FAIL', detail: (e && e.message) ? e.message : 'fetch 失败', ms };
     }
   };
-  // 探测内置活跃实例列表（NITTER_INSTANCES），覆盖当前实际生效的源
-  const results = await Promise.all(NITTER_INSTANCES.map(probe));
-  const alive = results.filter(r => r.status === 'OK');
-  const dead = results.filter(r => r.status !== 'OK');
+  const targets = only
+    ? NITTER_INSTANCES.filter(b => b.replace(/^https?:\/\//, '') === only)
+    : NITTER_INSTANCES;
+  const results = await Promise.all(targets.map(probe));
+  const alive = results.filter(r => r.status === 'OK').length;
+  const dead = results.length - alive;
+  return { results, alive, dead };
+}
+
+// 可视化网页（/twitter-rss?health=1）：实例表格 + 统计卡片 + 重新检测按钮。
+async function healthCheck() {
+  const { results, alive, dead } = await probeAll();
   const now = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
-  const row = (r) => `<tr class="${r.status === 'OK' ? 'ok' : 'bad'}"><td>${r.instance}</td><td>${r.status === 'OK' ? '✅ 可用' : '❌ 失效'}</td><td>${r.detail}</td><td>${r.ms}ms</td></tr>`;
+  const row = (r) => `<tr class="${r.status === 'OK' ? 'ok' : 'bad'}"><td>${r.instance}</td><td>${r.status === 'OK' ? '\u2705 可用' : '\u274c 失效'}</td><td>${r.detail}</td><td>${r.ms}ms</td></tr>`;
   const page = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nitter 实例检测</title>
 <style>
  body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#0f1115;color:#e6e6e6;margin:0;padding:24px;}
@@ -909,8 +919,8 @@ async function healthCheck() {
  <h1>Nitter 实例可用性检测</h1>
  <div class="sub">检测时间：${now} ｜ 共探测 ${results.length} 个内置实例（Cloudflare 边缘网络）</div>
  <div class="summary">
-   <div class="card ok"><div class="n">${alive.length}</div><div class="l">可用</div></div>
-   <div class="card bad"><div class="n">${dead.length}</div><div class="l">失效</div></div>
+   <div class="card ok"><div class="n">${alive}</div><div class="l">可用</div></div>
+   <div class="card bad"><div class="n">${dead}</div><div class="l">失效</div></div>
  </div>
  <table><thead><tr><th>实例</th><th>状态</th><th>说明</th><th>耗时</th></tr></thead><tbody>
  ${results.map(row).join('')}
@@ -921,6 +931,23 @@ async function healthCheck() {
   return new Response(page, {
     status: 200,
     headers: corsHeaders({ 'Content-Type': 'text/html; charset=utf-8' })
+  });
+}
+
+// 结构化 JSON（/twitter-rss?health=json）：供前端 JS 渲染运行日志里的实例检测列表。
+// 支持 &only=<host> 仅探测单个实例（用于单实例「重新检测」按钮）。
+async function healthCheckJson(only) {
+  const { results, alive, dead } = await probeAll(only);
+  const payload = {
+    updated: new Date().toISOString(),
+    checked: results.length,
+    alive,
+    dead,
+    results
+  };
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: corsHeaders({ 'Content-Type': 'application/json; charset=utf-8' })
   });
 }
 
@@ -935,6 +962,11 @@ export async function onRequest({ request, env }) {
   // 实例健康自检：访问 /twitter-rss?health=1 一键复核全部 Nitter 实例存活情况
   if (url.searchParams.get('health') === '1') {
     return healthCheck();
+  }
+  // 结构化 JSON（供运行日志界面前端渲染实例列表）：?health=json；支持 ?only=<host> 单实例重测
+  if (url.searchParams.get('health') === 'json') {
+    const only = url.searchParams.get('only') || undefined;
+    return healthCheckJson(only);
   }
 
   const username = (url.searchParams.get('user') || '')
