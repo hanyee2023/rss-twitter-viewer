@@ -66,13 +66,20 @@ function bindAllCardEvent(){
 
     document.querySelectorAll(".grid-img").forEach((img)=>{
         img.onclick = function(){
-            const imgs = JSON.parse(this.dataset.imggroup);
+            let imgs;
+            try {
+                imgs = JSON.parse(this.dataset.imggroup || "[]");
+                if(!Array.isArray(imgs) || imgs.length === 0) throw new Error("empty");
+            } catch(e) {
+                // 属性损坏/缺失时退化为单图预览（用当前已加载或直连地址），保证放大功能不崩
+                imgs = [ this.currentSrc || this.src || this.dataset.directSrc ].filter(Boolean);
+            }
             currentPreviewImgs = imgs;
             const box = this.closest(".grid-img-box");
-            const allBoxes = box.parentElement.querySelectorAll(".grid-img-box");
-            const clickIndex = Array.from(allBoxes).indexOf(box);
+            const allBoxes = box ? box.parentElement.querySelectorAll(".grid-img-box") : [];
+            const clickIndex = box ? Array.from(allBoxes).indexOf(box) : 0;
             renderPreviewSlider(imgs, clickIndex);
-            imgPreviewMask.style.display = "flex";
+            if(imgPreviewMask) imgPreviewMask.style.display = "flex";
         }
     })
 
@@ -124,8 +131,19 @@ function bindAllCardEvent(){
         btn.onclick = function(e){
             e.stopPropagation();
             const link = this.dataset.link;
-            const target = allArticles.find(i=>i.link === link);
-            if(!target) return;
+            if(!link) return;
+            // 在多个可能的列表里查找目标条目：主页(allArticles)、本地缓存(localCacheArticles)、单源(currentArticles)
+            // 修复：原先只搜 allArticles，单源浏览/搜索结果里的卡片不在其中，
+            // 导致点击收藏时 target 为 undefined、被 if(!target) return 静默吞掉 → 表现为"按钮偶尔点不动"。
+            let target = allArticles.find(i=>i.link === link);
+            if(!target && typeof localCacheArticles !== "undefined") target = localCacheArticles.find(i=>i.link === link);
+            if(!target && typeof currentArticles !== "undefined") target = currentArticles.find(i=>i.link === link);
+            if(!target){
+                // 兜底：用卡片现有信息构造最小对象，保证收藏切换始终有反馈（不再静默无反应）
+                const card = this.closest(".tweet-card");
+                const title = card ? (card.querySelector(".card-title")?.textContent || card.dataset.link || link) : link;
+                target = { link, title };
+            }
             if(!favList.some(f=>f.link === link)){
                 favList.push(target);
                 localStorage.setItem(FAV_KEY, JSON.stringify(favList));
@@ -278,11 +296,20 @@ imgPreviewMask.addEventListener("click", function(e){
 const RSS_CACHE_PREFIX = "rss_cache_";
 const RSS_CACHE_TTL = 24 * 60 * 60 * 1000; // 24小时
 
+// 单个订阅源的本地缓存条数上限（5.0.1 新增）。
+// 为什么需要：RSS 源缓存与「文章缓存」是两份**独立副本** —— 同一批条目会被存两遍。
+// 源缓存原本保存该源的全部条目且 parseRSS 不限条数，体积往往与文章缓存相当，
+// 是 localStorage 配额最主要的浪费来源。
+// 源缓存只用于「该源拉取失败时的回退展示」，保留最新 N 条已完全够用。
+const RSS_CACHE_ITEMS_PER_FEED = 120;
+
 function saveRssCache(url, items){
+    // 统一裁到上限，两处 setItem 都遵守
+    const slimItems = (items || []).slice(0, RSS_CACHE_ITEMS_PER_FEED);
     try{
         const key = RSS_CACHE_PREFIX + url;
         localStorage.setItem(key, JSON.stringify({
-            items: items,
+            items: slimItems,
             time: Date.now()
         }));
     }catch(e){
@@ -291,7 +318,7 @@ function saveRssCache(url, items){
         try{
             const key = RSS_CACHE_PREFIX + url;
             localStorage.setItem(key, JSON.stringify({
-                items: items,
+                items: slimItems,
                 time: Date.now()
             }));
         }catch(e2){
@@ -345,13 +372,31 @@ async function loadAllRSS(){
                     // 成功加载，保存缓存
                     if(items && items.length > 0){
                         saveRssCache(f.url, items);
+                    }else{
+                        // 后端返回了"空结果"RSS：很可能是所有 Nitter 实例失效，
+                        // 诊断原因写在 <channel><description> 里（例如"所有 Nitter 实例均不可用…"）。
+                        // 透传到运行报告，解决"前端提示失败、但运行报告无报错"的矛盾。
+                        let diag = "";
+                        try { if (typeof extractChannelDesc === "function") diag = extractChannelDesc(xmlText); } catch(e) {}
+                        if(diag && /实例|失效|不可用|失败|超时|未识别|验证页/.test(diag)){
+                            if(window.AppLog){
+                                AppLog.markFail();
+                                AppLog.recordError(`订阅【${f.name}】后端诊断失败：${diag}`, "RSS加载");
+                            }
+                            failedFeeds.push({name: f.name, url: f.url, error: diag});
+                        }
                     }
-                    allGroups.push(items);
+                    allGroups.push(items || []);
                 }
             }catch(e){
                 console.warn(`订阅【${f.name}】拉取失败：`, e.message);
                 const errDesc = describeRssError(e);
                 failedFeeds.push({name: f.name, url: f.url, error: errDesc});
+                // 运行日志（5.0）：记录后台订阅加载失败 + 累加失败计数
+                if(window.AppLog){
+                    AppLog.markFail();
+                    AppLog.recordError(`订阅【${f.name}】加载失败：${errDesc}`, "RSS加载");
+                }
                 // 尝试使用本地缓存
                 const cache = getRssCache(f.url);
                 if(cache && cache.items && cache.items.length > 0){
@@ -861,7 +906,11 @@ document.getElementById("confirmAddTwitter").onclick = function(){
         return;
     }
 
-    const twitterRssUrl = location.origin + "/twitter-rss?user=" + username;
+    // 固定使用官方 Pages 域名（不再依赖 location.origin）。
+    // 旧版曾用 location.origin 拼接，导致经自定义域名 mypear.ccwu.cc 访问时，
+    // 生成的 Twitter RSS 订阅地址也指向该自定义域名；该域名在手机端失效后订阅全部无法加载。
+    // 改为固定官方域名后，无论从哪个域名进入，订阅地址始终可用。
+    const twitterRssUrl = "https://rss-twitter-viewer.pages.dev" + "/twitter-rss?user=" + username;
 
     if (feedList.some(item => item.url === twitterRssUrl)) {
         showToast("该 Twitter 订阅已存在");
