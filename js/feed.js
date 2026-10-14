@@ -201,8 +201,6 @@ btnAdd.onclick = () => showPage(pageAdd, "添加订阅");
 btnFav.onclick = () => showPage(pageFav, "我的收藏");
 btnSearch.onclick = () => showPage(pageSearch, "内容搜索");
 btnLog.onclick = () => showPage(pageLog, "运行日志");
-const btnCheckNitter = document.getElementById('btnCheckNitter');
-if (btnCheckNitter) btnCheckNitter.onclick = () => window.open(location.origin + '/twitter-rss?health=1', '_blank');
 
 async function refreshAllRSSWithLock(){
     if(rssRefreshPromise) return rssRefreshPromise;
