@@ -1,5 +1,5 @@
 // Twitter 用户时间线 RSS 生成器
-// 多源回退架构：asia.aguea.com → aguea.net → nitter.catsarch.com（按实测可用排序）
+// 多源回退架构：xcancel.com（mp4 原生）→ asia.aguea.com（hls 兜底）→ nitter.netbub.com → nitter.meowing.monster
 // 视频输出策略（优先 m3u8，兼容 MP4）：
 //   - m3u8 路径（优先）：从 data-url 属性提取原始 m3u8 URL，体积小、起播快，变体过滤在 media-proxy.js 完成
 //   - MP4 路径（兜底）：仅当无 m3u8 时，从 <source src="..."> 或下载链接提取原始 video.twimg.com MP4 URL
@@ -10,39 +10,23 @@
 const DEFAULT_MAX_ITEMS = 50;   // 每源每次返回上限：原 20，提高到 50 以保留更多历史未读（约 5 天/源 @10条）
 const ABSOLUTE_MAX_ITEMS = 100; // ?max= 硬上限：原 50，提高到 100（保留调优空间）
 
-// Nitter 实例列表（按优先级排序，2026-10-10 复核后更新）
-// 已剔除实测失效/反爬的实例：aguea.net（Anubis 验证）、nitter.catsarch.com（永久关停）、
-//   nitter.kareem.one（上游宕机）、nitter.click（Anubis）、nitter.jaydenha.uk（访问队列）、
-//   shitter.thepixora.com（狗验证）、nitter.cz（非 nitter 部署）。
-// 保留并前置实测可用的实例；xcancel 首选（输出 mp4，原生 <video> 播放最稳）。
+// Nitter 实例列表（按优先级排序，2026-10-15 复核）
+// 实测依据（双出口验证可返回真实时间线）：asia.aguea.com(curl 200/21条) / nitter.cf(curl 200/15条) /
+//   nitter.netbub.com / nitter.meowing.monster / nitter.space（WebFetch 实拉到完整推文）。
+//   xcancel.com 为代码内 mp4 原生播放锚点（探测出口被其封禁无法直连验证，但 Cloudflare 函数出口通常可达）。
+// 状态页（status.d420.de）健康度仅供参考——实测 nitter.pp.ua(98%)/miningtcup.me(93%) 均返回 Bot 验证页，不可用；
+//   多数实例会屏蔽数据中心 IP（沙箱 curl 返回 000），故以 WebFetch 独立出口交叉验证为准。
+// 已剔除：nitter.app / nitter.tiekoetter.com(仅50%) / nitter.tromdienste.de（无状态页背书且未验证），
+//   以及历史失效的 aguea.net(Anubis) / nitter.catsarch.com(关停) / kareem.one / click / jaydenha.uk / thepixora / nitter.cz。
 const NITTER_INSTANCES = [
-  'https://xcancel.com',              // 首选：用户实测可播 mp4，原生 <video> 最稳（多图解析已适配其结构）
-  'https://asia.aguea.com',           // 4.8 长期稳定源（venexa.site 结构），作为 xcancel 失效时的首选回退
-  'https://nitter.app',               // 完整时间线 + hls 播放
-  'https://nitter.cf',                // 返回真实时间线
-  'https://nitter.space',             // 完整时间线
-  'https://nitter.tiekoetter.com',    // 完整时间线 + 视频状态
-  'https://nitter.tromdienste.de',    // 完整时间线 + hls 播放
-  'https://nitter.netbub.com',        // 低优先级兜底
-  'https://nitter.meowing.monster',   // 低优先级兜底
+  'https://xcancel.com',              // 首选：原生 mp4，<video> 播放最稳（多图解析已适配其结构）
+  'https://asia.aguea.com',           // 实测可返回真实时间线（hls 兜底），xcancel 失效时首选回退
+  'https://nitter.cf',                // 实测 200/15 timeline-item，标准 nitter 结构、代理路径已兼容
+  'https://nitter.space',             // 实测返回完整时间线，标准 nitter 结构、代理路径已兼容
+  'https://nitter.netbub.com',        // 状态页 95%、实测返回完整时间线，作为回退
+  'https://nitter.meowing.monster',   // 状态页 94%、实测返回完整时间线，作为回退
 ];
 
-// 健康自检池：?health=1 时并发探测下列全部实例，给出真实可用性报告。
-// 覆盖当前默认实例 + 用户提供的候选实例，便于部署后一键复核（实例随时可能失效）。
-const HEALTH_POOL = [
-  'https://xcancel.com',
-  'https://nitter.cf',
-  'https://nitter.kareem.one',
-  'https://nitter.click',
-  'https://nitter.jaydenha.uk',
-  'https://nitter.netbub.com',
-  'https://nitter.meowing.monster',
-  'https://nitter.tiekoetter.com',
-  'https://nitter.space',
-  'https://nitter.cz',
-  'https://nitter.tromdienste.de',
-  'https://nitter.app',
-];
 
 const SYNDICATION_BASE = 'https://syndication.twitter.com/srv/timeline-profile/screen-name/';
 
@@ -856,100 +840,6 @@ function buildEmptyRss(username, reason) {
   );
 }
 
-// ─── 实例健康自检（?health=1）──────────────────────────────────
-// 在 Cloudflare 边缘网络并发探测 HEALTH_POOL 全部实例，返回真实可用性。
-// 用途：部署后访问 /twitter-rss?health=1 一键复核实例存活，无需本地改代码。
-// 注意：必须在 Cloudflare 上跑才有意义——本地/沙箱网络与实例可达性无关，会误判。
-// 探测内置活跃实例列表（NITTER_INSTANCES）全部实例，返回真实可用性数组。
-// only: 可选，仅探测指定 host（用于单实例「重新检测」）。
-async function probeAll(only) {
-  const probe = async (base) => {
-    const host = base.replace(/^https?:\/\//, '');
-    const t0 = Date.now();
-    try {
-      const res = await fetch(base + '/NASA', {
-        headers: { 'User-Agent': FETCH_UA, 'Accept': 'text/html,application/xhtml+xml' },
-        signal: AbortSignal.timeout(12000),
-      });
-      const ms = Date.now() - t0;
-      if (!res.ok) return { instance: host, status: 'FAIL', detail: 'HTTP ' + res.status, ms };
-      const html = await res.text();
-      if (html.includes('Just a moment') || (html.includes('cloudflare') && html.includes('challenge')))
-        return { instance: host, status: 'FAIL', detail: 'Cloudflare 验证页', ms };
-      if (/Upstream is temporarily unavailable|Nitter shutdown|not a bot|Prove You|Access Queue|dogcaptcha/i.test(html))
-        return { instance: host, status: 'FAIL', detail: '反爬/宕机/排队', ms };
-      if (html.includes('YunoHost') || html.includes('Admin Login'))
-        return { instance: host, status: 'FAIL', detail: '非 nitter 部署', ms };
-      if (!hasTimeline(html)) return { instance: host, status: 'FAIL', detail: '无时间线结构', ms };
-      return { instance: host, status: 'OK', detail: '时间线正常', ms };
-    } catch (e) {
-      const ms = Date.now() - t0;
-      return { instance: host, status: 'FAIL', detail: (e && e.message) ? e.message : 'fetch 失败', ms };
-    }
-  };
-  const targets = only
-    ? NITTER_INSTANCES.filter(b => b.replace(/^https?:\/\//, '') === only)
-    : NITTER_INSTANCES;
-  const results = await Promise.all(targets.map(probe));
-  const alive = results.filter(r => r.status === 'OK').length;
-  const dead = results.length - alive;
-  return { results, alive, dead };
-}
-
-// 可视化网页（/twitter-rss?health=1）：实例表格 + 统计卡片 + 重新检测按钮。
-async function healthCheck() {
-  const { results, alive, dead } = await probeAll();
-  const now = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
-  const row = (r) => `<tr class="${r.status === 'OK' ? 'ok' : 'bad'}"><td>${r.instance}</td><td>${r.status === 'OK' ? '\u2705 可用' : '\u274c 失效'}</td><td>${r.detail}</td><td>${r.ms}ms</td></tr>`;
-  const page = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nitter 实例检测</title>
-<style>
- body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#0f1115;color:#e6e6e6;margin:0;padding:24px;}
- h1{font-size:20px;margin:0 0 4px} .sub{color:#8b8b8b;font-size:13px;margin-bottom:18px}
- .summary{display:flex;gap:16px;margin-bottom:18px}
- .card{background:#1a1d24;border:1px solid #2a2e38;border-radius:10px;padding:12px 18px;min-width:120px}
- .card .n{font-size:26px;font-weight:700} .card .l{font-size:12px;color:#8b8b8b}
- .ok .n{color:#3ad07a} .bad .n{color:#ff6b6b}
- table{width:100%;border-collapse:collapse;background:#1a1d24;border-radius:10px;overflow:hidden}
- th,td{text-align:left;padding:10px 12px;font-size:14px;border-bottom:1px solid #2a2e38}
- th{background:#22262f;color:#aab}
- tr.ok td:first-child{color:#3ad07a} tr.bad td:first-child{color:#ff8a8a}
- .refresh{margin-top:18px;display:inline-block;background:#2d6cff;color:#fff;border:none;border-radius:8px;padding:10px 18px;font-size:14px;cursor:pointer}
- code{background:#22262f;padding:1px 5px;border-radius:4px}
-</style></head><body>
- <h1>Nitter 实例可用性检测</h1>
- <div class="sub">检测时间：${now} ｜ 共探测 ${results.length} 个内置实例（Cloudflare 边缘网络）</div>
- <div class="summary">
-   <div class="card ok"><div class="n">${alive}</div><div class="l">可用</div></div>
-   <div class="card bad"><div class="n">${dead}</div><div class="l">失效</div></div>
- </div>
- <table><thead><tr><th>实例</th><th>状态</th><th>说明</th><th>耗时</th></tr></thead><tbody>
- ${results.map(row).join('')}
- </tbody></table>
- <button class="refresh" onclick="location.reload()">重新检测</button>
- <p style="margin-top:14px;color:#8b8b8b;font-size:12px">本页在 Cloudflare 边缘网络运行，结果反映服务端可达性。若大量实例失效，请在 <code>twitter-rss.js</code> 的 <code>NITTER_INSTANCES</code> 中替换为新实例后重新部署。</p>
-</body></html>`;
-  return new Response(page, {
-    status: 200,
-    headers: corsHeaders({ 'Content-Type': 'text/html; charset=utf-8' })
-  });
-}
-
-// 结构化 JSON（/twitter-rss?health=json）：供前端 JS 渲染运行日志里的实例检测列表。
-// 支持 &only=<host> 仅探测单个实例（用于单实例「重新检测」按钮）。
-async function healthCheckJson(only) {
-  const { results, alive, dead } = await probeAll(only);
-  const payload = {
-    updated: new Date().toISOString(),
-    checked: results.length,
-    alive,
-    dead,
-    results
-  };
-  return new Response(JSON.stringify(payload), {
-    status: 200,
-    headers: corsHeaders({ 'Content-Type': 'application/json; charset=utf-8' })
-  });
-}
 
 // ─── 主入口：多源回退 ──────────────────────────────────────────
 export async function onRequest({ request, env }) {
@@ -958,16 +848,6 @@ export async function onRequest({ request, env }) {
   }
 
   const url = new URL(request.url);
-
-  // 实例健康自检：访问 /twitter-rss?health=1 一键复核全部 Nitter 实例存活情况
-  if (url.searchParams.get('health') === '1') {
-    return healthCheck();
-  }
-  // 结构化 JSON（供运行日志界面前端渲染实例列表）：?health=json；支持 ?only=<host> 单实例重测
-  if (url.searchParams.get('health') === 'json') {
-    const only = url.searchParams.get('only') || undefined;
-    return healthCheckJson(only);
-  }
 
   const username = (url.searchParams.get('user') || '')
     .replace(/[^a-zA-Z0-9_]/g, '')
@@ -986,9 +866,9 @@ export async function onRequest({ request, env }) {
     });
   }
 
-  // KV 缓存（命名空间 rss-video-cache，已在 Cloudflare 后台绑定）
+  // KV 缓存（绑定名 RSS_VIDEO_CACHE，需在 Cloudflare 后台绑定；命名须为合法标识符，不能含连字符）
   // 命中则直接返回，毫秒级、不再回源打 Nitter，既提速又抗 Nitter 限流/封锁
-  const kv = env && env["rss-video-cache"];
+  const kv = env && env.RSS_VIDEO_CACHE;
   const cacheKey = `twrss:${username}:${maxItems}`;
   if (kv) {
     try {
@@ -1031,7 +911,7 @@ export async function onRequest({ request, env }) {
   // 仅缓存真实抓取到的内容；空结果/失败不缓存，以便尽快重试源站
   if (kv && gotReal && rss) {
     try {
-      await kv.put(cacheKey, rss, { expirationTtl: 300 });
+      await kv.put(cacheKey, rss, { expirationTtl: 600 });
     } catch (e) {
       console.warn("twitter-rss KV 写入失败（不影响本次返回）：", e);
     }
