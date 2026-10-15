@@ -25,13 +25,9 @@ const BUILTIN_RSS_HOSTS = [
   "venexa.site",
   "aguea.com",
   "htumeng.com",
-  "btumeng.com",
   "642p.com",
   "tutu1.space",
-  "freeshare58.com",
-  "jhfduadgiyhas.com",
-  "000355.xyz",
-  "919129.xyz"
+  "freeshare58.com"
 ];
 
 function normalizeHost(host) {
@@ -127,7 +123,7 @@ export async function onRequest({ request, env }) {
           status: cached.status || 200,
           headers: corsHeaders({
             "Content-Type": cached.contentType || "application/xml;charset=utf-8",
-            "Cache-Control": "public, max-age=1800",
+            "Cache-Control": "public, max-age=7200",
             "X-Cache": "HIT"
           })
         });
@@ -149,17 +145,17 @@ export async function onRequest({ request, env }) {
     const text = await res.text();
     const headers = corsHeaders({
       "Content-Type": "application/xml;charset=utf-8",
-      "Cache-Control": res.ok ? "public, max-age=1800" : "no-store",
+      "Cache-Control": res.ok ? "public, max-age=7200" : "no-store",
       "X-Cache": "MISS"
     });
-    // 成功响应写入 KV，TTL 30 分钟（仅在绑定了 RSS_CACHE 时）
+    // 成功响应写入 KV，TTL 2 小时（仅在绑定了 RSS_CACHE 时；与 RSS_VIDEO_CACHE 共用 1000 次/天写入额度）
     if (kv && res.ok) {
       try {
         await kv.put(cacheKey, JSON.stringify({
           body: text,
           status: res.status,
           contentType: "application/xml;charset=utf-8"
-        }), { expirationTtl: 1800 });
+        }), { expirationTtl: 7200 });
       } catch (e) {
         console.warn("RSS KV 写入失败（不影响本次返回）：", e);
       }

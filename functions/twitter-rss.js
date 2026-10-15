@@ -908,10 +908,11 @@ export async function onRequest({ request, env }) {
     }
   }
 
-  // 仅缓存真实抓取到的内容；空结果/失败不缓存，以便尽快重试源站
+  // 仅缓存真实抓取到的内容；空结果/失败不缓存，以便尽快重试源站。
+  // TTL 7200s(2小时)：50 个账号约 600 次写入/天，稳在 Free 计划 1000 次/天额度内（同时兼顾内容新鲜度）。
   if (kv && gotReal && rss) {
     try {
-      await kv.put(cacheKey, rss, { expirationTtl: 600 });
+      await kv.put(cacheKey, rss, { expirationTtl: 7200 });
     } catch (e) {
       console.warn("twitter-rss KV 写入失败（不影响本次返回）：", e);
     }
