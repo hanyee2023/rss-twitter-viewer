@@ -720,11 +720,15 @@ function startHlsVideo(video){
         const hls = new Hls({
             enableWorker: true,
             lowLatencyMode: false,
-            maxBufferLength: 60,
-            backBufferLength: 30,
+            maxBufferLength: 90,         // 加厚前向缓冲：代理分片慢时减少缓冲耗尽导致的停顿
+            maxMaxBufferLength: 120,     // 硬性上限，防止极端情况下内存失控
+            backBufferLength: 60,        // 加厚后向缓冲：拖动/回看更稳，减少重新拉取
             capLevelToPlayerSize: true,
             storage: null,
-            autoStartLoad: true
+            autoStartLoad: true,
+            fragLoadingMaxRetry: 6,      // 分片拉取失败容忍度（代理偶发抖动）
+            fragLoadingRetryDelay: 800,
+            manifestLoadingMaxRetry: 4
         });
         video.hlsInstance = hls;
         if(!video._metaBound){
@@ -836,13 +840,15 @@ function initHlsVideo(){
         }
         if(video.classList.contains("media-video")){
             video.addEventListener("play", ()=>{
-            if(!video.dataset.hlsLoaded) {
-                video.pause();
-                startHlsVideo(video);
-            } else if(video.hlsInstance) {
-                video.hlsInstance.startLoad();
-            }
-        });
+                // 关键修复：hls 已建好时仅恢复缓冲(startLoad)。
+                // 切莫在此再调 startHlsVideo——首次初始化统一由 toggleVideoPlay→startHlsVideo 负责。
+                // 否则会与点击手势内的 video.play() 形成「双 Hls 实例竞争」：play 事件触发时 hlsLoaded
+                // 尚未置位，便又建一个实例覆盖旧实例，两引擎同时 startLoad 喂同一个 <video>，
+                // 表现为播放-暂停无限循环（代理返回慢的个别 m3u8 因时序竞态更易暴露）。
+                if(video.dataset.hlsLoaded && video.hlsInstance) {
+                    video.hlsInstance.startLoad();
+                }
+            });
         }
         bindCustomMediaControls(video);
         // 优化4：绑定错误自动重试
