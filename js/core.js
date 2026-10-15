@@ -400,7 +400,7 @@ const btnSearch = document.getElementById("btnSearch");
 const btnLog = document.getElementById("btnLog");
 
 const pageTitle = document.getElementById("pageTitle");
-let allBtns = [btnHome, btnManage, btnAdd, btnFav, btnSearch, btnLog];
+let allBtns = [btnHome, btnManage, btnAdd, btnFav, btnSearch];
 
 const editModal = document.getElementById("editModal");
 const imgPreviewMask = document.getElementById("imgPreviewMask");

@@ -41,7 +41,7 @@ function showPage(targetDom, titleText) {
     pageFav.style.display = "none";
     pageSearch.style.display = "none";
     pageSingle.style.display = "none";
-    pageLog.style.display = "none";
+    if (pageLog) pageLog.style.display = "none";
 
     feedPanel.innerHTML = "";
     favPanel.innerHTML = "";
@@ -200,7 +200,7 @@ btnManage.onclick = () => showPage(pageManage, "管理订阅");
 btnAdd.onclick = () => showPage(pageAdd, "添加订阅");
 btnFav.onclick = () => showPage(pageFav, "我的收藏");
 btnSearch.onclick = () => showPage(pageSearch, "内容搜索");
-btnLog.onclick = () => showPage(pageLog, "运行日志");
+if (btnLog) btnLog.onclick = () => showPage(pageLog, "运行日志");
 
 async function refreshAllRSSWithLock(){
     if(rssRefreshPromise) return rssRefreshPromise;
