@@ -365,6 +365,10 @@ function toggleVideoPlay(video){
         // 规避异步 play() 被自动播放策略拦截（NotAllowedError）
         const gp = video.play();
         if(gp && gp.catch) gp.catch(()=>{});
+        // 关键修复：标记当前播放视频，让 managePreloads() 在所有可见性变化时直接 return，
+        // 不再给视口内其他视频做 HLS 预加载 —— 否则长视频播放期间缓存被反复抢占带宽，
+        // 缓冲补充跟不上消耗，浏览器 waiting/playing 横跳（播放-暂停循环）。短视频因时长短不易暴露。
+        currentPlayingVideo = video;
         startHlsVideo(video);
         return;
     }
@@ -720,8 +724,8 @@ function startHlsVideo(video){
         const hls = new Hls({
             enableWorker: true,
             lowLatencyMode: false,
-            maxBufferLength: 90,         // 加厚前向缓冲：代理分片慢时减少缓冲耗尽导致的停顿
-            maxMaxBufferLength: 120,     // 硬性上限，防止极端情况下内存失控
+            maxBufferLength: 120,        // 加厚前向缓冲：代理分片慢时减少缓冲耗尽导致的停顿
+            maxMaxBufferLength: 180,     // 硬性上限，防止极端情况下内存失控
             backBufferLength: 60,        // 加厚后向缓冲：拖动/回看更稳，减少重新拉取
             capLevelToPlayerSize: true,
             storage: null,
