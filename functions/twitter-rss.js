@@ -7,31 +7,30 @@
 // 部署到 Cloudflare Pages 的 functions 目录即可使用
 // 订阅地址: /twitter-rss?user=用户名
 
-const DEFAULT_MAX_ITEMS = 50;   // 每源每次返回上限：原 20，提高到 50 以保留更多历史未读（约 5 天/源 @10条）
-const ABSOLUTE_MAX_ITEMS = 100; // ?max= 硬上限：原 50，提高到 100（保留调优空间）
+const DEFAULT_MAX_ITEMS = 30;   // 每源每次返回上限：50→30，降低回源解析 CPU（仍保留约 3 天/源 @10条）
+const ABSOLUTE_MAX_ITEMS = 50;  // ?max= 硬上限：100→50，与默认值对齐，避免单请求解析量过大
 
-// Nitter 实例列表（按优先级排序，2026-10-15 复核）
-// 实测依据（双出口验证可返回真实时间线）：asia.aguea.com(curl 200/21条) / nitter.cf(curl 200/15条) /
-//   nitter.netbub.com / nitter.meowing.monster / nitter.space（WebFetch 实拉到完整推文）。
-//   xcancel.com 为代码内 mp4 原生播放锚点（探测出口被其封禁无法直连验证，但 Cloudflare 函数出口通常可达）。
-// 状态页（status.d420.de）健康度仅供参考——实测 nitter.pp.ua(98%)/miningtcup.me(93%) 均返回 Bot 验证页，不可用；
-//   多数实例会屏蔽数据中心 IP（沙箱 curl 返回 000），故以 WebFetch 独立出口交叉验证为准。
-// 已剔除：nitter.app / nitter.tiekoetter.com(仅50%) / nitter.tromdienste.de（无状态页背书且未验证），
-//   以及历史失效的 aguea.net(Anubis) / nitter.catsarch.com(关停) / kareem.one / click / jaydenha.uk / thepixora / nitter.cz。
+// Nitter 实例列表（按优先级排序，2026-10-17 实测复核）
+// 实测现状（WebFetch 独立出口）：nitter.cf / nitter.space / nitter.netbub.com / nitter.meowing.monster
+//   均正常返回推文时间线；xcancel.com 直接 fetch failed（疑似失效/加防护）；
+//   asia.aguea.com 已挂 Anubis「Making sure you're not a bot」验证页，返回不了推文。
+// 故把仍存活的 4 个实例前置（前 3 个即覆盖绝大多数场景），失效的 2 个移到末尾仅作储备。
+// 说明：多数实例会屏蔽数据中心 IP（沙箱 curl 返回 000），故以 WebFetch 独立出口交叉验证为准；
+//   状态页（status.d420.de）健康度仅供参考——实测 nitter.pp.ua(98%)/miningtcup.me(93%) 均返回 Bot 验证页，不可用。
 const NITTER_INSTANCES = [
-  'https://xcancel.com',              // 首选：原生 mp4，<video> 播放最稳（多图解析已适配其结构）
-  'https://asia.aguea.com',           // 实测可返回真实时间线（hls 兜底），xcancel 失效时首选回退
-  'https://nitter.cf',                // 实测 200/15 timeline-item，标准 nitter 结构、代理路径已兼容
-  'https://nitter.space',             // 实测返回完整时间线，标准 nitter 结构、代理路径已兼容
-  'https://nitter.netbub.com',        // 状态页 95%、实测返回完整时间线，作为回退
-  'https://nitter.meowing.monster',   // 状态页 94%、实测返回完整时间线，作为回退
+  'https://nitter.cf',                // 首选：实测正常返回标准 nitter 时间线
+  'https://nitter.space',             // 实测正常，标准 nitter 结构、代理路径已兼容
+  'https://nitter.netbub.com',        // 实测正常，作为回退
+  'https://nitter.meowing.monster',   // 实测正常（含 m3u8 视频），作为回退
+  'https://xcancel.com',              // 储备：原生 mp4 播放锚点，当前实测 fetch failed，恢复后再启用
+  'https://asia.aguea.com',           // 储备：当前挂 Anubis 验证页返回不了推文，恢复后再启用
 ];
 
 
 const SYNDICATION_BASE = 'https://syndication.twitter.com/srv/timeline-profile/screen-name/';
 
 const FETCH_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
-const FETCH_TIMEOUT = 10000;
+const FETCH_TIMEOUT = 4000;   // 单实例超时 10s→4s：失效实例快速失败，避免回源被挂起拖垮整体耗时
 
 function corsHeaders(extra = {}) {
   return {
@@ -246,7 +245,9 @@ function hasTimeline(html) {
 // ─── 方案 A：Nitter HTML 解析（多实例回退）──────────────────────
 async function fetchFromNitter(username, maxItems, diag = []) {
   const hostOf = (b) => b.replace('https://', '');
-  for (const base of NITTER_INSTANCES) {
+  // 限制实例尝试数：回源 CPU 峰值主要来自失败/超时后的反复解析，
+  // 只试前 3 个（xcancel → asia.aguea → nitter.cf）已覆盖绝大多数可用场景。
+  for (const base of NITTER_INSTANCES.slice(0, 3)) {
     try {
       const res = await fetch(base + '/' + username, {
         headers: {
@@ -269,15 +270,20 @@ async function fetchFromNitter(username, maxItems, diag = []) {
         return buildEmptyRss(username, '该用户不存在或已被封禁');
       }
 
-      // 检测是否有推文内容（宽松判断，兼容改版）
-      if (!hasTimeline(html)) {
-        diag.push(`${hostOf(base)}: 未识别到推文结构`);
+      // 检测验证页 / 机器人挑战（Nitter 实例普遍被 Anubis / Cloudflare 拦截，返回 Proof of Work 页面而非推文）
+      if (html.includes('Just a moment')
+          || html.includes('Making sure you')
+          || html.includes('Anubis')
+          || html.includes('Proof of Work')
+          || html.includes('Enable JavaScript and cookies')
+          || (html.includes('cloudflare') && html.includes('challenge'))) {
+        diag.push(`${hostOf(base)}: 验证/挑战页`);
         continue;
       }
 
-      // 检测 Cloudflare 验证页
-      if (html.includes('Just a moment') || (html.includes('cloudflare') && html.includes('challenge'))) {
-        diag.push(`${hostOf(base)}: Cloudflare验证页`);
+      // 检测是否有推文内容（宽松判断，兼容改版）
+      if (!hasTimeline(html)) {
+        diag.push(`${hostOf(base)}: 未识别到推文结构`);
         continue;
       }
 
@@ -343,8 +349,18 @@ async function fetchFromNitter(username, maxItems, diag = []) {
 async function parseNitterHtml(html, username, maxItems, nitterBase) {
   const items = [];
 
-  // 用 timeline-item 作为分隔，每个块包含一条推文
-  const tweetBlocks = html.split(/(?=<div class="timeline-item)/i);
+  // 只扫描前 maxItems+3 条 timeline-item，避免对整页 HTML 做全局 split，
+  // 这是回源 CPU 的主要消耗之一（长 HTML / 多转推时尤其明显）。
+  const tweetBlocks = [];
+  const marker = '<div class="timeline-item';
+  let searchFrom = 0;
+  for (let i = 0; i < maxItems + 3; i++) {
+    const idx = html.indexOf(marker, searchFrom);
+    if (idx === -1) break;
+    const nextIdx = html.indexOf(marker, idx + marker.length);
+    tweetBlocks.push(nextIdx === -1 ? html.slice(idx) : html.slice(idx, nextIdx));
+    searchFrom = idx + marker.length;
+  }
 
   for (const block of tweetBlocks) {
     if (items.length >= maxItems) break;
@@ -908,11 +924,15 @@ export async function onRequest({ request, env }) {
     }
   }
 
-  // 仅缓存真实抓取到的内容；空结果/失败不缓存，以便尽快重试源站。
-  // TTL 7200s(2小时)：50 个账号约 600 次写入/天，稳在 Free 计划 1000 次/天额度内（同时兼顾内容新鲜度）。
-  if (kv && gotReal && rss) {
+  // 成功与失败都写 KV，但 TTL 不同：
+  //   真实内容 → 10800s(3h)，保持低回源频率；
+  //   失败/空结果 → 600s(10min) 短缓存，避免对失效源/被墙实例反复回源
+  //   （这是本月实例大面积失效时 CPU 暴涨的根因：失败时每次刷新都重抓、且不缓存）。
+  // 失败写入约 56 源 × 每 10min 一次 ÷ 1440min ≈ 8 次/天，远低于 1000 次/天额度。
+  if (kv && rss) {
     try {
-      await kv.put(cacheKey, rss, { expirationTtl: 7200 });
+      const ttl = gotReal ? 10800 : 600;
+      await kv.put(cacheKey, rss, { expirationTtl: ttl });
     } catch (e) {
       console.warn("twitter-rss KV 写入失败（不影响本次返回）：", e);
     }
