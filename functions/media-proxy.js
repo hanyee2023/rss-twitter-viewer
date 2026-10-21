@@ -447,8 +447,11 @@ export async function onRequest({ request }) {
     // 注：不再无差别删除 Vary（Range 分支必须保留 Vary:Range）；仅删除 Transfer-Encoding 由运行时重算
     headers.delete("Transfer-Encoding");
 
-    // 用带速率测量的流式转发：既保持边收边发（流式），又实时记录代理下载速率供前端展示
-    return streamWithSpeed(res, res.status, headers);
+    // 回归 4.8 直通流转发：字节流不经过任何用户 JS，CPU≈0。
+    // 5.4 曾用 streamWithSpeed 逐 chunk 统计速率，每个视频分片的每个 chunk 都要过 JS transform，
+    // 大分片累积 CPU 超 10ms 上限——这是 2026-10 月 CPU 超限的真正根因（4.8 直通流两个月零违规）。
+    // 代价：media-proxy?ping 的实时速率显示不再有数据（恒为 null），接口本身保留无害。
+    return new Response(res.body, { status: res.status, headers });
   } catch (err) {
     return new Response("媒体代理失败：" + err.message, { status: 502, headers: corsHeaders() });
   }
