@@ -375,14 +375,10 @@ async function loadAllRSS(){
                     }else{
                         // 后端返回了"空结果"RSS：很可能是所有 Nitter 实例失效，
                         // 诊断原因写在 <channel><description> 里（例如"所有 Nitter 实例均不可用…"）。
-                        // 透传到运行报告，解决"前端提示失败、但运行报告无报错"的矛盾。
+                        // 透传给失败提示，避免"前端提示失败、但看不出原因"。
                         let diag = "";
                         try { if (typeof extractChannelDesc === "function") diag = extractChannelDesc(xmlText); } catch(e) {}
                         if(diag && /实例|失效|不可用|失败|超时|未识别|验证页/.test(diag)){
-                            if(window.AppLog){
-                                AppLog.markFail();
-                                AppLog.recordError(`订阅【${f.name}】后端诊断失败：${diag}`, "RSS加载");
-                            }
                             failedFeeds.push({name: f.name, url: f.url, error: diag});
                         }
                     }
@@ -392,11 +388,6 @@ async function loadAllRSS(){
                 console.warn(`订阅【${f.name}】拉取失败：`, e.message);
                 const errDesc = describeRssError(e);
                 failedFeeds.push({name: f.name, url: f.url, error: errDesc});
-                // 运行日志（5.0）：记录后台订阅加载失败 + 累加失败计数
-                if(window.AppLog){
-                    AppLog.markFail();
-                    AppLog.recordError(`订阅【${f.name}】加载失败：${errDesc}`, "RSS加载");
-                }
                 // 尝试使用本地缓存
                 const cache = getRssCache(f.url);
                 if(cache && cache.items && cache.items.length > 0){

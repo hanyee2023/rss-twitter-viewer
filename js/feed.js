@@ -41,7 +41,6 @@ function showPage(targetDom, titleText) {
     pageFav.style.display = "none";
     pageSearch.style.display = "none";
     pageSingle.style.display = "none";
-    if (pageLog) pageLog.style.display = "none";
 
     feedPanel.innerHTML = "";
     favPanel.innerHTML = "";
@@ -64,7 +63,6 @@ function showPage(targetDom, titleText) {
     else if (targetDom === pageAdd) btnAdd.classList.add("active");
     else if (targetDom === pageFav) btnFav.classList.add("active");
     else if (targetDom === pageSearch) btnSearch.classList.add("active");
-    else if (targetDom === pageLog) btnLog.classList.add("active");
     // 单源界面不属于任一底部固定 tab，不高亮
 
     if (targetDom === pageHome) {
@@ -110,8 +108,6 @@ function showPage(targetDom, titleText) {
     } else if (targetDom === pageSearch) {
         searchInput.value = "";
         searchResultBox.innerHTML = "";
-    } else if (targetDom === pageLog) {
-        if (window.AppLog) AppLog.renderList();
     } else if (targetDom === pageAdd) {
         renderKeywordList();
     }
@@ -200,7 +196,6 @@ btnManage.onclick = () => showPage(pageManage, "管理订阅");
 btnAdd.onclick = () => showPage(pageAdd, "添加订阅");
 btnFav.onclick = () => showPage(pageFav, "我的收藏");
 btnSearch.onclick = () => showPage(pageSearch, "内容搜索");
-if (btnLog) btnLog.onclick = () => showPage(pageLog, "运行日志");
 
 async function refreshAllRSSWithLock(){
     if(rssRefreshPromise) return rssRefreshPromise;
@@ -210,9 +205,6 @@ async function refreshAllRSSWithLock(){
         // 否则一次瞬时失败会抹掉全部文章 → 主页空白，且切回主页后卡在空快照里。
         // 仅当确实拉到了数据，才覆盖缓存；拉取失败则保留旧缓存，仅更新刷新时间戳。
         const isEmptyResult = (data.length === 0 && localCacheArticles.length > 0);
-        // 本地实际写入条数：容量不足时 saveArticleCacheToStorage 会逐级降档，
-        // 该值会低于 cacheData.length —— 日志里用它区分“源没给够”和“配额被砍”。
-        let savedCount = 0;
         if(isEmptyResult){
             lastRefreshTime = Date.now();
             localStorage.setItem(LAST_REFRESH_KEY, String(lastRefreshTime));
@@ -220,43 +212,10 @@ async function refreshAllRSSWithLock(){
             const cacheData = data.slice(0, ARTICLE_CACHE_LIMIT);
             allArticles = cacheData;
             localCacheArticles = [...cacheData];
-            savedCount = saveArticleCacheToStorage(cacheData);
+            saveArticleCacheToStorage(cacheData);
             lastRefreshTime = Date.now();
             localStorage.setItem(LAST_REFRESH_KEY, String(lastRefreshTime));
         }
-        // —— 运行日志（5.0）：记录本次刷新快照（更新时间点/条目/已读/未读/加载失败）——
-        // 注意：快照放在落盘之后，因此 itemCount 是**本次刷新后**的条目数（旧版记的是刷新前的旧值）。
-        try {
-            if (window.AppLog) {
-                const arts = (typeof localCacheArticles !== "undefined") ? localCacheArticles : [];
-                const rset = (typeof readLinkSet !== "undefined") ? readLinkSet : new Set();
-                const itemCount = arts.length;
-                const readCount = arts.filter(a => a && a.link && rset.has(a.link)).length;
-                const failCount = AppLog.getAndResetFail();
-                // 被屏蔽 / 被隐藏条目统计（仅在日志中体现，不影响列表）：
-                //   blockedCount = 命中「屏蔽关键字」的条目数
-                //   hiddenCount  = 被隐藏的「纯文字推特」条目数（无图/无视频/无 iframe）
-                const blockedCount = arts.filter(a => a && hasBlockedKeyword(getPureText(a.title))).length;
-                const hiddenCount = arts.filter(a => a && a.isTwitterRss && isPureTextItem(a)).length;
-                AppLog.recordUpdate({
-                    itemCount: itemCount,
-                    readCount: readCount,
-                    unreadCount: itemCount - readCount,
-                    failCount: failCount,
-                    blockedCount: blockedCount,
-                    hiddenCount: hiddenCount,
-                    savedCount: savedCount,
-                    source: "主页刷新"
-                });
-            }
-        } catch (e) { /* 日志写入失败不影响正常刷新 */ }
-        // 若此刻正停留在日志页，同步刷新「本地存储读数」条
-        try {
-            if (window.AppLog && AppLog.renderStorage &&
-                typeof pageLog !== "undefined" && pageLog && pageLog.style.display !== "none") {
-                AppLog.renderStorage();
-            }
-        } catch (e) { /* ignore */ }
         return localCacheArticles;
     })();
     try{

@@ -382,7 +382,6 @@ const pageAdd = document.getElementById("pageAdd");
 const pageFav = document.getElementById("pageFav");
 const pageSearch = document.getElementById("pageSearch");
 const pageSingle = document.getElementById("pageSingle");
-const pageLog = document.getElementById("pageLog");
 
 const articleBox = document.getElementById("articleBox");
 const articleBoxSingle = document.getElementById("articleBoxSingle");
@@ -397,7 +396,6 @@ const btnManage = document.getElementById("btnManage");
 const btnAdd = document.getElementById("btnAdd");
 const btnFav = document.getElementById("btnFav");
 const btnSearch = document.getElementById("btnSearch");
-const btnLog = document.getElementById("btnLog");
 
 const pageTitle = document.getElementById("pageTitle");
 let allBtns = [btnHome, btnManage, btnAdd, btnFav, btnSearch];
@@ -617,10 +615,6 @@ function shareIconSvg(){
 
 function favIconSvg(filled = false){
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="${filled ? "currentColor" : "none"}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>`;
-}
-
-function viewIconSvg(){
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
 }
 
 function editIconSvg(){
