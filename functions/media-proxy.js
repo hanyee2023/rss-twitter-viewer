@@ -296,70 +296,12 @@ function corsHeaders(extra = {}) {
   };
 }
 
-// 实时吞吐测量：在实际媒体流转发时更新。
-// 模块级变量在 CF isolate 内复用，温态（停留页面后）持续有效；
-// 冷启动/无播放时为 null，前端显示 “--”。
-let _lastSpeedMbps = null;
-let _lastSpeedTs = 0;
-
-// 将上游响应体包一层 TransformStream，统计转发字节数与耗时，得到代理实测下载速率(MB/s)。
-function streamWithSpeed(upstreamResp, status, headers) {
-  const body = upstreamResp.body;
-  if (!body) {
-    return new Response(null, { status, headers });
-  }
-  let total = 0;
-  let t0 = 0;
-  const ts = new TransformStream({
-    transform(chunk, controller) {
-      if (t0 === 0) t0 = Date.now();
-      if (chunk && chunk.byteLength) total += chunk.byteLength;
-      controller.enqueue(chunk);
-    },
-    flush() {
-      const dt = (Date.now() - t0) / 1000;
-      // 仅当数据量足够、耗时合理时更新，避免极短分片造成的噪声
-      if (dt > 0.05 && total > 4096) {
-        _lastSpeedMbps = (total / 1e6) / dt; // MB/s
-        _lastSpeedTs = Date.now();
-      }
-    }
-  });
-  return new Response(body.pipeThrough(ts), { status, headers });
-}
-
-// 延迟/速率探测接口：返回 Cloudflare 实测的代理下载速率(MB/s)。
-// 该速率由 streamWithSpeed 在真实转发视频流时测量，反映“代理水管粗细”，比本地计算更准。
-async function handlePing(request) {
-  const cf = request.cf || {};
-  const colo = cf.colo || null;
-  const fresh = (Date.now() - _lastSpeedTs) < 10000;
-  const speedMbps = (_lastSpeedMbps !== null && fresh)
-    ? Math.round(_lastSpeedMbps * 10) / 10
-    : null;
-  const body = JSON.stringify({ speedMbps, colo, ts: Date.now() });
-  return new Response(body, {
-    status: 200,
-    headers: corsHeaders({
-      "Content-Type": "application/json;charset=utf-8",
-      "Cache-Control": "no-store"
-    })
-  });
-}
-
 export async function onRequest({ request }) {
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders() });
   }
 
   const urlObj = new URL(request.url);
-
-  // 延迟探测接口：返回 本机→代理(clientTcpRtt) 与 代理→源站(upstreamRtt) 的实时延迟，
-  // 让用户能区分“自己的网络 / 代理网络 / 代码判断”导致的卡顿。前端每数秒轮询一次。
-  if (urlObj.searchParams.get("ping") !== null) {
-    return handlePing(request);
-  }
-
   let targetUrl = urlObj.searchParams.get("url");
   if (!targetUrl || !isHttpUrl(targetUrl)) {
     return new Response("缺少或非法url参数", { status: 400, headers: corsHeaders() });
@@ -450,7 +392,7 @@ export async function onRequest({ request }) {
     // 回归 4.8 直通流转发：字节流不经过任何用户 JS，CPU≈0。
     // 5.4 曾用 streamWithSpeed 逐 chunk 统计速率，每个视频分片的每个 chunk 都要过 JS transform，
     // 大分片累积 CPU 超 10ms 上限——这是 2026-10 月 CPU 超限的真正根因（4.8 直通流两个月零违规）。
-    // 代价：media-proxy?ping 的实时速率显示不再有数据（恒为 null），接口本身保留无害。
+    // 该功能属 5.2-5.3 期间引入，主页早已回归 4.8 布局、前端也不再调用，故连同 ?ping 接口一并移除。
     return new Response(res.body, { status: res.status, headers });
   } catch (err) {
     return new Response("媒体代理失败：" + err.message, { status: 502, headers: corsHeaders() });
