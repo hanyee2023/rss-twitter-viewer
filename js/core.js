@@ -401,7 +401,7 @@ const pageTitle = document.getElementById("pageTitle");
 let allBtns = [btnHome, btnManage, btnAdd, btnFav, btnSearch];
 
 const editModal = document.getElementById("editModal");
-const feedActionModal = document.getElementById("feedActionModal"); // 长按订阅源操作面板（2026-11-18）
+const feedPopover = document.getElementById("feedPopover"); // 长按订阅源的小气泡操作菜单（2026-11-18）
 const imgPreviewMask = document.getElementById("imgPreviewMask");
 const previewWrap = document.getElementById("previewWrap");
 const previewTip = document.getElementById("previewTip");

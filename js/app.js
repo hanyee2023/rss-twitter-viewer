@@ -21,7 +21,6 @@ function renderFav(){
     bindAllCardEvent();
     bindVideoPauseObserver();
     initHlsVideo();
-    translateCardTitles(favPanel);
     const favLoad = document.getElementById("favLoadMore");
     if(favLoad){
         const favObserver = new IntersectionObserver(async (e)=>{
@@ -829,10 +828,12 @@ function renderManage(){
     }
 }
 
-// ─── 长按订阅源唤出操作面板（标记已读 / 编辑 / 删除）──────────
+// ─── 长按订阅源唤出小气泡操作菜单（标记已读 / 编辑 / 删除）─────
 // 触摸端：长按 500ms 触发；桌面端：右键（contextmenu）兜底。
+// 气泡为 fixed 定位、由 JS 计算贴近触发条目，非全屏遮罩。
 // 注意 feedPanel.innerHTML 每次 renderManage 都会重建，监听器需重新绑定。
 let feedActionTimer = null;
+let feedActionIdx = -1;
 function bindFeedLongPress(){
     const startLongPress = (e) => {
         const item = e.target.closest(".feed-item");
@@ -840,7 +841,12 @@ function bindFeedLongPress(){
         const idx = Number(item.dataset.idx);
         if (Number.isNaN(idx) || !feedList[idx]) return;
         clearTimeout(feedActionTimer);
-        feedActionTimer = setTimeout(() => { feedActionTimer = null; openFeedAction(idx); }, 500);
+        feedActionTimer = setTimeout(() => {
+            feedActionTimer = null;
+            // 触觉反馈（支持的设备），并抑制长按后残余的系统选择
+            try { if (navigator.vibrate) navigator.vibrate(30); } catch(err) {}
+            openFeedAction(idx, item);
+        }, 500);
     };
     const cancelLongPress = () => {
         if (feedActionTimer) { clearTimeout(feedActionTimer); feedActionTimer = null; }
@@ -849,29 +855,46 @@ function bindFeedLongPress(){
     ["touchend", "touchmove", "touchcancel"].forEach(ev =>
         feedPanel.addEventListener(ev, cancelLongPress, {passive: true})
     );
-    // 桌面端右键兜底
+    // 桌面端右键兜底（preventDefault 同时抑制系统右键菜单）
     feedPanel.addEventListener("contextmenu", (e) => {
         const item = e.target.closest(".feed-item");
         if (!item) return;
         e.preventDefault();
-        openFeedAction(Number(item.dataset.idx));
+        openFeedAction(Number(item.dataset.idx), item);
     });
 }
 
-function openFeedAction(idx){
+function openFeedAction(idx, anchorEl){
     const f = feedList[idx];
-    if (!f) return;
-    document.getElementById("feedActionIdx").value = idx;
-    document.getElementById("feedActionTitle").textContent = f.name || "未命名订阅";
-    feedActionModal.style.display = "flex";
+    if (!f || !anchorEl) return;
+    feedActionIdx = idx;
+    document.getElementById("feedPopoverTitle").textContent = f.name || "未命名订阅";
+    feedPopover.style.display = "block";
+    // 先隐藏测量，再按触发条目位置贴近放置：默认贴条目右缘、与条目顶对齐，越界自动收回视口内
+    feedPopover.style.visibility = "hidden";
+    const r = anchorEl.getBoundingClientRect();
+    const pop = feedPopover;
+    const pw = pop.offsetWidth, ph = pop.offsetHeight;
+    const M = 8; // 视口安全边距
+    let top = r.top;
+    if (top + ph > window.innerHeight - M) top = window.innerHeight - ph - M;
+    if (top < M) top = M;
+    let left = r.right + 6;                       // 首选：条目右侧
+    if (left + pw > window.innerWidth - M) left = r.left - pw - 6; // 右侧放不下改左侧
+    if (left < M) left = window.innerWidth - pw - M;               // 两侧都不行则贴右缘
+    if (left < M) left = M;
+    pop.style.top = Math.round(top) + "px";
+    pop.style.left = Math.round(left) + "px";
+    pop.style.visibility = "visible";
 }
 
 function closeFeedAction(){
-    feedActionModal.style.display = "none";
+    feedPopover.style.display = "none";
+    feedActionIdx = -1;
 }
 
 document.getElementById("feedActionRead").onclick = function(){
-    const idx = Number(document.getElementById("feedActionIdx").value);
+    const idx = feedActionIdx;
     const f = feedList[idx];
     if (!f) return closeFeedAction();
     const count = markFeedItemsRead(f.url);
@@ -881,9 +904,9 @@ document.getElementById("feedActionRead").onclick = function(){
 };
 
 document.getElementById("feedActionEdit").onclick = function(){
-    const idx = Number(document.getElementById("feedActionIdx").value);
-    closeFeedAction();
+    const idx = feedActionIdx;
     const f = feedList[idx];
+    closeFeedAction();
     if (!f) return;
     document.getElementById("editIndex").value = idx;
     document.getElementById("editName").value = f.name || "";
@@ -892,7 +915,7 @@ document.getElementById("feedActionEdit").onclick = function(){
 };
 
 document.getElementById("feedActionDel").onclick = function(){
-    const idx = Number(document.getElementById("feedActionIdx").value);
+    const idx = feedActionIdx;
     const f = feedList[idx];
     closeFeedAction();
     if (!f) return;
@@ -901,11 +924,12 @@ document.getElementById("feedActionDel").onclick = function(){
     renderManage();
 };
 
-document.getElementById("feedActionCancel").onclick = closeFeedAction;
-// 点击遮罩空白处关闭操作面板
-feedActionModal.addEventListener("click", (e) => {
-    if (e.target === feedActionModal) closeFeedAction();
+// 点气泡外任意位置 / 滚动 / 旋转屏幕时关闭（capture 捕获所有容器的滚动）
+document.addEventListener("pointerdown", (e) => {
+    if (feedPopover.style.display === "block" && !feedPopover.contains(e.target)) closeFeedAction();
 });
+window.addEventListener("scroll", closeFeedAction, {capture: true, passive: true});
+window.addEventListener("resize", closeFeedAction);
 
 // ─── 管理页顶部【全部已读】按钮 ──────────────────────────────
 document.getElementById("markAllReadBtn").onclick = function(){
@@ -916,20 +940,6 @@ document.getElementById("markAllReadBtn").onclick = function(){
     const count = markAllFeedsRead();
     showToast(`已将全部 ${count} 条内容标记为已读`);
     afterMarkReadRefresh();
-};
-
-// ─── 管理页顶部【翻译】开关 ──────────────────────────────────
-const transToggleBtn = document.getElementById("transToggleBtn");
-function syncTransToggleText(){
-    transToggleBtn.textContent = isTranslateEnabled() ? "翻译:开" : "翻译:关";
-}
-syncTransToggleText();
-transToggleBtn.onclick = function(){
-    const on = toggleTranslate();
-    syncTransToggleText();
-    showToast(on ? "标题自动翻译已开启" : "标题自动翻译已关闭（已渲染的译文保留）");
-    // 开启时对当前页面立即生效
-    if (on && currentPage) translateCardTitles(currentPage);
 };
 
 function getFeedCategoryByContent(sourceUrl){

@@ -455,8 +455,6 @@ function renderPagedList(reset = false){
     bindAllCardEvent();
     bindVideoPauseObserver();
     initHlsVideo();
-    // 异步翻译非中文标题（纯前端，不阻塞渲染；见 js/translate.js）
-    translateCardTitles(currentArticleBox);
 }
 let mainScrollHandler = null;
 
