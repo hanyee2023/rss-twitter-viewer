@@ -128,11 +128,11 @@ function buildFavGridCell(item, idx){
         mediaInner = `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;padding:8px;font-size:11px;color:#888;text-align:center;overflow:hidden;">${escapeHtml((item.title||"").slice(0,60))}</div>`;
     }
     const playBadge = isVideo ? `<span class="fav-play-badge">${FAV_PLAY_SVG}</span>` : "";
-    // 头部：订阅头像 + 标题
+    // 头部：订阅头像 + 标题（Twitter 订阅显示订阅用户本人的真头像，无头像回退彩色字母图标）
     const avatarKey = (item.sourceUrl || "") + "|" + (item.sourceName || "");
     const head = `
         <div class="fav-cell-head">
-            <div class="fav-cell-avatar" style="background:${escapeAttr(getAvatarStyle(avatarKey))};">${avatarIconSvg(hashText(avatarKey))}</div>
+            <div class="fav-cell-avatar" style="background:${escapeAttr(getAvatarStyle(avatarKey))};">${feedAvatarInnerHtml(item.sourceUrl, avatarIconSvg(hashText(avatarKey)))}</div>
             <div class="fav-cell-title">${escapeHtml(item.sourceName || "未知来源")}</div>
         </div>`;
     // 底部：更新时间（月-日）+ 分享 / 收藏（防误触：点击只切换实心/空心，离开收藏页后才真正取消）
@@ -550,6 +550,14 @@ async function loadAllRSS(){
                     allGroups.push([]);
                 }else{
                     const items = parseRSS(xmlText, f.name, f.url, f.category);
+                    // 提取订阅用户头像（twitter-rss 在 channel 输出 <image><url>），有变化时持久化到 feed
+                    try{
+                        const av = extractChannelAvatar(xmlText);
+                        if(av && f.avatar !== av){
+                            f.avatar = av;
+                            localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
+                        }
+                    }catch(e){}
                     // 成功加载，保存缓存
                     if(items && items.length > 0){
                         saveRssCache(f.url, items);
@@ -597,6 +605,15 @@ async function loadAllRSS(){
         console.warn("RSS加载失败详情：\n" + failedMsgs);
     }
     return res;
+}
+
+// 从 RSS 文本提取 channel 级订阅头像 URL（twitter-rss 输出的 <image><url>）。
+// 仅信任 pbs.twimg.com/profile_images 地址，非 Twitter 源返回空字符串。
+function extractChannelAvatar(xml){
+    const m = String(xml || '').match(/<image>\s*<url>([^<]+)<\/url>/i);
+    if(!m) return "";
+    const u = fullDecodeXml(m[1]).trim();
+    return /^https?:\/\/pbs\.twimg\.com\/profile_images\//i.test(u) ? u : "";
 }
 
 function parseRSS(xml, sourceName, sourceUrl, cat){
@@ -1030,7 +1047,7 @@ function renderFeedSection(title, feeds, isTwitter){
         <div class="feed-item" data-idx="${feedList.indexOf(f)}" data-source-url="${f.url}">
             <div class="feed-left-area">
                 <div class="feed-index">${realIndex}</div>
-                <div class="card-avatar feed-avatar-btn" data-source="${f.url}" style="background:${avatarStyle};width:28px;height:28px;flex-shrink:0;cursor:pointer;" title="点击查看该订阅源">${avatarSvg}</div>
+                <div class="card-avatar feed-avatar-btn" data-source="${f.url}" style="background:${avatarStyle};width:28px;height:28px;flex-shrink:0;cursor:pointer;" title="点击查看该订阅源">${feedAvatarInnerHtml(f.url, avatarSvg)}</div>
                 <div class="feed-name-block">
                     <div class="feed-title-text">${escapeHtml(f.name||"未命名订阅")}</div>
                     <div class="feed-update-time">${unreadBadge}${latestTime}</div>

@@ -207,6 +207,27 @@ function getProxyFallbacksAttr(rawUrl, isFav = false) {
     return `data-proxy-fallbacks="${escapeAttr(JSON.stringify(fallbacks))}"`;
 }
 
+// ─── Twitter 订阅真头像（2026-11-19 新增）────────────────────────
+// twitter-rss.js 在 RSS channel 里输出 <image><url>（订阅用户本人头像，转推/发推作者不取），
+// 前端解析 RSS 时存入 feed.avatar；这里按订阅 URL 反查，仅信任 pbs.twimg.com/profile_images 地址。
+// 管理页 / 主页卡片 / 收藏九宫格三处复用。
+function getFeedAvatarUrl(sourceUrl) {
+    const key = String(sourceUrl || "").trim();
+    if (!key) return "";
+    const feed = feedList.find(f => String(f.url || "").trim() === key);
+    const raw = feed && feed.avatar ? String(feed.avatar) : "";
+    if (!/^https?:\/\/pbs\.twimg\.com\/profile_images\//i.test(raw)) return "";
+    return getProxyUrl(raw, false) || "";
+}
+
+// 真头像叠加渲染：真头像 <img> 覆盖在原彩色字母图标之上，
+// 加载失败时移除 <img> 自动回退字母图标（订阅删除 / 头像 404 / 非Twitter源均不受影响）。
+function feedAvatarInnerHtml(sourceUrl, avatarSvg) {
+    const realUrl = getFeedAvatarUrl(sourceUrl);
+    if (!realUrl) return avatarSvg;
+    return avatarSvg + `<img class="feed-real-avatar" src="${escapeAttr(realUrl)}" alt="" loading="lazy" onerror="this.remove()">`;
+}
+
 function fallbackMediaProxy(el) {
     const fallbacksStr = el.dataset.proxyFallbacks;
     if (!fallbacksStr) return false;

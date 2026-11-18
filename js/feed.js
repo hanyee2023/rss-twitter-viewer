@@ -330,6 +330,14 @@ async function renderSingleFeedFromSource(sourceUrl){
         const xmlText = await fetchRSSFeed(sourceUrl);
         const parsed = parseRSS(xmlText, feed ? feed.name : "未命名订阅", sourceUrl, feed ? feed.category : "img")
             .sort((a,b)=>new Date(b.date).getTime() - new Date(a.date).getTime());
+        // 提取订阅用户头像并持久化（twitter-rss 在 channel 输出 <image><url>）
+        try{
+            const av = extractChannelAvatar(xmlText);
+            if(feed && av && feed.avatar !== av){
+                feed.avatar = av;
+                localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
+            }
+        }catch(e){}
         const list = filterPureTextTwitter(parsed);
         if(list.length > 0){
             // 保存缓存 + 合并进本地总缓存（供主页/单源复用）
@@ -718,7 +726,7 @@ function buildCard(item, isFav = false){
         return `
         <div class="tweet-card" data-link="${itemLinkAttr}" data-source-url="${sourceUrlAttr}" data-share-url="${shareUrlAttr}">
             <div class="card-top">
-                <div class="card-avatar" style="background:${avatarStyle}">${avatarSvg}</div>
+                <div class="card-avatar" style="background:${avatarStyle}">${feedAvatarInnerHtml(item.sourceUrl, avatarSvg)}</div>
                 <div class="source-name-text">${sourceNameText}</div>
             </div>
             <div class="card-title-wrap">
@@ -738,7 +746,7 @@ function buildCard(item, isFav = false){
         return `
         <div class="tweet-card" data-link="${itemLinkAttr}" data-source-url="${sourceUrlAttr}" data-share-url="${shareUrlAttr}">
             <div class="card-top">
-                <div class="card-avatar" style="background:${avatarStyle}">${avatarSvg}</div>
+                <div class="card-avatar" style="background:${avatarStyle}">${feedAvatarInnerHtml(item.sourceUrl, avatarSvg)}</div>
                 <div class="source-name-text">${sourceNameText}</div>
             </div>
             <div class="card-title-wrap">
