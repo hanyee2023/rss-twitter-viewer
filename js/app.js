@@ -19,10 +19,43 @@ function renderFav(){
         html += `<div class="bottom-tip">全部收藏加载完毕</div>`;
     }
     favPanel.innerHTML = html;
-    // 九宫格点击：打开全屏播放层（不再走主页卡片的事件绑定）
-    favPanel.onclick = (e)=>{
-        const cell = e.target.closest(".fav-grid-cell");
-        if(cell && window.favGridItems){
+    // 九宫格点击：媒体区 → 全屏播放层；分享 → 复制链接；收藏 → 取消收藏
+    favPanel.onclick = async (e)=>{
+        const shareBtn = e.target.closest(".cell-share");
+        if(shareBtn){
+            e.stopPropagation();
+            const link = shareBtn.dataset.shareUrl || "";
+            if(!link){ showToast("无可分享的链接"); return; }
+            try{
+                await navigator.clipboard.writeText(link);
+                showToast("链接已复制");
+            }catch(err){
+                const input = document.createElement("input");
+                input.value = link;
+                document.body.appendChild(input);
+                input.select();
+                document.execCommand("copy");
+                input.remove();
+                showToast("链接已复制");
+            }
+            return;
+        }
+        const unfavBtn = e.target.closest(".cell-unfav");
+        if(unfavBtn){
+            e.stopPropagation();
+            const it = window.favGridItems && window.favGridItems[Number(unfavBtn.dataset.cellIdx)];
+            if(it && it.link){
+                const before = favList.length;
+                favList = favList.filter(x => x.link !== it.link);
+                localStorage.setItem(FAV_KEY, JSON.stringify(favList));
+                showToast(favList.length < before ? "已取消收藏" : "未找到该收藏");
+                renderFav();
+            }
+            return;
+        }
+        const media = e.target.closest(".fav-cell-media");
+        if(media && window.favGridItems){
+            const cell = media.closest(".fav-grid-cell");
             const it = window.favGridItems[Number(cell.dataset.favIdx)];
             if(it) openFavPlayer(it);
         }
@@ -51,7 +84,7 @@ function renderFav(){
     }
 }
 
-// ─── 收藏九宫格单元格：媒体预览区（3:4 圆角）+ 底部订阅头像 + 名称 ──
+// ─── 收藏九宫格单元格：头像+标题（顶） / 正方形媒体区（中） / 时间+分享+收藏（底） ──
 const FAV_PLAY_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M6 3.5v17l14-8.5z"/></svg>`;
 function buildFavGridCell(item, idx){
     const imgs = [...new Set((item.media && item.media.imgs) || [])];
@@ -67,13 +100,33 @@ function buildFavGridCell(item, idx){
         mediaInner = `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;padding:8px;font-size:11px;color:#888;text-align:center;overflow:hidden;">${escapeHtml((item.title||"").slice(0,60))}</div>`;
     }
     const playBadge = isVideo ? `<span class="fav-play-badge">${FAV_PLAY_SVG}</span>` : "";
+    // 头部：订阅头像 + 标题
     const avatarKey = (item.sourceUrl || "") + "|" + (item.sourceName || "");
+    const head = `
+        <div class="fav-cell-head">
+            <div class="fav-cell-avatar" style="background:${escapeAttr(getAvatarStyle(avatarKey))};">${avatarIconSvg(hashText(avatarKey))}</div>
+            <div class="fav-cell-title">${escapeHtml(item.sourceName || "未知来源")}</div>
+        </div>`;
+    // 底部：更新时间（月-日）+ 分享 / 取消收藏
+    let dateText = "";
+    try{
+        const d = new Date(item.date);
+        if(!Number.isNaN(d.getTime())){
+            dateText = `${d.getMonth() + 1}-${String(d.getDate()).padStart(2, "0")}`;
+        }
+    }catch(e){}
+    // 分享链接：与主页卡片同规则——优先原始媒体 URL，无媒体用文章链接
+    const shareUrl = item.videoUrl ? cleanMediaUrl(item.videoUrl) : (imgs.length ? cleanMediaUrl(imgs[0]) : (item.link || ""));
     const foot = `
         <div class="fav-cell-foot">
-            <div class="fav-cell-avatar" style="background:${escapeAttr(getAvatarStyle(avatarKey))};">${avatarIconSvg(hashText(avatarKey))}</div>
-            <div class="fav-cell-name">${escapeHtml(item.sourceName || "未知来源")}</div>
+            <span class="fav-cell-date">${dateText}</span>
+            <span class="fav-cell-ops">
+                <button class="cell-share" data-share-url="${escapeAttr(shareUrl)}" title="分享">${shareIconSvg()}</button>
+                <button class="cell-unfav" data-cell-idx="${idx}" title="取消收藏">${favIconSvg(true)}</button>
+            </span>
         </div>`;
     return `<div class="fav-grid-cell" data-fav-idx="${idx}">
+        ${head}
         <div class="fav-cell-media">${mediaInner}${playBadge}</div>
         ${foot}
     </div>`;
@@ -948,7 +1001,7 @@ function renderFeedSection(title, feeds, isTwitter){
         <div class="feed-item" data-idx="${feedList.indexOf(f)}" data-source-url="${f.url}">
             <div class="feed-left-area">
                 <div class="feed-index">${realIndex}</div>
-                <div class="card-avatar feed-avatar-btn" data-source="${f.url}" style="background:${avatarStyle};width:36px;height:36px;flex-shrink:0;cursor:pointer;" title="点击查看该订阅源">${avatarSvg}</div>
+                <div class="card-avatar feed-avatar-btn" data-source="${f.url}" style="background:${avatarStyle};width:28px;height:28px;flex-shrink:0;cursor:pointer;" title="点击查看该订阅源">${avatarSvg}</div>
                 <div class="feed-name-block">
                     <div class="feed-title-text">${escapeHtml(f.name||"未命名订阅")}</div>
                     <div class="feed-update-time">${unreadBadge}${latestTime}</div>
