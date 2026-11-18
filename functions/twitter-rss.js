@@ -20,8 +20,10 @@ const ABSOLUTE_MAX_ITEMS = 50;  // ?max= 硬上限：100→50，与默认值对�
 const NITTER_INSTANCES = [
   'https://nitter.cf',                // 首选：实测正常返回标准 nitter 时间线
   'https://nitter.space',             // 实测正常，标准 nitter 结构、代理路径已兼容
+  'https://nitterts.pages.dev',       // 2026-11-18 新增：Cloudflare Pages 自建实例，实测返回完整标准时间线（结构同 nitter.cf）
   'https://nitter.netbub.com',        // 实测正常，作为回退
   'https://nitter.meowing.monster',   // 实测正常（含 m3u8 视频），作为回退
+  'https://xitter.cf',                // 2026-11-18 储备：teapawt fork，可返回推文但外链/头像被路径重写（xitter.cf/t.co/...），媒体 URL 解码未验证，仅文字兜底
   'https://xcancel.com',              // 储备：原生 mp4 播放锚点，当前实测 fetch failed，恢复后再启用
   'https://asia.aguea.com',           // 储备：当前挂 Anubis 验证页返回不了推文，恢复后再启用
 ];
@@ -840,6 +842,77 @@ async function fetchFromSyndication(username, maxItems) {
   }
 }
 
+// ─── KV 条目归档（2026-11-18 新增）────────────────────────────
+// 每源一个归档键 twarch:<user>，值 = 该源最近 ARCHIVE_MAX_ITEMS 条 <item> XML 字符串数组。
+// 作用：回源失败（Nitter 全挂 + Syndication 失败）时兜底返回历史条目，feed 缓存 6h 过期后归档仍在；
+//       同时为前端提供最多约 8 天的内容历史（每源 100 条 ÷ 平均 12 条/天）。
+// 写入成本：仅回源成功时合并写 1 次/回源（约 80 次/天），加 feed 缓存写入远低于 KV 免费 1000 写/天。
+// 存储成本：50 源 × 100 条 × 约 2-3KB ≈ 15MB，KV 免费额度 1GB，可忽略。
+const ARCHIVE_TTL = 604800;       // 归档保留 7 天，超期自动清理
+const ARCHIVE_MAX_ITEMS = 100;    // 每源归档条目上限
+
+function extractItemLink(itemXml) {
+  const m = String(itemXml || '').match(/<link>([^<]+)<\/link>/i);
+  return m ? m[1] : '';
+}
+
+// 回源成功后合并归档：新条目在前、按 link 去重、超出上限裁剪、TTL 续期
+async function updateArchive(kv, username, freshItems) {
+  if (!kv || !freshItems || freshItems.length === 0) return;
+  try {
+    const archKey = `twarch:${username}`;
+    let old = [];
+    try {
+      const raw = await kv.get(archKey, { type: 'text' });
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) old = parsed;
+      }
+    } catch (e) { /* 归档读取/解析失败按空处理，不影响主流程 */ }
+    const seen = new Set(freshItems.map(extractItemLink).filter(Boolean));
+    const merged = [
+      ...freshItems,
+      ...old.filter(it => {
+        const link = extractItemLink(it);
+        return link && !seen.has(link);
+      }),
+    ].slice(0, ARCHIVE_MAX_ITEMS);
+    await kv.put(archKey, JSON.stringify(merged), { expirationTtl: ARCHIVE_TTL });
+  } catch (e) {
+    console.warn('twitter-rss 归档写入失败（不影响本次返回）：', e);
+  }
+}
+
+// 读取归档（回源失败时兜底）
+async function readArchive(kv, username) {
+  if (!kv) return null;
+  try {
+    const raw = await kv.get(`twarch:${username}`, { type: 'text' });
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// 用归档条目拼装 RSS（description 标注来源，便于前端识别这是兜底数据）
+function buildArchiveRss(username, archivedItems) {
+  return (
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<rss version="2.0">\n' +
+    '<channel>\n' +
+    '<title>@' + username + ' / Twitter</title>\n' +
+    '<link>https://x.com/' + username + '</link>\n' +
+    '<description>Twitter 时间线 - @' + username + '（回源失败，以下为 KV 归档的历史条目，共 ' + archivedItems.length + ' 条）</description>\n' +
+    '<language>zh-CN</language>\n' +
+    '<lastBuildDate>' + new Date().toUTCString() + '</lastBuildDate>\n' +
+    archivedItems.join('\n') + '\n' +
+    '</channel>\n' +
+    '</rss>'
+  );
+}
+
 // ─── 生成空 RSS（无 item，不显示占位内容）──────────────────────
 function buildEmptyRss(username, reason) {
   return (
@@ -915,6 +988,16 @@ export async function onRequest({ request, env }) {
     gotReal = !!syn;
     if (syn) {
       rss = syn;
+    }
+  }
+
+  // 方案 C：Nitter + Syndication 全失败 → 读 KV 归档兜底，返回历史条目而非空 feed
+  let archiveFallback = false;
+  if (!rss) {
+    const archived = await readArchive(kv, username);
+    if (archived) {
+      rss = buildArchiveRss(username, archived);
+      archiveFallback = true;
     } else {
       const detail = nitterDiag.length ? nitterDiag.join('；') : '未知原因';
       rss = buildEmptyRss(
@@ -928,6 +1011,7 @@ export async function onRequest({ request, env }) {
   //   真实内容 → 10800s(3h)，保持低回源频率；
   //   失败/空结果 → 600s(10min) 短缓存，避免对失效源/被墙实例反复回源
   //   （这是本月实例大面积失效时 CPU 暴涨的根因：失败时每次刷新都重抓、且不缓存）。
+  //   归档兜底（archiveFallback）也按 600s 短缓存，10 分钟内命中缓存直接返回归档内容。
   // 失败写入约 56 源 × 每 10min 一次 ÷ 1440min ≈ 8 次/天，远低于 1000 次/天额度。
   if (kv && rss) {
     try {
@@ -938,13 +1022,23 @@ export async function onRequest({ request, env }) {
     }
   }
 
+  // 回源成功时同步合并条目归档（每源每次回源仅 1 次额外写入）
+  if (kv && gotReal) {
+    try {
+      const itemMatches = rss.match(/<item>[\s\S]*?<\/item>/g) || [];
+      await updateArchive(kv, username, itemMatches.slice(0, maxItems));
+    } catch (e) {
+      console.warn("twitter-rss 归档合并失败（不影响本次返回）：", e);
+    }
+  }
+
   return new Response(rss, {
     status: 200,
     headers: corsHeaders({
       'Content-Type': 'application/rss+xml; charset=utf-8',
       'Cache-Control': 'public, max-age=300, stale-while-revalidate=300',
       'ETag': '"' + username + '-' + maxItems + '-' + Math.floor(Date.now() / 300000) + '"',
-      'X-Cache': gotReal ? 'MISS' : 'BYPASS',
+      'X-Cache': gotReal ? 'MISS' : (archiveFallback ? 'ARCHIVE' : 'BYPASS'),
     }),
   });
 }
