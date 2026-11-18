@@ -204,13 +204,27 @@ body{
 .feed-top-op{
     display:flex;
     gap:8px;
-    flex-wrap:wrap;
+    flex-wrap:nowrap;
     justify-content:center;
     margin:12px 0;
 }
-#importFeed{background:#ff7823;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:14px;}
-#exportAllBtn{background:#b388eb;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:14px;}
-#delAllFeed{background:#c0392b;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:14px;}
+.feed-top-op button{
+    flex:1 1 0;
+    max-width:92px;
+    padding:7px 0;
+    border:none;
+    border-radius:6px;
+    font-size:14px;
+    line-height:1;
+    color:#fff;
+    text-align:center;
+    cursor:pointer;
+    white-space:nowrap;
+}
+#importFeed{background:#ff7823;}
+#exportAllBtn{background:#b388eb;}
+#delAllFeed{background:#c0392b;}
+#markAllReadBtn{background:#1d9bf0;}
 .feed-list{background:#fff;}
 .feed-item{
     padding:12px 10px;
@@ -220,6 +234,12 @@ body{
     justify-content:space-between;
     gap:10px;
     /* 长按唤出操作面板：禁用系统文本选择/长按菜单，避免误触 */
+    user-select:none;
+    -webkit-user-select:none;
+    -webkit-touch-callout:none;
+}
+/* 长按防误触加强：覆盖条目内所有子元素，彻底禁用系统文本选择与长按复制/粘贴菜单 */
+.feed-item *{
     user-select:none;
     -webkit-user-select:none;
     -webkit-touch-callout:none;
@@ -574,14 +594,35 @@ body{
 .modal-box input,.modal-box select{width:100%;margin-bottom:10px;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:15px;}
 .modal-btn-bar{display:flex;gap:10px;justify-content:flex-end;margin-top:12px;}
 /* 长按订阅源操作面板的竖排按钮 */
-.feed-action-list{display:flex;flex-direction:column;gap:10px;margin-top:14px;}
-.feed-action-btn{
-    border:1px solid #e3e8ee;background:#f7f9fb;border-radius:8px;
-    padding:12px 16px;font-size:15px;color:#333;cursor:pointer;text-align:left;
+/* 长按小气泡：贴近触发条目浮出，风格与整体卡片一致 */
+#feedPopover{
+    display:none;
+    position:fixed;
+    z-index:3000;
+    min-width:140px;
+    background:#fff;
+    border:1px solid #e2e2e2;
+    border-radius:10px;
+    box-shadow:0 6px 24px rgba(0,0,0,0.16);
+    padding:6px;
+    /* 气泡自身也不触发系统选择/长按菜单 */
+    user-select:none;
+    -webkit-user-select:none;
+    -webkit-touch-callout:none;
 }
-.feed-action-btn:active{background:#e8f1fb;}
-.feed-action-btn.fa-danger{color:#d93025;border-color:#f2c6c2;background:#fdf3f2;}
-.feed-action-btn.fa-cancel{color:#888;background:#fff;border-style:dashed;}
+#feedPopoverTitle{
+    font-size:12px;color:#999;padding:6px 10px 4px;
+    max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    border-bottom:1px solid #f0f0f0;margin-bottom:4px;
+}
+#feedPopover button{
+    display:block;width:100%;
+    border:none;background:transparent;
+    padding:10px 12px;font-size:14px;color:#333;
+    text-align:left;border-radius:8px;cursor:pointer;
+}
+#feedPopover button:active{background:#e8f1fb;}
+#feedPopover button.fa-danger{color:#d93025;}
 #clearModal .modal-btn-bar button,
 #exportModal .modal-btn-bar button{
     border:none;
@@ -738,7 +779,7 @@ body{
 <header id="mainHeader">
 <div class="title-wrap">
   <h1 id="pageTitle">RSS媒体阅读器</h1>
-  <span class="beta-tag">5.4</span>
+  <span class="beta-tag">5.5</span>
 </div>
 </header>
 
@@ -754,8 +795,7 @@ body{
     <button id="importFeed">一键导入</button>
     <button id="exportAllBtn">一键导出</button>
     <button id="delAllFeed">一键清空</button>
-    <button id="markAllReadBtn">全部已读</button>
-    <button id="transToggleBtn">翻译:开</button>
+    <button id="markAllReadBtn">全部标记</button>
     <input type="file" id="importFileInput" accept=".json" style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none;">
 </div>
         <div class="feed-list" id="feedPanel"></div>
@@ -846,17 +886,12 @@ body{
 </div>
 
 <!-- 长按订阅源弹出的操作面板（标记已读 / 编辑 / 删除） -->
-<div class="modal-mask" id="feedActionModal">
-    <div class="modal-box">
-        <h3 id="feedActionTitle" style="max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">订阅操作</h3>
-        <input id="feedActionIdx" type="hidden">
-        <div class="feed-action-list">
-            <button id="feedActionRead" class="feed-action-btn">✓ 标记已读</button>
-            <button id="feedActionEdit" class="feed-action-btn">✎ 编辑</button>
-            <button id="feedActionDel" class="feed-action-btn fa-danger">🗑 删除</button>
-            <button id="feedActionCancel" class="feed-action-btn fa-cancel">取消</button>
-        </div>
-    </div>
+<!-- 长按订阅源的小气泡操作菜单：absolute 定位由 JS 计算到条目附近，非全屏遮罩 -->
+<div id="feedPopover">
+    <div id="feedPopoverTitle">订阅操作</div>
+    <button id="feedActionRead">✓ 标记已读</button>
+    <button id="feedActionEdit">✎ 编辑</button>
+    <button id="feedActionDel" class="fa-danger">🗑 删除</button>
 </div>
 
 <div class="modal-mask" id="clearModal">
@@ -898,7 +933,6 @@ body{
 <div class="tip-toast" id="slideTip"></div>
 
 <script src="js/core.js"></script>
-<script src="js/translate.js"></script>
 <script src="js/media.js"></script>
 <script src="js/feed.js"></script>
 <script src="js/app.js"></script>
