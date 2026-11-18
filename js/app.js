@@ -1,8 +1,24 @@
 // ===== app.js (从 index.html 拆出) =====
+// ─── 收藏「待取消」标记（防误触，2026-11-18）─────────────────
+// 点击收藏按钮：实心→空心仅是标记，不立即删除；再点一次空心→实心立即恢复；
+// 重新进入收藏页 / 刷新页面时（renderFav 开头）才真正从 favList 移除。
+// sessionStorage 保存：页面刷新后标记仍生效（随后被真正移除），关闭标签页自动清空。
+let favPendingRemove = new Set(JSON.parse(sessionStorage.getItem("rss_fav_pending") || "[]"));
+function saveFavPending(){
+    try{ sessionStorage.setItem("rss_fav_pending", JSON.stringify([...favPendingRemove])); }catch(e){}
+}
+
 function renderFav(){
     if(scrollObserver) scrollObserver.disconnect();
     renderPageNum = 1;
     loadLock = false;
+    // 防误触机制：上一轮标记为「待取消」的收藏，在重新进入收藏页/刷新时才真正移除
+    if(favPendingRemove.size > 0){
+        favList = favList.filter(x => !favPendingRemove.has(x.link));
+        localStorage.setItem(FAV_KEY, JSON.stringify(favList));
+        favPendingRemove.clear();
+        saveFavPending();
+    }
     if(favList.length === 0) {
         favPanel.innerHTML = `<div class="empty-tip" style="min-height:70vh;display:flex;align-items:center;justify-content:center;flex-direction:column;">暂无收藏内容<br>浏览主页卡片点击收藏按钮添加</div>`;
         return;
@@ -45,11 +61,23 @@ function renderFav(){
             e.stopPropagation();
             const it = window.favGridItems && window.favGridItems[Number(unfavBtn.dataset.cellIdx)];
             if(it && it.link){
-                const before = favList.length;
-                favList = favList.filter(x => x.link !== it.link);
-                localStorage.setItem(FAV_KEY, JSON.stringify(favList));
-                showToast(favList.length < before ? "已取消收藏" : "未找到该收藏");
-                renderFav();
+                if(favPendingRemove.has(it.link)){
+                    // 空心 → 实心：马上恢复收藏
+                    favPendingRemove.delete(it.link);
+                    saveFavPending();
+                    unfavBtn.classList.remove("pending");
+                    unfavBtn.innerHTML = favIconSvg(true);
+                    unfavBtn.title = "取消收藏";
+                    showToast("已恢复收藏");
+                }else{
+                    // 实心 → 空心：仅标记待取消，离开收藏页后才真正移除
+                    favPendingRemove.add(it.link);
+                    saveFavPending();
+                    unfavBtn.classList.add("pending");
+                    unfavBtn.innerHTML = favIconSvg(false);
+                    unfavBtn.title = "恢复收藏";
+                    showToast("将在离开收藏页后取消（再点一次可恢复）");
+                }
             }
             return;
         }
@@ -107,7 +135,7 @@ function buildFavGridCell(item, idx){
             <div class="fav-cell-avatar" style="background:${escapeAttr(getAvatarStyle(avatarKey))};">${avatarIconSvg(hashText(avatarKey))}</div>
             <div class="fav-cell-title">${escapeHtml(item.sourceName || "未知来源")}</div>
         </div>`;
-    // 底部：更新时间（月-日）+ 分享 / 取消收藏
+    // 底部：更新时间（月-日）+ 分享 / 收藏（防误触：点击只切换实心/空心，离开收藏页后才真正取消）
     let dateText = "";
     try{
         const d = new Date(item.date);
@@ -117,12 +145,13 @@ function buildFavGridCell(item, idx){
     }catch(e){}
     // 分享链接：与主页卡片同规则——优先原始媒体 URL，无媒体用文章链接
     const shareUrl = item.videoUrl ? cleanMediaUrl(item.videoUrl) : (imgs.length ? cleanMediaUrl(imgs[0]) : (item.link || ""));
+    const pending = favPendingRemove.has(item.link);
     const foot = `
         <div class="fav-cell-foot">
             <span class="fav-cell-date">${dateText}</span>
             <span class="fav-cell-ops">
                 <button class="cell-share" data-share-url="${escapeAttr(shareUrl)}" title="分享">${shareIconSvg()}</button>
-                <button class="cell-unfav" data-cell-idx="${idx}" title="取消收藏">${favIconSvg(true)}</button>
+                <button class="cell-unfav${pending ? " pending" : ""}" data-cell-idx="${idx}" title="${pending ? "恢复收藏" : "取消收藏"}">${favIconSvg(!pending)}</button>
             </span>
         </div>`;
     return `<div class="fav-grid-cell" data-fav-idx="${idx}">
