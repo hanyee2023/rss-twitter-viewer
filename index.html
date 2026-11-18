@@ -286,8 +286,9 @@ body{
     padding:0 0 5px;
     min-width:0;
 }
-.fav-cell-avatar{width:18px;height:18px;border-radius:50%;overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
+.fav-cell-avatar{width:18px;height:18px;border-radius:50%;overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center;position:relative;}
 .fav-cell-avatar svg{width:14px;height:14px;}
+.fav-cell-avatar img{width:100%;height:100%;object-fit:cover;border-radius:50%;}
 .fav-cell-title{
     font-size:11px;color:#333;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
@@ -551,6 +552,16 @@ body{
     stroke-linejoin:round;
 }
 .card-avatar img{
+    width:100%;
+    height:100%;
+    object-fit:cover;
+    border-radius:50%;
+}
+/* Twitter 订阅真头像叠加层：绝对定位盖住字母图标，加载失败 onerror 移除自动回退 */
+.feed-real-avatar{
+    position:absolute;
+    left:0;
+    top:0;
     width:100%;
     height:100%;
     object-fit:cover;
@@ -906,7 +917,7 @@ body{
 <header id="mainHeader">
 <div class="title-wrap">
   <h1 id="pageTitle">RSS媒体阅读器</h1>
-  <span class="beta-tag">5.6</span>
+  <span class="beta-tag">5.7</span>
 </div>
 </header>
 
