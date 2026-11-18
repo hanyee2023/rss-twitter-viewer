@@ -296,6 +296,11 @@ function renderHomeFromCache() {
         return;
     }
     const visibleArticles = getVisibleHomeArticles(localCacheArticles);
+    if(visibleArticles.length === 0) {
+        // 主页可见条目为空：可能是无缓存，也可能全部已读（手动「全部已读/标记已读」后）
+        articleBox.innerHTML = `<div class="empty-tip">${localCacheArticles.length > 0 ? "暂无更新内容" : "暂无文章内容"}</div>`;
+        return;
+    }
 
     currentArticles = [...visibleArticles];
     renderPageNum = 1;
@@ -450,8 +455,48 @@ function renderPagedList(reset = false){
     bindAllCardEvent();
     bindVideoPauseObserver();
     initHlsVideo();
+    // 异步翻译非中文标题（纯前端，不阻塞渲染；见 js/translate.js）
+    translateCardTitles(currentArticleBox);
 }
 let mainScrollHandler = null;
+
+// ─── 手动标记已读（2026-11-18 新增）─────────────────────────
+// 管理页【全部已读】按钮 / 长按订阅源【标记已读】共用。
+// 条目 link 同时写入 readLinkSet（未读角标归零）与 sessionStartReadSet
+// （主页渲染时按它过滤 → 已读条目不再展示，主页清空后显示「暂无更新内容」）。
+// 只影响主页展示；搜索 / 收藏 / 单源界面不受影响。
+function markFeedItemsRead(sourceUrl){
+    const key = String(sourceUrl || "").trim();
+    const items = localCacheArticles.filter(it => String(it.sourceUrl || "").trim() === key);
+    let changed = false;
+    items.forEach(it => {
+        if (!it.link) return;
+        if (!readLinkSet.has(it.link)) { readLinkSet.add(it.link); changed = true; }
+        sessionStartReadSet.add(it.link);
+    });
+    if (changed) saveReadLinks();
+    return items.length;
+}
+
+function markAllFeedsRead(){
+    let changed = false;
+    (localCacheArticles || []).forEach(it => {
+        if (!it.link) return;
+        if (!readLinkSet.has(it.link)) { readLinkSet.add(it.link); changed = true; }
+        sessionStartReadSet.add(it.link);
+    });
+    if (changed) saveReadLinks();
+    return (localCacheArticles || []).length;
+}
+
+// 标记已读后刷新管理页角标并使主页快照失效（回到主页时重新渲染 → 只剩未读内容）
+function afterMarkReadRefresh(){
+    renderManage();
+    homeArticleHtml = "";
+    homeIsCached = false;
+    try { renderHomeFromCache(); } catch (e) { /* 主页重新渲染失败不影响管理页 */ }
+}
+
 function doLoadMore(){
     if(loadLock) return;
     loadLock = true;

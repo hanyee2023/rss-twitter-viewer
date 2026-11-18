@@ -21,6 +21,7 @@ function renderFav(){
     bindAllCardEvent();
     bindVideoPauseObserver();
     initHlsVideo();
+    translateCardTitles(favPanel);
     const favLoad = document.getElementById("favLoadMore");
     if(favLoad){
         const favObserver = new IntersectionObserver(async (e)=>{
@@ -813,37 +814,123 @@ function renderManage(){
                     <div class="feed-update-time">${unreadBadge}${latestTime}</div>
                 </div>
             </div>
-            <div class="feed-btn-group">
-                <button class="edit" data-idx="${feedList.indexOf(f)}" title="编辑">${editIconSvg()}</button>
-                <button class="del" data-idx="${feedList.indexOf(f)}" title="删除">${trashIconSvg()}</button>
-            </div>
         </div>`;
     })
     feedPanel.innerHTML = html;
+    // 行内【编辑】【删除】按钮已移除（2026-11-18）：改为长按订阅源区域唤出操作面板
+    // （标记已读 / 编辑 / 删除），见 bindFeedLongPress。
+    bindFeedLongPress();
     feedPanel.onclick = async function(e){
         const avatarBtn = e.target.closest(".feed-avatar-btn");
-        const delBtn = e.target.closest(".del");
-        const editBtn = e.target.closest(".edit");
         if(avatarBtn){
             await openSingleSource(avatarBtn.dataset.source);
             return;
         }
-        if(delBtn){
-            const idx = Number(delBtn.dataset.idx);
-            feedList.splice(idx,1);
-            localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
-            renderManage();
-        }
-        if(editBtn){
-            const idx = Number(editBtn.dataset.idx);
-            const f = feedList[idx];
-            document.getElementById("editIndex").value = idx;
-            document.getElementById("editName").value = f.name||"";
-            document.getElementById("editUrl").value = f.url;
-            editModal.style.display = "flex";
-        }
     }
 }
+
+// ─── 长按订阅源唤出操作面板（标记已读 / 编辑 / 删除）──────────
+// 触摸端：长按 500ms 触发；桌面端：右键（contextmenu）兜底。
+// 注意 feedPanel.innerHTML 每次 renderManage 都会重建，监听器需重新绑定。
+let feedActionTimer = null;
+function bindFeedLongPress(){
+    const startLongPress = (e) => {
+        const item = e.target.closest(".feed-item");
+        if (!item) return;
+        const idx = Number(item.dataset.idx);
+        if (Number.isNaN(idx) || !feedList[idx]) return;
+        clearTimeout(feedActionTimer);
+        feedActionTimer = setTimeout(() => { feedActionTimer = null; openFeedAction(idx); }, 500);
+    };
+    const cancelLongPress = () => {
+        if (feedActionTimer) { clearTimeout(feedActionTimer); feedActionTimer = null; }
+    };
+    feedPanel.addEventListener("touchstart", startLongPress, {passive: true});
+    ["touchend", "touchmove", "touchcancel"].forEach(ev =>
+        feedPanel.addEventListener(ev, cancelLongPress, {passive: true})
+    );
+    // 桌面端右键兜底
+    feedPanel.addEventListener("contextmenu", (e) => {
+        const item = e.target.closest(".feed-item");
+        if (!item) return;
+        e.preventDefault();
+        openFeedAction(Number(item.dataset.idx));
+    });
+}
+
+function openFeedAction(idx){
+    const f = feedList[idx];
+    if (!f) return;
+    document.getElementById("feedActionIdx").value = idx;
+    document.getElementById("feedActionTitle").textContent = f.name || "未命名订阅";
+    feedActionModal.style.display = "flex";
+}
+
+function closeFeedAction(){
+    feedActionModal.style.display = "none";
+}
+
+document.getElementById("feedActionRead").onclick = function(){
+    const idx = Number(document.getElementById("feedActionIdx").value);
+    const f = feedList[idx];
+    if (!f) return closeFeedAction();
+    const count = markFeedItemsRead(f.url);
+    closeFeedAction();
+    showToast(`已将「${f.name || "该订阅"}」的 ${count} 条内容标记为已读`);
+    afterMarkReadRefresh();
+};
+
+document.getElementById("feedActionEdit").onclick = function(){
+    const idx = Number(document.getElementById("feedActionIdx").value);
+    closeFeedAction();
+    const f = feedList[idx];
+    if (!f) return;
+    document.getElementById("editIndex").value = idx;
+    document.getElementById("editName").value = f.name || "";
+    document.getElementById("editUrl").value = f.url;
+    editModal.style.display = "flex";
+};
+
+document.getElementById("feedActionDel").onclick = function(){
+    const idx = Number(document.getElementById("feedActionIdx").value);
+    const f = feedList[idx];
+    closeFeedAction();
+    if (!f) return;
+    feedList.splice(idx, 1);
+    localStorage.setItem(FEED_KEY, JSON.stringify(feedList));
+    renderManage();
+};
+
+document.getElementById("feedActionCancel").onclick = closeFeedAction;
+// 点击遮罩空白处关闭操作面板
+feedActionModal.addEventListener("click", (e) => {
+    if (e.target === feedActionModal) closeFeedAction();
+});
+
+// ─── 管理页顶部【全部已读】按钮 ──────────────────────────────
+document.getElementById("markAllReadBtn").onclick = function(){
+    if (!localCacheArticles || localCacheArticles.length === 0) {
+        showToast("暂无内容可标记");
+        return;
+    }
+    const count = markAllFeedsRead();
+    showToast(`已将全部 ${count} 条内容标记为已读`);
+    afterMarkReadRefresh();
+};
+
+// ─── 管理页顶部【翻译】开关 ──────────────────────────────────
+const transToggleBtn = document.getElementById("transToggleBtn");
+function syncTransToggleText(){
+    transToggleBtn.textContent = isTranslateEnabled() ? "翻译:开" : "翻译:关";
+}
+syncTransToggleText();
+transToggleBtn.onclick = function(){
+    const on = toggleTranslate();
+    syncTransToggleText();
+    showToast(on ? "标题自动翻译已开启" : "标题自动翻译已关闭（已渲染的译文保留）");
+    // 开启时对当前页面立即生效
+    if (on && currentPage) translateCardTitles(currentPage);
+};
 
 function getFeedCategoryByContent(sourceUrl){
     const items = localCacheArticles.filter(item => String(item.sourceUrl || "").trim() === String(sourceUrl || "").trim());
