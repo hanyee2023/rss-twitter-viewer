@@ -8,9 +8,10 @@ function renderFav(){
         return;
     }
     const sortedFavList = [...favList].sort((a,b)=>new Date(b.date).getTime() - new Date(a.date).getTime());
+    // 九宫格数据源：cells 通过 data-fav-idx 引用（2026-11-18 改版）
+    window.favGridItems = sortedFavList;
     const slice = sortedFavList.slice(0, PAGE_SIZE);
-    let html = "";
-    slice.forEach(item => html += buildCard(item, true));
+    let html = `<div class="fav-grid">` + slice.map((it,i)=>buildFavGridCell(it, i)).join("") + `</div>`;
     const remain = sortedFavList.length - slice.length;
     if(remain > 0){
         html += `<div class="load-more-tip" id="favLoadMore">滚动加载更多...</div>`;
@@ -18,9 +19,14 @@ function renderFav(){
         html += `<div class="bottom-tip">全部收藏加载完毕</div>`;
     }
     favPanel.innerHTML = html;
-    bindAllCardEvent();
-    bindVideoPauseObserver();
-    initHlsVideo();
+    // 九宫格点击：打开全屏播放层（不再走主页卡片的事件绑定）
+    favPanel.onclick = (e)=>{
+        const cell = e.target.closest(".fav-grid-cell");
+        if(cell && window.favGridItems){
+            const it = window.favGridItems[Number(cell.dataset.favIdx)];
+            if(it) openFavPlayer(it);
+        }
+    };
     const favLoad = document.getElementById("favLoadMore");
     if(favLoad){
         const favObserver = new IntersectionObserver(async (e)=>{
@@ -28,16 +34,12 @@ function renderFav(){
                 loadLock = true;
                 renderPageNum += 1;
                 const favSlice = sortedFavList.slice(0, renderPageNum * PAGE_SIZE);
-                let favHtml = "";
-                favSlice.forEach(i=>favHtml += buildCard(i,true));
+                let favHtml = `<div class="fav-grid">` + favSlice.map((it,i)=>buildFavGridCell(it, i)).join("") + `</div>`;
                 const rem = sortedFavList.length - favSlice.length;
                 if(rem>0) favHtml += `<div class="load-more-tip" id="favLoadMore">滚动加载更多...</div>`;
                 else favHtml += `<div class="bottom-tip">全部收藏加载完毕</div>`;
                 favPanel.innerHTML = favHtml;
-                bindAllCardEvent();
-                bindVideoPauseObserver();
-                initHlsVideo();
-                                        favObserver.disconnect();
+                favObserver.disconnect();
                 setTimeout(()=>{
                     const newFavLoad = document.getElementById("favLoadMore");
                     if(newFavLoad) favObserver.observe(newFavLoad);
@@ -48,6 +50,103 @@ function renderFav(){
         favObserver.observe(favLoad);
     }
 }
+
+// ─── 收藏九宫格单元格：媒体预览区（3:4 圆角）+ 底部订阅头像 + 名称 ──
+const FAV_PLAY_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M6 3.5v17l14-8.5z"/></svg>`;
+function buildFavGridCell(item, idx){
+    const imgs = [...new Set((item.media && item.media.imgs) || [])];
+    const isVideo = item.isM3u8Video === true || !!item.videoUrl;
+    // 预览图：视频用封面（videoPoster 优先），图片用第一张
+    const previewImg = isVideo ? (item.videoPoster || imgs[0] || "") : (imgs[0] || "");
+    let mediaInner;
+    if(previewImg){
+        const src = getProxyUrl(previewImg, true, "large") || twimgSizedDirect(cleanMediaUrl(previewImg), "large") || previewImg;
+        mediaInner = `<img src="${escapeAttr(src)}" loading="lazy" alt="">`;
+    }else{
+        // 无媒体：纯文字占位
+        mediaInner = `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;padding:8px;font-size:11px;color:#888;text-align:center;overflow:hidden;">${escapeHtml((item.title||"").slice(0,60))}</div>`;
+    }
+    const playBadge = isVideo ? `<span class="fav-play-badge">${FAV_PLAY_SVG}</span>` : "";
+    const avatarKey = (item.sourceUrl || "") + "|" + (item.sourceName || "");
+    const foot = `
+        <div class="fav-cell-foot">
+            <div class="fav-cell-avatar" style="background:${escapeAttr(getAvatarStyle(avatarKey))};">${avatarIconSvg(hashText(avatarKey))}</div>
+            <div class="fav-cell-name">${escapeHtml(item.sourceName || "未知来源")}</div>
+        </div>`;
+    return `<div class="fav-grid-cell" data-fav-idx="${idx}">
+        <div class="fav-cell-media">${mediaInner}${playBadge}</div>
+        ${foot}
+    </div>`;
+}
+
+// ─── 收藏九宫格 → 全屏播放层（视频复用主页 HLS 播放机制，图片直接放大）──
+function openFavPlayer(item){
+    const layer = document.getElementById("favPlayerLayer");
+    const box = document.getElementById("favPlayerContent");
+    const isTwRss = !!item.isTwitterRss;
+    const twRssAttr = isTwRss ? ' data-twitter-rss="1"' : "";
+    let inner = "";
+    if(item.isM3u8Video === true && item.videoUrl){
+        const imgs = [...new Set((item.media && item.media.imgs) || [])];
+        const posterImg = item.videoPoster || imgs[0] || "";
+        const posterAttr = posterImg ? `poster="${escapeAttr(getProxyUrl(posterImg, true, "large"))}"` : "";
+        const posterDirectAttr = posterImg ? `data-poster-direct="${escapeAttr(twimgSizedDirect(cleanMediaUrl(posterImg), "large"))}"` : "";
+        const preferProxy = hostMatched(item.videoUrl);
+        let videoProxy = preferProxy ? getProxyUrl(item.videoUrl, true) : "";
+        if(isTwRss && videoProxy) videoProxy += "&src=twrss";
+        const firstSrc = preferProxy ? videoProxy : cleanMediaUrl(item.videoUrl);
+        const proxyVideoAttr = preferProxy ? 'data-proxy-video="1"' : "";
+        const fbs = preferProxy ? getMediaProxyCandidates(item.videoUrl, true).slice(1).map(u => isTwRss ? u + "&src=twrss" : u) : [];
+        const fbAttr = fbs.length ? `data-proxy-fallbacks="${escapeAttr(JSON.stringify(fbs))}"` : "";
+        inner = `<div class="video-single-wrap" style="width:100%;background:#000;">
+            <video class="media-video" data-m3u8="1" ${proxyVideoAttr}${twRssAttr} preload="none" playsinline ${posterAttr} ${posterDirectAttr} ${fbAttr} data-src="${escapeAttr(firstSrc)}" data-alt-src="">
+</video>${mediaControlsHtml()}</div>`;
+    }else if(item.videoUrl){
+        const imgs = [...new Set((item.media && item.media.imgs) || [])];
+        const posterImg = item.videoPoster || imgs[0] || "";
+        const posterAttr = posterImg ? `poster="${escapeAttr(getProxyUrl(posterImg, true, "large"))}"` : "";
+        const useProxy = hostMatched(item.videoUrl);
+        const videoSrc = useProxy ? getProxyUrl(item.videoUrl, true) : cleanMediaUrl(item.videoUrl);
+        const proxyVideoAttr = useProxy ? 'data-proxy-video="1"' : "";
+        const fbAttr = useProxy ? getProxyFallbacksAttr(item.videoUrl, true) : "";
+        inner = `<div class="video-single-wrap" style="width:100%;background:#000;">
+            <video class="media-video-mp4"${twRssAttr} ${proxyVideoAttr} preload="none" playsinline ${posterAttr} src="${escapeAttr(videoSrc)}" ${fbAttr}>
+</video>${mediaControlsHtml()}</div>`;
+    }else{
+        const imgs = [...new Set((item.media && item.media.imgs) || [])];
+        if(imgs.length === 0){
+            showToast("该内容没有可播放的媒体");
+            return;
+        }
+        inner = `<img src="${escapeAttr(getProxyUrl(imgs[0], true, "large"))}" alt="">`;
+    }
+    box.innerHTML = inner;
+    layer.classList.add("show");
+    // 视频走主页同一套 HLS 机制并自动起播
+    if(inner.indexOf("<video") !== -1){
+        initHlsVideo();
+        const v = box.querySelector("video");
+        if(v) toggleVideoPlay(v);
+    }
+}
+
+function closeFavPlayer(){
+    const layer = document.getElementById("favPlayerLayer");
+    const box = document.getElementById("favPlayerContent");
+    box.querySelectorAll("video").forEach(v=>{
+        try{ v.pause(); }catch(e){}
+        try{ if(v.hlsInstance) v.hlsInstance.destroy(); }catch(e){}
+        try{ v.removeAttribute("src"); v.load(); }catch(e){}
+    });
+    box.innerHTML = "";
+    layer.classList.remove("show");
+}
+
+// 点 ✕ 或黑色空白处关闭全屏播放层
+document.getElementById("favPlayerClose").onclick = closeFavPlayer;
+document.getElementById("favPlayerLayer").addEventListener("click", (e)=>{
+    if(e.target.id === "favPlayerLayer") closeFavPlayer();
+});
 
 function bindAllCardEvent(){
     // 主页卡片头像点击：跳转查看该订阅源所有内容
@@ -775,9 +874,51 @@ function renderManage(){
         feedPanel.innerHTML = `<div class="empty-tip" style="min-height:70vh;display:flex;align-items:center;justify-content:center;flex-direction:column;">暂无订阅源<br>请切换【添加订阅】页面新增RSS链接</div>`;
         return;
     }
-    let html = "";
+    const isTw = (f) => /twitter-rss/i.test(f.url || "");
     const reverseFeed = [...feedList].reverse();
-    reverseFeed.forEach((f, idx)=>{
+    const normalFeeds = reverseFeed.filter(f => !isTw(f));
+    const twFeeds = reverseFeed.filter(isTw);
+    // 普通订阅区与 Twitter 订阅区分别渲染，标题用两种颜色填充，标题右侧各带【全部标记】
+    let html = "";
+    html += renderFeedSection("普通订阅", normalFeeds, false);
+    html += renderFeedSection("Twitter订阅", twFeeds, true);
+    feedPanel.innerHTML = html;
+    // 行内【编辑】【删除】按钮已移除（2026-11-18）：改为长按订阅源区域唤出操作面板
+    // （标记已读 / 编辑 / 删除），见 bindFeedLongPress。
+    bindFeedLongPress();
+    feedPanel.onclick = async function(e){
+        const markBtn = e.target.closest(".sec-mark-btn");
+        if(markBtn){
+            const isTwitter = markBtn.dataset.section === "twitter";
+            const count = markSectionFeedsRead(isTwitter);
+            if(count === 0){
+                showToast(isTwitter ? "Twitter订阅区暂无内容可标记" : "普通订阅区暂无内容可标记");
+            }else{
+                showToast(`已将${isTwitter ? "Twitter订阅" : "普通订阅"}区的 ${count} 条内容标记为已读`);
+            }
+            afterMarkReadRefresh();
+            return;
+        }
+        const avatarBtn = e.target.closest(".feed-avatar-btn");
+        if(avatarBtn){
+            await openSingleSource(avatarBtn.dataset.source);
+            return;
+        }
+    }
+}
+
+// 管理页分区渲染：一个标题栏（颜色区分）+ 该区订阅源列表
+function renderFeedSection(title, feeds, isTwitter){
+    const secClass = isTwitter ? "section-twitter" : "section-normal";
+    let html = `
+    <div class="feed-section-title ${secClass}">
+        <div class="sec-title-left">${title}<span class="sec-count">${feeds.length} 个</span></div>
+        <button class="sec-mark-btn" data-section="${isTwitter ? "twitter" : "normal"}">全部标记</button>
+    </div>`;
+    if(feeds.length === 0){
+        return html + `<div class="feed-section-empty">该分类暂无订阅源</div>`;
+    }
+    feeds.forEach((f, idx)=>{
         const realIndex = idx + 1;
         const avatarKey = (f.url || "") + "|" + (f.name || "");
         const avatarIndex = hashText(avatarKey);
@@ -814,18 +955,8 @@ function renderManage(){
                 </div>
             </div>
         </div>`;
-    })
-    feedPanel.innerHTML = html;
-    // 行内【编辑】【删除】按钮已移除（2026-11-18）：改为长按订阅源区域唤出操作面板
-    // （标记已读 / 编辑 / 删除），见 bindFeedLongPress。
-    bindFeedLongPress();
-    feedPanel.onclick = async function(e){
-        const avatarBtn = e.target.closest(".feed-avatar-btn");
-        if(avatarBtn){
-            await openSingleSource(avatarBtn.dataset.source);
-            return;
-        }
-    }
+    });
+    return html;
 }
 
 // ─── 长按订阅源唤出小气泡操作菜单（标记已读 / 编辑 / 删除）─────
@@ -931,16 +1062,7 @@ document.addEventListener("pointerdown", (e) => {
 window.addEventListener("scroll", closeFeedAction, {capture: true, passive: true});
 window.addEventListener("resize", closeFeedAction);
 
-// ─── 管理页顶部【全部已读】按钮 ──────────────────────────────
-document.getElementById("markAllReadBtn").onclick = function(){
-    if (!localCacheArticles || localCacheArticles.length === 0) {
-        showToast("暂无内容可标记");
-        return;
-    }
-    const count = markAllFeedsRead();
-    showToast(`已将全部 ${count} 条内容标记为已读`);
-    afterMarkReadRefresh();
-};
+// ─── 管理页顶部【全部标记】按钮（2026-11-18 移除）：已改为分区标题右侧各自的【全部标记】──
 
 function getFeedCategoryByContent(sourceUrl){
     const items = localCacheArticles.filter(item => String(item.sourceUrl || "").trim() === String(sourceUrl || "").trim());

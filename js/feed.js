@@ -476,15 +476,22 @@ function markFeedItemsRead(sourceUrl){
     return items.length;
 }
 
-function markAllFeedsRead(){
-    let changed = false;
-    (localCacheArticles || []).forEach(it => {
-        if (!it.link) return;
-        if (!readLinkSet.has(it.link)) { readLinkSet.add(it.link); changed = true; }
-        sessionStartReadSet.add(it.link);
-    });
+// 分区标记已读（2026-11-18 改版）：只标记普通订阅区 / Twitter 订阅区其中一类
+function markSectionFeedsRead(isTwitter){
+    let changed = false, count = 0;
+    (feedList || [])
+        .filter(f => (/twitter-rss/i.test(f.url || "")) === isTwitter)
+        .forEach(f => {
+            const items = localCacheArticles.filter(it => String(it.sourceUrl || "").trim() === String(f.url || "").trim());
+            items.forEach(it => {
+                if (!it.link) return;
+                if (!readLinkSet.has(it.link)) { readLinkSet.add(it.link); changed = true; }
+                sessionStartReadSet.add(it.link);
+            });
+            count += items.length;
+        });
     if (changed) saveReadLinks();
-    return (localCacheArticles || []).length;
+    return count;
 }
 
 // 标记已读后刷新管理页角标并使主页快照失效（回到主页时重新渲染 → 只剩未读内容）
