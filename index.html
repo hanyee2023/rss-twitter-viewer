@@ -218,9 +218,10 @@ body{
     gap:8px;
     flex-wrap:nowrap;
     justify-content:center;
-    margin:12px 0;
+    /* 底部不留白：与分区标题栏无缝衔接 */
+    margin:12px 0 0;
     padding:10px 10px;
-    background:#1b5e20;
+    background:#1a5276;
 }
 .feed-top-op button{
     flex:1 1 0;
@@ -235,9 +236,9 @@ body{
     cursor:pointer;
     white-space:nowrap;
 }
-#importFeed{background:#ff7823;}
-#exportAllBtn{background:#b388eb;}
-#delAllFeed{background:#c0392b;}
+#importFeed{background:#42a5f5;}
+#exportAllBtn{background:#42a5f5;}
+#delAllFeed{background:#42a5f5;}
 /* 分区标题：两种颜色填充区分普通订阅与 Twitter 订阅 */
 .feed-section-title{
     display:flex;
@@ -262,7 +263,8 @@ body{
 /* 我的收藏：九宫格 */
 .fav-grid{
     display:grid;
-    grid-template-columns:repeat(3,1fr);
+    /* minmax(0,1fr) 强制三列等宽：1fr 会被内容最小宽度撑破导致列宽不一 */
+    grid-template-columns:repeat(3,minmax(0,1fr));
     padding:0;
     background:#fff;
 }
@@ -270,6 +272,9 @@ body{
     padding:7px 7px 4px;
     border-right:1px solid #ddd;
     border-bottom:1px solid #ddd;
+    /* 防止单元格内容把轨道撑宽溢出视口（第三列右侧显示不全的根因） */
+    min-width:0;
+    overflow:hidden;
 }
 /* 每行第 3 个去掉右侧竖线 */
 .fav-grid-cell:nth-child(3n){border-right:none;}
@@ -317,12 +322,13 @@ body{
     align-items:center;
     justify-content:space-between;
     padding:3px 1px 1px;
+    min-width:0;
 }
 .fav-cell-date{font-size:11px;color:#999;flex-shrink:0;}
-.fav-cell-ops{display:flex;align-items:center;gap:2px;}
+.fav-cell-ops{display:flex;align-items:center;gap:0;flex-shrink:0;}
 .fav-cell-ops button{
     border:none;background:transparent;
-    width:26px;height:26px;padding:3px;
+    width:24px;height:24px;padding:3px;
     border-radius:6px;cursor:pointer;
     color:#888;display:flex;align-items:center;justify-content:center;
 }
