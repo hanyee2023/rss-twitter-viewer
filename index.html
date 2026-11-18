@@ -219,6 +219,8 @@ body{
     flex-wrap:nowrap;
     justify-content:center;
     margin:12px 0;
+    padding:10px 10px;
+    background:#1b5e20;
 }
 .feed-top-op button{
     flex:1 1 0;
@@ -233,9 +235,9 @@ body{
     cursor:pointer;
     white-space:nowrap;
 }
-#importFeed{background:#1b5e20;}
-#exportAllBtn{background:#1b5e20;}
-#delAllFeed{background:#1b5e20;}
+#importFeed{background:#ff7823;}
+#exportAllBtn{background:#b388eb;}
+#delAllFeed{background:#c0392b;}
 /* 分区标题：两种颜色填充区分普通订阅与 Twitter 订阅 */
 .feed-section-title{
     display:flex;
@@ -261,22 +263,22 @@ body{
 .fav-grid{
     display:grid;
     grid-template-columns:repeat(3,1fr);
-    gap:8px;
-    padding:10px;
+    padding:0;
+    background:#fff;
 }
 .fav-grid-cell{
-    cursor:default;
-    background:#fff;
-    border:1px solid #eee;
-    border-radius:10px;
-    overflow:hidden;
+    padding:7px 7px 4px;
+    border-right:1px solid #ddd;
+    border-bottom:1px solid #ddd;
 }
-/* 头部：订阅头像 + 标题 */
+/* 每行第 3 个去掉右侧竖线 */
+.fav-grid-cell:nth-child(3n){border-right:none;}
+/* 头部：订阅头像 + 名称 */
 .fav-cell-head{
     display:flex;
     align-items:center;
     gap:5px;
-    padding:6px 7px;
+    padding:0 0 5px;
     min-width:0;
 }
 .fav-cell-avatar{width:18px;height:18px;border-radius:50%;overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
@@ -291,6 +293,8 @@ body{
     position:relative;
     width:100%;
     aspect-ratio:1/1;
+    border-radius:8px;
+    overflow:hidden;
     background:#ececec;
     cursor:pointer;
 }
@@ -312,7 +316,7 @@ body{
     display:flex;
     align-items:center;
     justify-content:space-between;
-    padding:3px 5px 5px;
+    padding:3px 1px 1px;
 }
 .fav-cell-date{font-size:11px;color:#999;flex-shrink:0;}
 .fav-cell-ops{display:flex;align-items:center;gap:2px;}
@@ -323,7 +327,9 @@ body{
     color:#888;display:flex;align-items:center;justify-content:center;
 }
 .fav-cell-ops button svg{width:16px;height:16px;stroke:currentColor;}
+/* 收藏按钮：默认实心绿色（已收藏）；标记待取消后变灰色空心 */
 .fav-cell-ops button.cell-unfav{color:#28a745;}
+.fav-cell-ops button.cell-unfav.pending{color:#999;}
 .fav-cell-ops button:active{background:#f0f0f0;}
 /* 收藏全屏播放层 */
 #favPlayerLayer{
