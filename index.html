@@ -233,9 +233,9 @@ body{
     cursor:pointer;
     white-space:nowrap;
 }
-#importFeed{background:#ff7823;}
-#exportAllBtn{background:#b388eb;}
-#delAllFeed{background:#c0392b;}
+#importFeed{background:#1b5e20;}
+#exportAllBtn{background:#1b5e20;}
+#delAllFeed{background:#1b5e20;}
 /* 分区标题：两种颜色填充区分普通订阅与 Twitter 订阅 */
 .feed-section-title{
     display:flex;
@@ -255,7 +255,7 @@ body{
 }
 .feed-section-title .sec-mark-btn:active{background:rgba(255,255,255,.45);}
 .feed-section-title.section-normal{background:#1d9bf0;}
-.feed-section-title.section-twitter{background:#111111;}
+.feed-section-title.section-twitter{background:#28a745;}
 .feed-section-empty{padding:14px 12px;font-size:13px;color:#999;text-align:center;background:#fafafa;}
 /* 我的收藏：九宫格 */
 .fav-grid{
@@ -264,14 +264,35 @@ body{
     gap:8px;
     padding:10px;
 }
-.fav-grid-cell{cursor:pointer;}
+.fav-grid-cell{
+    cursor:default;
+    background:#fff;
+    border:1px solid #eee;
+    border-radius:10px;
+    overflow:hidden;
+}
+/* 头部：订阅头像 + 标题 */
+.fav-cell-head{
+    display:flex;
+    align-items:center;
+    gap:5px;
+    padding:6px 7px;
+    min-width:0;
+}
+.fav-cell-avatar{width:18px;height:18px;border-radius:50%;overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
+.fav-cell-avatar svg{width:14px;height:14px;}
+.fav-cell-title{
+    font-size:11px;color:#333;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    flex:1;min-width:0;
+}
+/* 中部：正方形圆角媒体区 */
 .fav-cell-media{
     position:relative;
     width:100%;
-    aspect-ratio:3/4;
-    border-radius:10px;
-    overflow:hidden;
+    aspect-ratio:1/1;
     background:#ececec;
+    cursor:pointer;
 }
 .fav-cell-media img{
     width:100%;height:100%;
@@ -286,10 +307,24 @@ body{
     pointer-events:none;
 }
 .fav-cell-media .fav-play-badge svg{width:16px;height:16px;fill:#fff;margin-left:2px;}
-.fav-cell-foot{display:flex;align-items:center;gap:5px;margin-top:5px;min-width:0;}
-.fav-cell-avatar{width:18px;height:18px;border-radius:50%;overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
-.fav-cell-avatar svg{width:14px;height:14px;}
-.fav-cell-name{font-size:11px;color:#333;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+/* 底部：更新时间（左）+ 分享/收藏按钮（右） */
+.fav-cell-foot{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:3px 5px 5px;
+}
+.fav-cell-date{font-size:11px;color:#999;flex-shrink:0;}
+.fav-cell-ops{display:flex;align-items:center;gap:2px;}
+.fav-cell-ops button{
+    border:none;background:transparent;
+    width:26px;height:26px;padding:3px;
+    border-radius:6px;cursor:pointer;
+    color:#888;display:flex;align-items:center;justify-content:center;
+}
+.fav-cell-ops button svg{width:16px;height:16px;stroke:currentColor;}
+.fav-cell-ops button.cell-unfav{color:#28a745;}
+.fav-cell-ops button:active{background:#f0f0f0;}
 /* 收藏全屏播放层 */
 #favPlayerLayer{
     position:fixed;inset:0;
@@ -307,7 +342,7 @@ body{
 }
 .feed-list{background:#fff;}
 .feed-item{
-    padding:12px 10px;
+    padding:6px 10px;
     border-bottom:1px solid #ddd;
     display:flex;
     align-items:flex-start;
@@ -346,17 +381,17 @@ body{
     min-width:0;
 }
 .feed-title-text{
-    font-size:15px;
+    font-size:14px;
     font-weight:700;
     font-family:"SimSun","宋体","Songti SC","Noto Serif CJK SC",serif;
     color:#111;
     word-break:break-all;
-    line-height:1.4;
+    line-height:1.35;
 }
 .feed-update-time{
     font-size:12px;
     color:#999;
-    margin-top:4px;
+    margin-top:2px;
     line-height:1.2;
 }
 .feed-unread-badge-inline{

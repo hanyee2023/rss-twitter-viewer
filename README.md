@@ -4,8 +4,8 @@
 
 一个轻量级本地 RSS 媒体阅读器，适合个人自用。前端为纯静态页面（浏览器直接运行），后端代理由 Cloudflare Pages Functions 提供。支持添加 RSS 订阅源、聚合展示图文 / 视频内容、收藏、搜索、已读隐藏、订阅导入导出，以及针对部分国外媒体资源的代理播放。
 
-当前版本：`5.5`
-（5.5：① Nitter 实例新增 nitterts.pages.dev（实测可用）与 xitter.cf（储备）；② 新增 KV 条目归档——每源保留最近 100 条、7 天自动清理，回源失败时自动兜底返回历史条目；③ 新增手动标记已读——管理页【全部标记】一键清角标、长按订阅源在条目旁弹出小气泡菜单「标记已读/编辑/删除」，已读条目不再在主页展示；长按期间禁用系统文本选择与复制菜单）
+当前版本：`5.6`
+（5.6：① 管理订阅分「普通订阅区 / Twitter订阅区」两类显示（蓝/绿标题栏），【全部标记】移至各区标题右侧（分区标记），顶部三个【一键XX】按钮统一深绿；订阅源行紧凑化；② 我的收藏九宫格改版：头部订阅头像+标题、正方形圆角媒体区、底部更新时间+分享+取消收藏按钮，点击媒体区全屏播放/查看；③ 底部导航各图标下新增文字说明（主页/搜索/添加/管理/收藏），选中随图标变绿，导航栏高度不变）
 （5.4：媒体代理回归直通流转发，修复 CPU 超限；清理运行日志遗留代码与无调用的接口）
 
 <img width="195" height="400" alt="1" src="https://github.com/user-attachments/assets/84abcdf1-6814-4861-93ec-5bc7740c3c6f" /><img width="195" height="400" alt="3" src="https://github.com/user-attachments/assets/3aaa09a5-3188-46ca-a041-306540ecd3f9" /><img width="195" height="400" alt="4" src="https://github.com/user-attachments/assets/20ebe23a-acf7-4248-9d51-9beedba66ef1" /><img width="195" height="400" alt="5" src="https://github.com/user-attachments/assets/40bf5151-3aab-48f6-a6df-85b507f4d13f" />
