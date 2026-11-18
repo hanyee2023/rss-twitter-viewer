@@ -1,8 +1,11 @@
 # RSS媒体阅读器
 
+**仓库地址：https://github.com/hanyee2023/rss-twitter-viewer**
+
 一个轻量级本地 RSS 媒体阅读器，适合个人自用。前端为纯静态页面（浏览器直接运行），后端代理由 Cloudflare Pages Functions 提供。支持添加 RSS 订阅源、聚合展示图文 / 视频内容、收藏、搜索、已读隐藏、订阅导入导出，以及针对部分国外媒体资源的代理播放。
 
-当前版本：`5.4`
+当前版本：`5.5`
+（5.5：① Nitter 实例新增 nitterts.pages.dev（实测可用）与 xitter.cf（储备）；② 新增 KV 条目归档——每源保留最近 100 条、7 天自动清理，回源失败时自动兜底返回历史条目；③ 新增手动标记已读——管理页【全部已读】一键清角标、长按订阅源唤出「标记已读/编辑/删除」面板，已读条目不再在主页展示；④ 新增标题自动翻译——非中文标题异步翻译为中文（微软 Edge 免费接口，Google 兜底），译文本地缓存，管理页可开关，不影响显示速度）
 （5.4：媒体代理回归直通流转发，修复 CPU 超限；清理运行日志遗留代码与无调用的接口）
 
 <img width="195" height="400" alt="1" src="https://github.com/user-attachments/assets/84abcdf1-6814-4861-93ec-5bc7740c3c6f" /><img width="195" height="400" alt="3" src="https://github.com/user-attachments/assets/3aaa09a5-3188-46ca-a041-306540ecd3f9" /><img width="195" height="400" alt="4" src="https://github.com/user-attachments/assets/20ebe23a-acf7-4248-9d51-9beedba66ef1" /><img width="195" height="400" alt="5" src="https://github.com/user-attachments/assets/40bf5151-3aab-48f6-a6df-85b507f4d13f" />
