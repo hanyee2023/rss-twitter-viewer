@@ -235,6 +235,58 @@ function normalizeTwImgUrl(url) {
     .replace(/\?$/, '');
 }
 
+// ─── 订阅用户头像提取（2026-11-19 新增）────────────────────────
+// 目标：只提取「订阅时输入的那个用户名本人」的头像，转推/发推者是谁都不取。
+// 数据来源：Nitter 时间线 HTML 本身（头像本来就在页面里，现在只是被 pushImg 丢弃），
+//   因此零额外回源请求、零额外 CPU、零 KV 写入额度增加。
+//   1) 优先：页面顶部资料卡（profile-card）内的 <img>——一定是订阅用户本人；
+//   2) 兜底：全文第一个 profile_images 图片——Nitter 页面结构里资料卡在时间线之前，
+//      时间线中转推条目显示的是原作者头像且位于资料卡之后，故全文首个命中仍是本人。
+function extractProfileAvatar(html) {
+  if (!html) return '';
+  try {
+    let raw = '';
+    const cardIdx = html.indexOf('profile-card');
+    if (cardIdx !== -1) {
+      const seg = html.slice(cardIdx, cardIdx + 8000);
+      const m = seg.match(/<img[^>]*src="([^"]+profile_images[^"]+)"/i);
+      if (m) raw = m[1];
+    }
+    if (!raw) {
+      const m2 = html.match(/<img[^>]*src="([^"]+profile_images[^"]+)"/i);
+      if (m2) raw = m2[1];
+    }
+    if (!raw) return '';
+    const url = decodeNitterProxyUrl(raw);
+    // 必须还原为 twimg 域名下的 profile_images 才可信（防止实例自身图片/横幅混入）
+    if (!/https?:\/\/pbs\.twimg\.com\/profile_images\//i.test(url)) return '';
+    // 小头像升级：_normal(48px) → _200x200，管理页 28px / 收藏页 18px 在高分屏下更清晰。
+    // _200x200 是 Twitter CDN 标准变体；URL 无尺寸后缀时不动。
+    return url.replace(/_(normal|bigger|mini)\.(jpe?g|png|gif|webp)$/i, '_200x200.$2');
+  } catch (e) {
+    return '';
+  }
+}
+
+// RSS channel 级头像块（RSS 标准 <image> 写法），无头像时不输出，
+// 前端/其他阅读器取不到头像时自动回退各自的占位图标，向后兼容。
+function buildChannelImage(username, avatarUrl) {
+  if (!avatarUrl) return '';
+  return (
+    '<image>\n' +
+    '<url>' + escapeXml(avatarUrl) + '</url>\n' +
+    '<title>@' + escapeXml(username) + '</title>\n' +
+    '<link>https://x.com/' + escapeXml(username) + '</link>\n' +
+    '</image>\n'
+  );
+}
+
+// 从已生成的 RSS 文本中反取头像 URL（供 KV 归档合并写入用，归档兜底时也能带上头像）
+function extractRssAvatar(rss) {
+  const m = String(rss || '').match(/<image>\s*<url>([^<]+)<\/url>/i);
+  return m ? m[1].trim() : '';
+}
+
 // 宽松判断页面是否含有推文时间线（兼容不同 Nitter 实例/改版的类名）
 // 旧版仅认 timeline-item，xcancel 等改版后可能换类名，导致整源被误判为空
 function hasTimeline(html) {
@@ -290,6 +342,7 @@ async function fetchFromNitter(username, maxItems, diag = []) {
       }
 
       const items = await parseNitterHtml(html, username, maxItems, base);
+      const avatarUrl = extractProfileAvatar(html);
 
       if (items.length === 0) {
         // 当前实例能访问但没有媒体推文，不继续尝试其他实例
@@ -304,6 +357,7 @@ async function fetchFromNitter(username, maxItems, diag = []) {
         '<link>https://x.com/' + username + '</link>\n' +
         '<description>Twitter 时间线 - @' + username + '（via ' + base.replace('https://', '') + '）</description>\n' +
         '<language>zh-CN</language>\n' +
+        buildChannelImage(username, avatarUrl) +
         '<lastBuildDate>' + new Date().toUTCString() + '</lastBuildDate>\n' +
         items.join('\n') + '\n' +
         '</channel>\n' +
@@ -767,6 +821,18 @@ async function fetchFromSyndication(username, maxItems) {
       return null;
     }
 
+    // 提取订阅用户本人头像：转推条目的 user 是原作者，只认 screen_name 与订阅用户名一致的条目
+    let avatarUrl = '';
+    for (const entry of entries) {
+      const u = entry?.content?.tweet?.user;
+      if (u && u.profile_image_url_https
+          && String(u.screen_name || '').toLowerCase() === username.toLowerCase()) {
+        avatarUrl = String(u.profile_image_url_https)
+          .replace(/_(normal|bigger|mini)\.(jpe?g|png|gif|webp)$/i, '_200x200.$2');
+        break;
+      }
+    }
+
     const items = [];
     for (const entry of entries) {
       if (items.length >= maxItems) break;
@@ -831,6 +897,7 @@ async function fetchFromSyndication(username, maxItems) {
       '<link>https://x.com/' + username + '</link>\n' +
       '<description>Twitter 时间线 - @' + username + '（via Syndication API）</description>\n' +
       '<language>zh-CN</language>\n' +
+      buildChannelImage(username, avatarUrl) +
       '<lastBuildDate>' + new Date().toUTCString() + '</lastBuildDate>\n' +
       items.join('\n') + '\n' +
       '</channel>\n' +
@@ -857,16 +924,22 @@ function extractItemLink(itemXml) {
 }
 
 // 回源成功后合并归档：新条目在前、按 link 去重、超出上限裁剪、TTL 续期
-async function updateArchive(kv, username, freshItems) {
+// 存储结构：{ items: [...], avatar: 头像URL }——头像一并归档，回源全挂时的兜底 RSS 也能显示真头像
+async function updateArchive(kv, username, freshItems, avatarUrl) {
   if (!kv || !freshItems || freshItems.length === 0) return;
   try {
     const archKey = `twarch:${username}`;
     let old = [];
+    let oldAvatar = '';
     try {
       const raw = await kv.get(archKey, { type: 'text' });
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) old = parsed;
+        else if (parsed && Array.isArray(parsed.items)) {
+          old = parsed.items;
+          oldAvatar = parsed.avatar || '';
+        }
       }
     } catch (e) { /* 归档读取/解析失败按空处理，不影响主流程 */ }
     const seen = new Set(freshItems.map(extractItemLink).filter(Boolean));
@@ -877,27 +950,36 @@ async function updateArchive(kv, username, freshItems) {
         return link && !seen.has(link);
       }),
     ].slice(0, ARCHIVE_MAX_ITEMS);
-    await kv.put(archKey, JSON.stringify(merged), { expirationTtl: ARCHIVE_TTL });
+    await kv.put(archKey, JSON.stringify({
+      items: merged,
+      avatar: avatarUrl || oldAvatar || '',
+    }), { expirationTtl: ARCHIVE_TTL });
   } catch (e) {
     console.warn('twitter-rss 归档写入失败（不影响本次返回）：', e);
   }
 }
 
-// 读取归档（回源失败时兜底）
+// 读取归档（回源失败时兜底）。兼容旧格式（纯数组）与新格式（{items, avatar}）
 async function readArchive(kv, username) {
   if (!kv) return null;
   try {
     const raw = await kv.get(`twarch:${username}`, { type: 'text' });
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : null;
+    if (Array.isArray(parsed)) {
+      return parsed.length > 0 ? { items: parsed, avatar: '' } : null;
+    }
+    if (parsed && Array.isArray(parsed.items) && parsed.items.length > 0) {
+      return { items: parsed.items, avatar: parsed.avatar || '' };
+    }
+    return null;
   } catch (e) {
     return null;
   }
 }
 
 // 用归档条目拼装 RSS（description 标注来源，便于前端识别这是兜底数据）
-function buildArchiveRss(username, archivedItems) {
+function buildArchiveRss(username, archivedItems, avatarUrl) {
   return (
     '<?xml version="1.0" encoding="UTF-8"?>\n' +
     '<rss version="2.0">\n' +
@@ -906,6 +988,7 @@ function buildArchiveRss(username, archivedItems) {
     '<link>https://x.com/' + username + '</link>\n' +
     '<description>Twitter 时间线 - @' + username + '（回源失败，以下为 KV 归档的历史条目，共 ' + archivedItems.length + ' 条）</description>\n' +
     '<language>zh-CN</language>\n' +
+    buildChannelImage(username, avatarUrl) +
     '<lastBuildDate>' + new Date().toUTCString() + '</lastBuildDate>\n' +
     archivedItems.join('\n') + '\n' +
     '</channel>\n' +
@@ -996,7 +1079,7 @@ export async function onRequest({ request, env }) {
   if (!rss) {
     const archived = await readArchive(kv, username);
     if (archived) {
-      rss = buildArchiveRss(username, archived);
+      rss = buildArchiveRss(username, archived.items, archived.avatar);
       archiveFallback = true;
     } else {
       const detail = nitterDiag.length ? nitterDiag.join('；') : '未知原因';
@@ -1026,7 +1109,7 @@ export async function onRequest({ request, env }) {
   if (kv && gotReal) {
     try {
       const itemMatches = rss.match(/<item>[\s\S]*?<\/item>/g) || [];
-      await updateArchive(kv, username, itemMatches.slice(0, maxItems));
+      await updateArchive(kv, username, itemMatches.slice(0, maxItems), extractRssAvatar(rss));
     } catch (e) {
       console.warn("twitter-rss 归档合并失败（不影响本次返回）：", e);
     }
