@@ -161,11 +161,23 @@ body{
     border:none;
     background:transparent;
     position: relative;
-    /* 图标居中 */
+    /* 图标 + 文字纵向排列 */
     display:flex;
+    flex-direction:column;
     align-items:center;
     justify-content:center;
+    gap:2px;
 }
+/* 图标缩小给文字腾位，导航栏总高不变 */
+.bottom-nav-bar button svg{width:19px;height:19px;}
+.nav-label{
+    font-size:10px;
+    line-height:1;
+    color:#111111;
+    pointer-events:none;
+}
+/* 选中状态：图标与文字一起变绿 */
+.bottom-nav-bar button.active .nav-label{color:#28a745;}
 /* 选中状态：图标变绿色 */
 .bottom-nav-bar button.active svg{
     stroke:#28a745 !important;
@@ -224,7 +236,75 @@ body{
 #importFeed{background:#ff7823;}
 #exportAllBtn{background:#b388eb;}
 #delAllFeed{background:#c0392b;}
-#markAllReadBtn{background:#1d9bf0;}
+/* 分区标题：两种颜色填充区分普通订阅与 Twitter 订阅 */
+.feed-section-title{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:10px 12px;
+    color:#fff;
+    font-size:14px;
+    font-weight:bold;
+}
+.feed-section-title .sec-title-left{display:flex;align-items:baseline;gap:6px;}
+.feed-section-title .sec-count{font-size:12px;font-weight:normal;opacity:.85;}
+.feed-section-title .sec-mark-btn{
+    background:rgba(255,255,255,.28);
+    border:none;color:#fff;
+    font-size:12px;padding:5px 12px;border-radius:6px;cursor:pointer;
+}
+.feed-section-title .sec-mark-btn:active{background:rgba(255,255,255,.45);}
+.feed-section-title.section-normal{background:#1d9bf0;}
+.feed-section-title.section-twitter{background:#111111;}
+.feed-section-empty{padding:14px 12px;font-size:13px;color:#999;text-align:center;background:#fafafa;}
+/* 我的收藏：九宫格 */
+.fav-grid{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:8px;
+    padding:10px;
+}
+.fav-grid-cell{cursor:pointer;}
+.fav-cell-media{
+    position:relative;
+    width:100%;
+    aspect-ratio:3/4;
+    border-radius:10px;
+    overflow:hidden;
+    background:#ececec;
+}
+.fav-cell-media img{
+    width:100%;height:100%;
+    object-fit:cover;display:block;
+}
+.fav-cell-media .fav-play-badge{
+    position:absolute;left:50%;top:50%;
+    transform:translate(-50%,-50%);
+    width:34px;height:34px;border-radius:50%;
+    background:rgba(0,0,0,.45);
+    display:flex;align-items:center;justify-content:center;
+    pointer-events:none;
+}
+.fav-cell-media .fav-play-badge svg{width:16px;height:16px;fill:#fff;margin-left:2px;}
+.fav-cell-foot{display:flex;align-items:center;gap:5px;margin-top:5px;min-width:0;}
+.fav-cell-avatar{width:18px;height:18px;border-radius:50%;overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
+.fav-cell-avatar svg{width:14px;height:14px;}
+.fav-cell-name{font-size:11px;color:#333;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+/* 收藏全屏播放层 */
+#favPlayerLayer{
+    position:fixed;inset:0;
+    background:#000;z-index:10000;
+    display:none;align-items:center;justify-content:center;
+}
+#favPlayerLayer.show{display:flex;}
+#favPlayerContent{width:100%;height:100%;display:flex;align-items:center;justify-content:center;}
+#favPlayerContent video,#favPlayerContent img{max-width:100%;max-height:100%;object-fit:contain;}
+#favPlayerClose{
+    position:absolute;top:12px;right:14px;z-index:10001;
+    background:rgba(255,255,255,.22);border:none;color:#fff;
+    font-size:20px;line-height:1;border-radius:50%;
+    width:36px;height:36px;cursor:pointer;
+}
 .feed-list{background:#fff;}
 .feed-item{
     padding:12px 10px;
@@ -779,7 +859,7 @@ body{
 <header id="mainHeader">
 <div class="title-wrap">
   <h1 id="pageTitle">RSS媒体阅读器</h1>
-  <span class="beta-tag">5.5</span>
+  <span class="beta-tag">5.6</span>
 </div>
 </header>
 
@@ -795,7 +875,6 @@ body{
     <button id="importFeed">一键导入</button>
     <button id="exportAllBtn">一键导出</button>
     <button id="delAllFeed">一键清空</button>
-    <button id="markAllReadBtn">全部标记</button>
     <input type="file" id="importFileInput" accept=".json" style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none;">
 </div>
         <div class="feed-list" id="feedPanel"></div>
@@ -842,18 +921,21 @@ body{
             <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
             <polyline points="9 22 9 12 15 12 15 22"></polyline>
         </svg>
+        <span class="nav-label">主页</span>
     </button>
     <button id="btnSearch" class="">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#111111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="11" cy="11" r="8"></circle>
             <path d="m21 21-4.35-4.35"></path>
         </svg>
+        <span class="nav-label">搜索</span>
     </button>
     <button id="btnAdd" class="">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#111111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
             <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"></path>
         </svg>
+        <span class="nav-label">添加</span>
     </button>
     <button id="btnManage" class="">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#111111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -864,12 +946,20 @@ body{
             <line x1="3" x2="3.01" y1="12" y2="12"></line>
             <line x1="3" x2="3.01" y1="18" y2="18"></line>
         </svg>
+        <span class="nav-label">管理</span>
     </button>
     <button id="btnFav" class="">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#111111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
         </svg>
+        <span class="nav-label">收藏</span>
     </button>
+</div>
+
+<!-- 收藏九宫格点击后的全屏播放层 -->
+<div id="favPlayerLayer">
+    <button id="favPlayerClose">✕</button>
+    <div id="favPlayerContent"></div>
 </div>
 
 <div class="modal-mask" id="editModal">
