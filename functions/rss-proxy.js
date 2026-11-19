@@ -19,7 +19,7 @@ const BUILTIN_RSS_HOSTS = [
   "redd.it",
   "770118.xyz",
   "phe69",
-  "phe69.com",
+  "taoo.xyz",
   "3go.fun",
   "rsshub.app",
   "venexa.site",
