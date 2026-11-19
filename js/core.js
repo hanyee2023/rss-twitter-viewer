@@ -29,7 +29,7 @@ const FORCE_PROXY_HOSTS = [
     "media.redgifs.com",
     "redd.it",
     "770118.xyz",
-    "phe69",
+    "taoo.xyz",
     "viet69z.sex",
     "3go.fun",
     "rsshub.app",
