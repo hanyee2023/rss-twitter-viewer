@@ -43,7 +43,9 @@ const FORCE_PROXY_HOSTS = [
     "jhfduadgiyhas.com",
     "000355.xyz",
     "919129.xyz",
-    "2025pic.net"
+    "2025pic.net",
+    "mmdb.cc",
+    "xiuren100.com"
 ];
 
 function normalizeUrl(rawUrl) {
