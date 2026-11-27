@@ -29,7 +29,7 @@ const FORCE_PROXY_HOSTS = [
     "media.redgifs.com",
     "redd.it",
     "770118.xyz",
-    "taoo.xyz",
+    "phe69",
     "viet69z.sex",
     "3go.fun",
     "rsshub.app",
@@ -43,9 +43,7 @@ const FORCE_PROXY_HOSTS = [
     "jhfduadgiyhas.com",
     "000355.xyz",
     "919129.xyz",
-    "2025pic.net",
-    "mmdb.cc",
-    "xiuren100.com"
+    "2025pic.net"
 ];
 
 function normalizeUrl(rawUrl) {
@@ -420,7 +418,6 @@ const btnAdd = document.getElementById("btnAdd");
 const btnFav = document.getElementById("btnFav");
 const btnSearch = document.getElementById("btnSearch");
 
-const pageTitle = document.getElementById("pageTitle");
 let allBtns = [btnHome, btnManage, btnAdd, btnFav, btnSearch];
 
 const editModal = document.getElementById("editModal");
@@ -441,6 +438,9 @@ mainWrap.addEventListener("scroll", ()=>{
     }, 120);
 });
 window.addEventListener("beforeunload", markReadByScroll);
+
+// 底部导航栏为常驻固定显示（2026-11-20 应用户要求取消上滑隐藏/下滑恢复动画，
+// 相关滚动监听与 .nav-hidden 规则已一并移除）
 
 function showToast(msg){
     toastDom.innerText = msg;

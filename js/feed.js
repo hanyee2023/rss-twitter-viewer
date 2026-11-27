@@ -52,10 +52,7 @@ function showPage(targetDom, titleText) {
         mainWrap.scrollTop = 0;
     }
 
-    const textNode = Array.from(pageTitle.childNodes).find(n => n.nodeType === 3);
-    if (textNode) {
-        textNode.textContent = titleText;
-    }
+    // 顶部标题区已移除（2026-11-19），不再更新页面标题文字
 
     allBtns.forEach(b => b.classList.remove("active"));
     if (targetDom === pageHome) btnHome.classList.add("active");
@@ -156,8 +153,6 @@ async function openSingleSource(sourceUrl){
     if (currentPage === pageSingle) {
         // 已在单源界面，只是切换不同源：直接重渲染（不走 showPage 去重，因为容器相同）
         await renderSingleFeedFromSource(sourceUrl);
-        const textNode = Array.from(pageTitle.childNodes).find(n => n.nodeType === 3);
-        if (textNode) textNode.textContent = title;
         return;
     }
     showPage(pageSingle, title);
@@ -176,8 +171,6 @@ function showHomeFresh(){
         currentPage = pageHome;
         allBtns.forEach(b => b.classList.remove("active"));
         btnHome.classList.add("active");
-        const textNode = Array.from(pageTitle.childNodes).find(n => n.nodeType === 3);
-        if (textNode) textNode.textContent = "RSS媒体阅读器";
     }
     homeIsCached = false;
     homeArticleHtml = "";
