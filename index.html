@@ -18,55 +18,14 @@ html {
   background: #e0e0e0;
 }
 body{
-  background:#f5f5f5;color:#111;
+  background:#ffffff;color:#111;
   height: 100%;
   margin: 0 auto;
   max-width: 430px;
   position: relative;
 }
 
-/* 顶部悬浮固定栏 磨砂玻璃 */
-#mainHeader{
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    margin: 0 auto;
-    max-width: 430px;
-    width: 100%;
-    height: 48px;
-    background: rgba(255,255,255,0.22);
-    backdrop-filter: blur(26px);
-    -webkit-backdrop-filter: blur(26px);
-    z-index: 9999;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    padding: 0 12px;
-    box-sizing: border-box;
-}
-
-.title-wrap {
-  position: relative;
-  width: fit-content;
-}
-.beta-tag {
-  position: absolute;
-  top: -3px;
-  right: -40px;
-  font-size: 12px;
-  background:#28a745;
-  color:#fff;
-  padding:2px 8px;
-  border-radius:6px;
-  z-index:9999;
-  white-space:nowrap;
-}
-#pageTitle{
-    font-size:19px;
-    font-weight:600;
-    white-space:nowrap;
-}
+/* 顶部标题区已移除（2026-11-19）：内容顶格显示，仅保留刘海屏安全区避让 */
 
 /* 视频缓冲中遮罩（P0-3：区分“在缓冲”与“真卡死”） */
 .video-buffering{
@@ -137,19 +96,20 @@ body{
 
 @keyframes vs-shimmer{to{background-position:-200% 0;}}
 
-/* 底部悬浮导航栏 磨砂玻璃 */
+/* 底部悬浮导航栏（2026-11-19 改版）：矩形大圆角、白色半透明悬浮、滚动自动隐藏 */
 .bottom-nav-bar{
     position: fixed;
-    bottom: 0;
+    bottom: 10px;
     left: 0;
     right: 0;
     margin: 0 auto;
-    max-width: 430px;
-    width: 100%;
-    height: 50px;
-    background: rgba(255,255,255,0.22);
-    backdrop-filter: blur(26px);
-    -webkit-backdrop-filter: blur(26px);
+    /* 左右内缩 14px，与卡片内媒体区域的左右边缘对齐；上限收窄到 402px 保证桌面端也对齐 430px 内容列 */
+    max-width: 402px;
+    width: calc(100% - 28px);
+    height: 48px;
+    background: rgba(255,255,255,0.88);
+    border-radius: 26px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.16);
     z-index: 9999;
     display:flex;
     justify-content:space-around;
@@ -182,13 +142,13 @@ body{
 .bottom-nav-bar button.active svg{
     stroke:#28a745 !important;
 }
-/* 底部蓝色横线 */
+/* 底部蓝色横线（改回蓝色）：缩短长度、随悬浮圆角上移不贴边 */
 .bottom-nav-bar button.active::after{
     content:"";
     position:absolute;
-    left:15%;
-    right:15%;
-    bottom:0;
+    left:33%;
+    right:33%;
+    bottom:4px;
     height:4px;
     background:#0066dd;
     border-radius:4px;
@@ -198,9 +158,18 @@ body{
     display: none !important;
 }
 
+/* 页内标题（随内容滚动，非悬浮、无角标）：文字居中，白色填充 */
+.page-title{
+    font-size:19px;
+    font-weight:600;
+    text-align:center;
+    padding:13px 14px;
+    background:#ffffff;
+}
+
 .main-wrap{
-    padding-top: 48px;
-    padding-bottom: 50px;
+    padding-top: max(0px, env(safe-area-inset-top));
+    padding-bottom: 74px;
     height: 100%;
     overflow-y: auto;
     overflow-x: hidden;
@@ -218,8 +187,8 @@ body{
     gap:8px;
     flex-wrap:nowrap;
     justify-content:center;
-    /* 底部不留白：与分区标题栏无缝衔接 */
-    margin:12px 0 0;
+    /* 顶部不留白：与页内标题区（绿色半透明）无缝衔接；底部与分区标题栏无缝 */
+    margin:0;
     padding:10px 10px;
     background:#1a5276;
 }
@@ -891,7 +860,7 @@ body{
 .del-fav svg{width:20px;height:20px;stroke:currentColor;}
 .update-float-bar{
     position:fixed;
-    top:56px;
+    top:12px;
     left:50%;
     transform:translateX(-50%);
     z-index:10000;
@@ -914,13 +883,6 @@ body{
 
 </head>
 <body>
-<header id="mainHeader">
-<div class="title-wrap">
-  <h1 id="pageTitle">RSS媒体阅读器</h1>
-  <span class="beta-tag">5.7</span>
-</div>
-</header>
-
 <div class="main-wrap">
     <div class="page-home" id="pageHome" style="display: block;">
         <div id="articleBox"><div class="empty-tip">暂无文章内容</div></div>
@@ -929,6 +891,7 @@ body{
         <div id="articleBoxSingle"><div class="empty-tip">暂无文章内容</div></div>
     </div>
     <div class="page-manage" id="pageManage" style="display: none;">
+        <div class="page-title">管理订阅</div>
         <div class="feed-top-op">
     <button id="importFeed">一键导入</button>
     <button id="exportAllBtn">一键导出</button>
@@ -938,6 +901,7 @@ body{
         <div class="feed-list" id="feedPanel"></div>
     </div>
     <div class="page-add" id="pageAdd" style="display: none;">
+        <div class="page-title">添加订阅</div>
         <div class="add-feed-form">
             <div class="keyword-block-title">添加新订阅</div>
             <div class="add-feed-row">
@@ -964,8 +928,9 @@ body{
             <div class="keyword-list" id="keywordList"><div style="color:#999;font-size:13px;padding:8px 4px;">暂无屏蔽关键字</div></div>
         </div>
     </div>
-    <div class="page-fav" id="pageFav" style="display: none;"><div id="favPanel"></div></div>
+    <div class="page-fav" id="pageFav" style="display: none;"><div class="page-title">我的收藏</div><div id="favPanel"></div></div>
     <div class="page-search" id="pageSearch" style="display: none;">
+        <div class="page-title">内容搜索</div>
         <div style="padding:12px;">
             <input id="searchInput" placeholder="输入关键词精确匹配标题" style="width:100%;padding:12px;border-radius:8px;border:1px solid #ddd;font-size:16px;">
             <div id="searchResultBox"></div>
@@ -1080,9 +1045,10 @@ body{
 </div>
 <div class="tip-toast" id="slideTip"></div>
 
-<script src="js/core.js"></script>
-<script src="js/media.js"></script>
-<script src="js/feed.js"></script>
-<script src="js/app.js"></script>
+<!-- ?v= 版本参数：强制手机浏览器在每次发版后拉取最新 JS，防止新旧文件混用导致脚本崩溃（2026-11-19） -->
+<script src="js/core.js?v=584"></script>
+<script src="js/media.js?v=584"></script>
+<script src="js/feed.js?v=584"></script>
+<script src="js/app.js?v=584"></script>
 
 </body></html>
